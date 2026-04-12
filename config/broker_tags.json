@@ -1,0 +1,8 @@
+[
+  {"broker_name": "兆豐-嘉義", "broker_type": "swing", "notes": "長線主力，連買3-5天後抱1-2個月"},
+  {"broker_name": "凱基-台北", "broker_type": "day_trade", "notes": "隔日沖高手，今買明賣"},
+  {"broker_name": "元大-土城永寧", "broker_type": "day_trade", "notes": "隔日沖"},
+  {"broker_name": "永豐金-萬盛", "broker_type": "swing", "notes": "波段王"},
+  {"broker_name": "港商麥格理", "broker_type": "hedge", "notes": "避險，大買可能掩護現貨賣超"},
+  {"broker_name": "美銀", "broker_type": "hedge", "notes": "避險"}
+]
