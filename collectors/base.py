@@ -1,5 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
+from typing import Callable
 
 from config import settings
 
@@ -19,7 +20,7 @@ class BaseCollector(ABC):
 
     @abstractmethod
     def save(self, date: str, data: dict) -> None:
-        """存入 SQLite raw table。用 INSERT OR REPLACE。"""
+        """存入 SQLite raw table。"""
 
     def run(self, date: str) -> bool:
         """collect -> save。成功回傳 True，失敗回傳 False 並 log error。"""
@@ -34,4 +35,20 @@ class BaseCollector(ABC):
             return True
         except Exception as e:
             logger.error("%s failed for %s: %s", self.__class__.__name__, date, e)
+            return False
+
+    def _try_collect_and_save(
+        self,
+        collect_fn: Callable[[], dict | list | None],
+        save_fn: Callable[[dict | list], None],
+    ) -> bool:
+        """執行單一 collect + save 子任務，回傳成功與否。"""
+        try:
+            data = collect_fn()
+            if data is None:
+                return False
+            save_fn(data)
+            return True
+        except Exception as e:
+            logger.error("%s sub-task failed: %s", self.__class__.__name__, e)
             return False

@@ -36,8 +36,10 @@ def cmd_collect(args: argparse.Namespace) -> None:
 
         collector = TWSECollector()
         success = collector.run(date)
+        # 舊的 institutional-only 模式回傳 dict，取 institutional 結果
+        if isinstance(success, dict):
+            success = success.get("institutional", False)
         if success:
-            # 讀出並顯示摘要
             with get_connection() as conn:
                 row = conn.execute(
                     "SELECT foreign_net, trust_net, dealer_net, total_net "
@@ -53,9 +55,85 @@ def cmd_collect(args: argparse.Namespace) -> None:
         else:
             print(f"Failed to collect institutional data for {date}")
             sys.exit(1)
+
+    elif target == "twse":
+        from collectors.twse import TWSECollector
+
+        collector = TWSECollector()
+        results = collector.run(date)
+        print(f"TWSE collection for {date}:")
+        for task, ok in results.items():
+            status = "OK" if ok else "FAILED/NO DATA"
+            print(f"  {task}: {status}")
+        # 顯示 DB 中的摘要
+        _print_twse_summary(date)
+
+    elif target == "taifex":
+        from collectors.taifex import TAIFEXCollector
+
+        collector = TAIFEXCollector()
+        results = collector.run(date)
+        print(f"TAIFEX collection for {date}:")
+        for task, ok in results.items():
+            status = "OK" if ok else "FAILED/NO DATA (stub)"
+            print(f"  {task}: {status}")
+
+    elif target == "fx":
+        from collectors.fx import FXCollector
+
+        collector = FXCollector()
+        results = collector.run(date)
+        print(f"FX collection for {date}:")
+        for task, ok in results.items():
+            status = "OK" if ok else "FAILED/NO DATA (stub)"
+            print(f"  {task}: {status}")
+
     else:
         print(f"Unknown collect target: {target}")
         sys.exit(1)
+
+
+def cmd_import_chip(args: argparse.Namespace) -> None:
+    """從 CSV 匯入分點籌碼資料。"""
+    from collectors.chip import ChipCollector
+
+    collector = ChipCollector()
+    count = collector.import_from_csv(args.csv_path)
+    print(f"Imported {count} rows from {args.csv_path}")
+
+
+def _print_twse_summary(date: str) -> None:
+    """印出 TWSE 收集後的 DB 摘要。"""
+    with get_connection() as conn:
+        # 三大法人
+        row = conn.execute(
+            "SELECT foreign_net, trust_net, dealer_net, total_net "
+            "FROM raw_institutional WHERE date = ?",
+            (date,),
+        ).fetchone()
+        if row:
+            print(f"  --- Institutional ---")
+            print(f"  Foreign net: {row[0]:>15,.0f}")
+            print(f"  Trust net:   {row[1]:>15,.0f}")
+            print(f"  Dealer net:  {row[2]:>15,.0f}")
+            print(f"  Total net:   {row[3]:>15,.0f}")
+
+        # 加權指數
+        row = conn.execute(
+            "SELECT spot_close FROM raw_futures WHERE date = ?",
+            (date,),
+        ).fetchone()
+        if row and row[0]:
+            print(f"  --- Spot Close ---")
+            print(f"  TAIEX: {row[0]:>12,.2f}")
+
+        # 除息
+        row = conn.execute(
+            "SELECT ex_dividend_points FROM raw_futures WHERE date = ?",
+            (date,),
+        ).fetchone()
+        if row and row[0] is not None:
+            print(f"  Ex-dividend points: {row[0]:.2f}")
 
 
 def main() -> None:
@@ -73,12 +151,22 @@ def main() -> None:
     # collect
     collect_parser = subparsers.add_parser("collect", help="Collect market data")
     collect_parser.add_argument(
-        "target", choices=["institutional"], help="Data target to collect"
+        "target",
+        choices=["institutional", "twse", "taifex", "fx"],
+        help="Data target to collect",
     )
     collect_parser.add_argument(
         "--date",
         default=None,
         help="Date to collect (YYYY-MM-DD, default: today)",
+    )
+
+    # import-chip
+    import_parser = subparsers.add_parser(
+        "import-chip", help="Import chip data from CSV"
+    )
+    import_parser.add_argument(
+        "csv_path", help="Path to the chip CSV file"
     )
 
     args = parser.parse_args()
@@ -91,6 +179,8 @@ def main() -> None:
 
             args.date = date.today().isoformat()
         cmd_collect(args)
+    elif args.command == "import-chip":
+        cmd_import_chip(args)
     else:
         parser.print_help()
         sys.exit(1)
