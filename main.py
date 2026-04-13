@@ -319,6 +319,108 @@ def _query_stock(date: str, stock_id: str) -> None:
         print(f"    雙邊交易:    {both_label}")
 
 
+def cmd_run(args: argparse.Namespace) -> None:
+    """執行完整 job（after-close / after-night / before-open）。"""
+    job_name = args.job_name
+    date = args.date
+
+    if job_name == "after-close":
+        from jobs.after_close import run_after_close
+
+        result = run_after_close(date)
+    elif job_name == "after-night":
+        from jobs.after_night import run_after_night
+
+        result = run_after_night(date)
+    elif job_name == "before-open":
+        from jobs.before_open import run_before_open
+
+        result = run_before_open(date)
+    else:
+        print(f"Unknown job: {job_name}")
+        sys.exit(1)
+
+    # 印出結果
+    print(f"\n=== {job_name} for {date} ===")
+    print(f"Status: {result['status']}")
+    if result.get("results"):
+        print("Steps:")
+        for step, ok in result["results"].items():
+            status_str = "OK" if ok else "FAILED/NO DATA"
+            print(f"  {step}: {status_str}")
+    if result.get("errors"):
+        print("Errors:")
+        for err in result["errors"]:
+            print(f"  - {err}")
+
+    # before-open 特有的 summary
+    if result.get("summary"):
+        print()
+        print(result["summary"])
+
+
+def cmd_backfill(args: argparse.Namespace) -> None:
+    """回補歷史資料。"""
+    from jobs.backfill import run_backfill
+
+    result = run_backfill(args.from_date, args.to_date)
+
+    print(f"\n=== Backfill {result['range']} ===")
+    print(f"Total trading days: {result['total_days']}")
+    print(f"  Completed: {result['completed']}")
+    print(f"  Partial:   {result['partial']}")
+    print(f"  Failed:    {result['failed']}")
+
+    for date, detail in result["details"].items():
+        status = detail["status"]
+        print(f"\n  {date}: {status}")
+        if detail.get("errors"):
+            for err in detail["errors"]:
+                print(f"    - {err}")
+
+
+def cmd_watchlist(args: argparse.Namespace) -> None:
+    """觀察名單管理。"""
+    from db.watchlist import watchlist_add, watchlist_list, watchlist_remove
+
+    action = args.action
+
+    if action == "list":
+        items = watchlist_list()
+        if not items:
+            print("觀察名單為空")
+            return
+        print(f"觀察名單（{len(items)} 檔）：")
+        for item in items:
+            print(
+                f"  {item['stock_id']}  {item['stock_name']}  "
+                f"{item['added_date']}  {item['reason']}"
+            )
+
+    elif action == "add":
+        if not args.stock_id or not args.stock_name:
+            print("Error: watchlist add requires stock_id and stock_name")
+            sys.exit(1)
+        reason = args.reason or ""
+        ok = watchlist_add(args.stock_id, args.stock_name, reason)
+        if ok:
+            print(f"Added {args.stock_id} {args.stock_name}")
+
+    elif action == "remove":
+        if not args.stock_id:
+            print("Error: watchlist remove requires stock_id")
+            sys.exit(1)
+        ok = watchlist_remove(args.stock_id)
+        if ok:
+            print(f"Removed {args.stock_id}")
+        else:
+            print(f"Not found: {args.stock_id}")
+
+    else:
+        print(f"Unknown watchlist action: {action}")
+        sys.exit(1)
+
+
 def _print_twse_summary(date: str) -> None:
     """印出 TWSE 收集後的 DB 摘要。"""
     with get_connection() as conn:
@@ -395,6 +497,54 @@ def main() -> None:
         help="Date to compute (YYYY-MM-DD, default: today)",
     )
 
+    # run (job)
+    run_parser = subparsers.add_parser(
+        "run", help="Run a complete job (after-close, after-night, before-open)"
+    )
+    run_parser.add_argument(
+        "job_name",
+        choices=["after-close", "after-night", "before-open"],
+        help="Job to run",
+    )
+    run_parser.add_argument(
+        "--date", default=None,
+        help="Date (YYYY-MM-DD, default: today)",
+    )
+
+    # backfill
+    backfill_parser = subparsers.add_parser(
+        "backfill", help="Backfill historical data for a date range"
+    )
+    backfill_parser.add_argument(
+        "--from", dest="from_date", required=True,
+        help="Start date (YYYY-MM-DD)",
+    )
+    backfill_parser.add_argument(
+        "--to", dest="to_date", required=True,
+        help="End date (YYYY-MM-DD)",
+    )
+
+    # watchlist
+    watchlist_parser = subparsers.add_parser(
+        "watchlist", help="Manage watchlist"
+    )
+    watchlist_parser.add_argument(
+        "action", choices=["list", "add", "remove"],
+        help="Action: list, add, or remove",
+    )
+    watchlist_parser.add_argument(
+        "stock_id", nargs="?", default=None,
+        help="Stock ID (required for add/remove)",
+    )
+    watchlist_parser.add_argument(
+        "stock_name", nargs="?", default=None,
+        help="Stock name (required for add)",
+    )
+    watchlist_parser.add_argument(
+        "reason", nargs="?", default=None,
+        help="Reason for adding (optional)",
+    )
+
     # query
     query_parser = subparsers.add_parser(
         "query", help="Query computed metrics"
@@ -429,6 +579,16 @@ def main() -> None:
 
             args.date = date.today().isoformat()
         cmd_compute(args)
+    elif args.command == "run":
+        if args.date is None:
+            from datetime import date
+
+            args.date = date.today().isoformat()
+        cmd_run(args)
+    elif args.command == "backfill":
+        cmd_backfill(args)
+    elif args.command == "watchlist":
+        cmd_watchlist(args)
     elif args.command == "query":
         cmd_query(args)
     else:

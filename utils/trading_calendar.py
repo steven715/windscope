@@ -1,10 +1,28 @@
-"""交易日曆工具：查詢前一交易日、最近 N 個交易日。"""
+"""交易日曆工具：查詢前一交易日、最近 N 個交易日、交易日判斷。"""
 
 import logging
 import sqlite3
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
+
+
+def is_trading_day(date: str) -> bool:
+    """判斷是否為交易日。目前只排除週末，國定假日暫不處理。"""
+    dt = datetime.strptime(date, "%Y-%m-%d")
+    return dt.weekday() < 5
+
+
+def iter_trading_days(start_date: str, end_date: str) -> list[str]:
+    """產生 start_date ~ end_date（含）之間的所有交易日，從舊到新。"""
+    result: list[str] = []
+    dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    while dt <= end:
+        if dt.weekday() < 5:
+            result.append(dt.strftime("%Y-%m-%d"))
+        dt += timedelta(days=1)
+    return result
 
 
 def get_previous_trading_day(

@@ -1,0 +1,12 @@
+# Pre-Market Intelligence System 排程設定
+# 複製此檔案內容到 crontab -e
+
+# 收盤後 job（週一到週五 18:30）
+30 18 * * 1-5 cd /path/to/premarket && python main.py run after-close >> logs/after_close.log 2>&1
+
+# 夜盤後 job（週二到週六 05:30）
+# 週一夜盤在週二凌晨收，所以是週二到週六
+30 5 * * 2-6 cd /path/to/premarket && python main.py run after-night >> logs/after_night.log 2>&1
+
+# 開盤前 job（週一到週五 08:50）
+50 8 * * 1-5 cd /path/to/premarket && python main.py run before-open >> logs/before_open.log 2>&1
