@@ -1,0 +1,58 @@
+"""交易日曆工具：查詢前一交易日、最近 N 個交易日。"""
+
+import logging
+import sqlite3
+from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
+
+
+def get_previous_trading_day(
+    date: str, conn: sqlite3.Connection | None = None
+) -> str | None:
+    """回傳 date 的前一個交易日（YYYY-MM-DD）。跳過週末和假日。"""
+    if conn is not None:
+        row = conn.execute(
+            "SELECT date FROM raw_futures WHERE date < ? ORDER BY date DESC LIMIT 1",
+            (date,),
+        ).fetchone()
+        if row:
+            return row[0]
+        row = conn.execute(
+            "SELECT date FROM raw_institutional WHERE date < ? ORDER BY date DESC LIMIT 1",
+            (date,),
+        ).fetchone()
+        if row:
+            return row[0]
+
+    # Fallback: skip weekends, max 10 days back
+    dt = datetime.strptime(date, "%Y-%m-%d")
+    for _ in range(10):
+        dt -= timedelta(days=1)
+        if dt.weekday() < 5:
+            return dt.strftime("%Y-%m-%d")
+    return None
+
+
+def get_recent_trading_days(
+    date: str, n: int, conn: sqlite3.Connection | None = None
+) -> list[str]:
+    """回傳 date 之前的 n 個交易日（不含 date），最新的排前面。"""
+    if conn is not None:
+        rows = conn.execute(
+            "SELECT date FROM raw_futures WHERE date < ? ORDER BY date DESC LIMIT ?",
+            (date, n),
+        ).fetchall()
+        if rows:
+            return [r[0] for r in rows]
+
+    # Fallback: skip weekends
+    result: list[str] = []
+    dt = datetime.strptime(date, "%Y-%m-%d")
+    for _ in range(n * 3):
+        dt -= timedelta(days=1)
+        if dt.weekday() < 5:
+            result.append(dt.strftime("%Y-%m-%d"))
+        if len(result) == n:
+            break
+    return result
