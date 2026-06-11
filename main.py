@@ -173,9 +173,78 @@ def cmd_query(args: argparse.Namespace) -> None:
             print("Error: query stock requires a stock_id argument")
             sys.exit(1)
         _query_stock(date, stock_id)
+    elif query_type == "signal":
+        _query_signal(date)
+    elif query_type == "verification":
+        _query_verification(date)
     else:
         print(f"Unknown query type: {query_type}")
         sys.exit(1)
+
+
+def _query_signal(date: str) -> None:
+    """查詢市場訊號與個股觀察訊號。"""
+    import json
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT direction, confidence, fx_vote, futures_vote, "
+            "       reasons, rule_version FROM signals WHERE date = ?",
+            (date,),
+        ).fetchone()
+        stock_rows = conn.execute(
+            "SELECT stock_id, broker_name, category, reasons "
+            "FROM stock_signals WHERE date = ? ORDER BY stock_id",
+            (date,),
+        ).fetchall()
+
+    if not row:
+        print(f"No signal found for {date}")
+        return
+
+    direction, confidence, fx_vote, futures_vote, reasons, rule_version = row
+    print(f"=== {date} Signal (rule {rule_version}) ===")
+    print(f"方向: {direction}  信心: {confidence}/5")
+    print(f"匯率票: {fx_vote}  期貨票: {futures_vote}")
+    print("理由:")
+    for r in json.loads(reasons):
+        print(f"  · {r}")
+
+    if stock_rows:
+        print("\n[個股觀察訊號]")
+        for stock_id, broker, category, reason in stock_rows:
+            print(f"  {stock_id} {broker}: {category} — {reason}")
+
+
+def _query_verification(date: str) -> None:
+    """查詢單日驗證結果與近 20 日命中率。"""
+    from integration.verification import get_verification_stats
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT predicted_direction, confidence, day_change_pct, "
+            "       day_change_class, open_gap_pct, open_gap_class, "
+            "       hit_day, hit_open FROM verifications WHERE date = ?",
+            (date,),
+        ).fetchone()
+        stats = get_verification_stats(conn)
+
+    if not row:
+        print(f"No verification found for {date}")
+    else:
+        (pred, conf, day_pct, day_cls, gap_pct, gap_cls,
+         hit_day, hit_open) = row
+        print(f"=== {date} Verification ===")
+        print(f"預測: {pred} (信心 {conf})")
+        print(f"當日漲跌: {day_pct:+.2f}% ({day_cls}) → {'✓ 命中' if hit_day else '✗ 失誤'}")
+        print(f"開盤跳空: {gap_pct:+.2f}% ({gap_cls}) → {'✓' if hit_open else '✗'}")
+
+    if stats["total"] > 0:
+        print(f"\n[近 {stats['total']} 日命中率]")
+        print(f"  收盤基準: {stats['hit_day_rate']}%  跳空基準: {stats['hit_open_rate']}%")
+        for conf_level in sorted(stats["by_confidence"], reverse=True):
+            b = stats["by_confidence"][conf_level]
+            print(f"  信心 {conf_level}: {b['rate']}% ({b['hits']}/{b['total']})")
 
 
 def _format_amount(amount: float | None) -> str:
@@ -336,6 +405,10 @@ def cmd_run(args: argparse.Namespace) -> None:
         from jobs.before_open import run_before_open
 
         result = run_before_open(date)
+    elif job_name == "verify-close":
+        from jobs.verify_close import run_verify_close
+
+        result = run_verify_close(date)
     else:
         print(f"Unknown job: {job_name}")
         sys.exit(1)
@@ -357,6 +430,16 @@ def cmd_run(args: argparse.Namespace) -> None:
     if result.get("summary"):
         print()
         print(result["summary"])
+
+    # verify-close 特有的驗證結果
+    if result.get("verification"):
+        v = result["verification"]
+        hit_label = "✓ 命中" if v["hit_day"] else "✗ 失誤"
+        print()
+        print(f"預測 {v['predicted_direction']} (信心 {v['confidence']}) "
+              f"vs 實際 {v['day_change_class']} ({v['day_change_pct']:+.2f}%) → {hit_label}")
+        print(f"開盤跳空 {v['open_gap_class']} ({v['open_gap_pct']:+.2f}%) "
+              f"{'✓' if v['hit_open'] else '✗'}")
 
 
 def cmd_backfill(args: argparse.Namespace) -> None:
@@ -499,11 +582,11 @@ def main() -> None:
 
     # run (job)
     run_parser = subparsers.add_parser(
-        "run", help="Run a complete job (after-close, after-night, before-open)"
+        "run", help="Run a complete job (after-close, after-night, before-open, verify-close)"
     )
     run_parser.add_argument(
         "job_name",
-        choices=["after-close", "after-night", "before-open"],
+        choices=["after-close", "after-night", "before-open", "verify-close"],
         help="Job to run",
     )
     run_parser.add_argument(
@@ -550,8 +633,8 @@ def main() -> None:
         "query", help="Query computed metrics"
     )
     query_parser.add_argument(
-        "query_type", choices=["daily", "stock"],
-        help="Query type: daily (aggregate) or stock (per-stock)",
+        "query_type", choices=["daily", "stock", "signal", "verification"],
+        help="Query type: daily, stock, signal, or verification",
     )
     query_parser.add_argument(
         "date", help="Date to query (YYYY-MM-DD)",
