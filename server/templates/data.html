@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}資料瀏覽{% endblock %}
+{% block content %}
+<h2>資料瀏覽</h2>
+
+<form class="filter" method="get" action="/data">
+  <select name="table">
+    {% for t in tables %}
+    <option value="{{ t }}" {{ "selected" if t == table }}>{{ t }}</option>
+    {% endfor %}
+  </select>
+  <label>從 <input type="date" name="date_from" value="{{ date_from }}"></label>
+  <label>到 <input type="date" name="date_to" value="{{ date_to }}"></label>
+  <button type="submit">查詢</button>
+</form>
+
+{% if rows %}
+<div class="panel" style="overflow-x:auto">
+<table>
+  <tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr>
+  {% for row in rows %}
+  <tr>{% for c in columns %}<td>{{ row[c] if row[c] is not none else "—" }}</td>{% endfor %}</tr>
+  {% endfor %}
+</table>
+<div class="dim" style="margin-top:8px">{{ rows | length }} 筆（上限 500）</div>
+</div>
+{% else %}
+<div class="panel empty">{{ table }} 查無資料</div>
+{% endif %}
+{% endblock %}

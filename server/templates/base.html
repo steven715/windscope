@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>{% block title %}開盤前情報{% endblock %}</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a2129; --panel2: #212b36; --border: #2e3d4d;
+    --text: #d8e1ea; --dim: #8a9bab; --accent: #4fc3f7;
+    --green: #66bb6a; --red: #ef5350; --yellow: #ffca28; --orange: #ffa726;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+    display: flex; min-height: 100vh; line-height: 1.6;
+  }
+  .sidebar {
+    width: 170px; background: #11161c; border-right: 1px solid var(--border);
+    padding: 14px 0; flex-shrink: 0;
+  }
+  .sidebar .logo { font-weight: bold; font-size: 14px; padding: 4px 18px 14px; color: var(--accent); }
+  .sidebar a {
+    display: block; padding: 8px 18px; font-size: 13.5px;
+    color: var(--dim); text-decoration: none;
+  }
+  .sidebar a.active {
+    color: var(--text); background: rgba(79,195,247,.1);
+    border-left: 3px solid var(--accent); padding-left: 15px;
+  }
+  .sidebar a:hover { color: var(--text); }
+  .main { flex: 1; padding: 24px 28px; min-width: 0; }
+  h2 { font-size: 18px; margin: 0 0 16px; }
+  .dim { color: var(--dim); font-size: 12.5px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 18px; margin-bottom: 14px;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--dim); font-weight: normal;
+       border-bottom: 1px solid var(--border); padding: 5px 8px; }
+  td { padding: 5px 8px; border-bottom: 1px solid rgba(46,61,77,.4); }
+  .up { color: var(--green); } .down { color: var(--red); }
+  .flat { color: var(--yellow); }
+  .hit { color: var(--green); font-weight: bold; }
+  .miss { color: var(--red); font-weight: bold; }
+  .empty { color: var(--dim); padding: 24px; text-align: center; }
+  .cards { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .card { flex: 1; min-width: 160px; background: var(--panel);
+          border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+  .card .ct { font-size: 12px; color: var(--dim); }
+  .card .cv { font-size: 17px; font-weight: bold; margin: 2px 0; }
+  form.filter { display: flex; gap: 8px; align-items: center; margin-bottom: 14px;
+                font-size: 13px; flex-wrap: wrap; }
+  input, select {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 5px 8px; font-size: 13px;
+  }
+  button {
+    background: var(--accent); border: none; color: #08222e; font-weight: bold;
+    border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 13px;
+  }
+  .banner {
+    display: flex; align-items: center; gap: 18px; border-radius: 10px;
+    padding: 14px 18px; margin-bottom: 14px; border: 1px solid var(--border);
+    background: var(--panel);
+  }
+  .banner.bullish { background: rgba(102,187,106,.1); border-color: rgba(102,187,106,.4); }
+  .banner.bearish { background: rgba(239,83,80,.1); border-color: rgba(239,83,80,.4); }
+  .banner .big { font-size: 25px; font-weight: bold; white-space: nowrap; }
+  .banner.bullish .big { color: var(--green); }
+  .banner.bearish .big { color: var(--red); }
+  .banner.neutral .big { color: var(--yellow); }
+  .banner ul { margin: 0; padding-left: 18px; font-size: 12.5px; }
+  .banner .conf { margin-left: auto; text-align: center; flex-shrink: 0; }
+  .banner .conf .n { font-size: 20px; font-weight: bold; }
+  .rate-big { font-size: 28px; font-weight: bold; color: var(--green); }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 10px;
+         background: var(--panel2); border: 1px solid var(--border); color: var(--dim); }
+</style>
+</head>
+<body>
+  <nav class="sidebar">
+    <div class="logo">📡 開盤前情報</div>
+    <a href="/" class="{{ 'active' if active == 'dashboard' }}">今日情報</a>
+    <a href="/signals" class="{{ 'active' if active == 'signals' }}">訊號與驗證紀錄</a>
+    <a href="/data" class="{{ 'active' if active == 'data' }}">資料瀏覽</a>
+    <a href="/watchlist" class="{{ 'active' if active == 'watchlist' }}">觀察名單</a>
+    <a href="/scheduler" class="{{ 'active' if active == 'scheduler' }}">排程狀態</a>
+  </nav>
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

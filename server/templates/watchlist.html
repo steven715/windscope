@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}觀察名單{% endblock %}
+{% block content %}
+<h2>觀察名單</h2>
+
+{% if stocks %}
+{% for s in stocks %}
+<div class="panel">
+  <b>{{ s[1] }}（{{ s[0] }}）</b>
+  <span class="dim">加入於 {{ s[2] }}・{{ s[3] }}</span>
+  {% set sigs = signals_by_stock.get(s[0]) %}
+  {% if sigs %}
+  <table style="margin-top:8px">
+    <tr><th>日期</th><th>分點</th><th>分類</th><th>理由</th></tr>
+    {% for sig in sigs[:10] %}
+    <tr>
+      <td>{{ sig.date }}</td>
+      <td>{{ sig.broker_name }}</td>
+      <td><span class="tag">{{ sig.category }}</span></td>
+      <td class="dim">{{ sig.reasons }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="dim" style="margin-top:6px">尚無個股觀察訊號</div>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<div class="panel empty">觀察名單為空——用 <code>python main.py watchlist add</code> 加入</div>
+{% endif %}
+{% endblock %}

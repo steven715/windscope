@@ -442,6 +442,20 @@ def cmd_run(args: argparse.Namespace) -> None:
               f"{'✓' if v['hit_open'] else '✗'}")
 
 
+def cmd_serve(args: argparse.Namespace) -> None:
+    """啟動 web server（內建排程器）。"""
+    import uvicorn
+
+    from config import settings
+    from server.app import create_app
+
+    app = create_app(enable_scheduler=not args.no_scheduler)
+    port = args.port or settings.SERVER_PORT
+    print(f"Starting server on http://{settings.SERVER_HOST}:{port} "
+          f"(scheduler={'off' if args.no_scheduler else 'on'})")
+    uvicorn.run(app, host=settings.SERVER_HOST, port=port)
+
+
 def cmd_backfill(args: argparse.Namespace) -> None:
     """回補歷史資料。"""
     from jobs.backfill import run_backfill
@@ -644,6 +658,19 @@ def main() -> None:
         help="Stock ID (required for 'stock' query)",
     )
 
+    # serve
+    serve_parser = subparsers.add_parser(
+        "serve", help="Start the web server with built-in scheduler"
+    )
+    serve_parser.add_argument(
+        "--port", type=int, default=None,
+        help="Port (default: settings.SERVER_PORT)",
+    )
+    serve_parser.add_argument(
+        "--no-scheduler", action="store_true",
+        help="Disable the built-in scheduler (web UI only)",
+    )
+
     args = parser.parse_args()
 
     if args.command == "init-db":
@@ -674,6 +701,8 @@ def main() -> None:
         cmd_watchlist(args)
     elif args.command == "query":
         cmd_query(args)
+    elif args.command == "serve":
+        cmd_serve(args)
     else:
         parser.print_help()
         sys.exit(1)

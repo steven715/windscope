@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}今日情報{% endblock %}
+{% block content %}
+<h2>今日開盤前情報</h2>
+
+{% if signal %}
+<div class="dim" style="margin-bottom:12px">訊號日期：{{ signal.date }}（規則 {{ signal.rule_version }}）</div>
+
+<div class="banner {{ signal.direction }}">
+  <div class="big">{{ signal.direction_label }}</div>
+  <ul>
+    {% for r in signal.reasons %}<li>{{ r }}</li>{% endfor %}
+  </ul>
+  <div class="conf"><div class="n">{{ signal.confidence }} / 5</div><div class="dim">信心度</div></div>
+</div>
+
+{% if metrics %}
+<div class="cards">
+  <div class="card">
+    <div class="ct">匯率 FX</div>
+    <div class="cv {{ 'up' if metrics.fx_direction == 'bullish' else 'down' if metrics.fx_direction == 'bearish' else 'flat' }}">
+      {% if metrics.fx_delta_twd is not none %}Δ {{ "%+.4f"|format(metrics.fx_delta_twd) }}{% else %}N/A{% endif %}
+    </div>
+    <div class="dim">{{ metrics.fx_direction or "N/A" }}・亞幣同步 {{ "✓" if metrics.fx_asia_sync == 1 else "✗" if metrics.fx_asia_sync == 0 else "?" }}</div>
+  </div>
+  <div class="card">
+    <div class="ct">期貨 Futures</div>
+    <div class="cv {{ 'up' if metrics.spread_adjusted and metrics.spread_adjusted > 0 else 'down' if metrics.spread_adjusted and metrics.spread_adjusted < 0 else 'flat' }}">
+      {% if metrics.spread_adjusted is not none %}{{ "%+.1f"|format(metrics.spread_adjusted) }}{% else %}N/A{% endif %}
+    </div>
+    <div class="dim">調整後價差・量比 {% if metrics.volume_ratio is not none %}{{ "%.2f"|format(metrics.volume_ratio) }}x{% else %}N/A{% endif %}</div>
+  </div>
+  <div class="card">
+    <div class="ct">外資未平倉</div>
+    <div class="cv {{ 'up' if metrics.oi_net and metrics.oi_net > 0 else 'down' if metrics.oi_net and metrics.oi_net < 0 else 'flat' }}">
+      {% if metrics.oi_net is not none %}{{ "{:+,}".format(metrics.oi_net) }}{% else %}N/A{% endif %}
+    </div>
+    <div class="dim">口</div>
+  </div>
+</div>
+{% endif %}
+
+{% if stock_signals %}
+<div class="panel">
+  <div class="dim" style="margin-bottom:8px">個股觀察訊號</div>
+  <table>
+    <tr><th>股票</th><th>分點</th><th>分類</th><th>理由</th></tr>
+    {% for s in stock_signals %}
+    <tr><td>{{ s[0] }}</td><td>{{ s[1] }}</td><td><span class="tag">{{ s[2] }}</span></td><td>{{ s[3] }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+{% else %}
+<div class="panel empty">尚無訊號資料——等第一次 08:50 排程跑完，或手動執行 <code>python main.py run before-open</code></div>
+{% endif %}
+
+<div style="display:flex; gap:14px; flex-wrap:wrap">
+  <div class="panel" style="flex:1; min-width:260px">
+    <div class="dim">判斷戰績（近 {{ stats.total }} 個交易日）</div>
+    {% if stats.total > 0 %}
+    <span class="rate-big">{{ stats.hit_day_rate }}%</span>
+    <span class="dim">收盤基準・跳空基準 {{ stats.hit_open_rate }}%</span>
+    <div style="margin-top:8px; font-size:12px">
+      {% for conf, b in stats.by_confidence | dictsort(reverse=true) %}
+      <div class="dim">信心 {{ conf }}：{{ b.rate }}%（{{ b.hits }}/{{ b.total }}）</div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">尚無驗證紀錄</div>
+    {% endif %}
+  </div>
+  <div class="panel" style="flex:2; min-width:340px">
+    <div class="dim" style="margin-bottom:8px">最近驗證紀錄</div>
+    {% if recent %}
+    <table>
+      <tr><th>日期</th><th>判斷</th><th>實際（收盤）</th><th>結果</th><th>跳空</th></tr>
+      {% for r in recent %}
+      <tr>
+        <td>{{ r.date }}</td>
+        <td>{{ r.direction_label }} ({{ r.confidence }})</td>
+        <td class="{{ r.day_change_class }}">{{ r.day_label }} {{ "%+.2f"|format(r.day_change_pct) }}%</td>
+        <td class="{{ 'hit' if r.hit_day else 'miss' }}">{{ "✓ 命中" if r.hit_day else "✗ 失誤" }}</td>
+        <td class="{{ 'hit' if r.hit_open else 'miss' }}">{{ "✓" if r.hit_open else "✗" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="empty">尚無驗證紀錄</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

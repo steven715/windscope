@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}訊號與驗證紀錄{% endblock %}
+{% block content %}
+<h2>訊號與驗證紀錄</h2>
+
+<form class="filter" method="get" action="/signals">
+  <label>從 <input type="date" name="date_from" value="{{ date_from }}"></label>
+  <label>到 <input type="date" name="date_to" value="{{ date_to }}"></label>
+  <button type="submit">查詢</button>
+</form>
+
+{% if stats.total > 0 %}
+<div class="dim" style="margin-bottom:10px">
+  近 {{ stats.total }} 日命中率：收盤基準 {{ stats.hit_day_rate }}%・跳空基準 {{ stats.hit_open_rate }}%
+</div>
+{% endif %}
+
+{% if records %}
+<div class="panel">
+<table>
+  <tr><th>日期</th><th>判斷</th><th>信心</th><th>規則</th>
+      <th>收盤漲跌</th><th>結果</th><th>跳空</th><th>理由</th></tr>
+  {% for r in records %}
+  <tr>
+    <td>{{ r.date }}</td>
+    <td>{{ r.direction_label }}</td>
+    <td>{{ r.confidence }}/5</td>
+    <td><span class="tag">{{ r.rule_version }}</span></td>
+    <td>{% if r.day_change_pct is not none %}{{ "%+.2f"|format(r.day_change_pct) }}%（{{ r.day_label }}）{% else %}<span class="dim">未驗證</span>{% endif %}</td>
+    <td>{% if r.hit_day is not none %}<span class="{{ 'hit' if r.hit_day else 'miss' }}">{{ "✓" if r.hit_day else "✗" }}</span>{% else %}—{% endif %}</td>
+    <td>{% if r.hit_open is not none %}<span class="{{ 'hit' if r.hit_open else 'miss' }}">{{ "✓" if r.hit_open else "✗" }}</span>{% else %}—{% endif %}</td>
+    <td class="dim" style="font-size:12px">{{ r.reasons | join("；") }}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% else %}
+<div class="panel empty">查無訊號紀錄</div>
+{% endif %}
+{% endblock %}

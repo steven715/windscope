@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}排程狀態{% endblock %}
+{% block content %}
+<h2>排程狀態</h2>
+
+{% if scheduler_enabled %}
+<div class="panel">
+  <table>
+    <tr><th>Job</th><th>說明</th><th>下次執行</th></tr>
+    {% for j in jobs %}
+    <tr>
+      <td><span class="tag">{{ j.id }}</span></td>
+      <td>{{ j.name }}</td>
+      <td>{{ j.next_run or "—" }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% else %}
+<div class="panel empty">
+  排程器未啟用。以 <code>python main.py serve</code> 啟動 server 時會自動啟用；
+  測試模式下保持關閉。
+</div>
+{% endif %}
+{% endblock %}
