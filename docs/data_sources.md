@@ -47,6 +47,20 @@
 
 ---
 
+### 1.2b 加權指數每日開高低收（OHLC）
+
+| 項目 | 內容 |
+|------|------|
+| 用途 | 取得加權指數當日開盤/最高/最低/收盤，供 Layer 4 驗證引擎判定開盤跳空與當日漲跌 |
+| URL | `https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST?date={YYYYMMDD}&response=json` |
+| 方法 | GET |
+| 回傳格式 | JSON |
+| 更新時間 | 每個交易日收盤後 |
+| 狀態 | ✅ VERIFIED（2026-06-12 真實回應驗證，fixture: `mi_5mins_hist_202606.json`） |
+| 備註 | 回傳整月每日 OHLC。欄位：日期(民國年)/開盤/最高/最低/收盤，逗號數字。存入 `raw_index` 表。|
+
+---
+
 ### 1.3 個股每日收盤價
 
 | 項目 | 內容 |

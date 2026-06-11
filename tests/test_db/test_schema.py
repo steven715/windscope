@@ -18,12 +18,46 @@ class TestCreateAllTables:
             "raw_futures",
             "raw_chip",
             "raw_institutional",
+            "raw_index",
             "broker_tags",
             "watchlist",
             "daily_metrics",
             "daily_stock_metrics",
+            "signals",
+            "stock_signals",
+            "verifications",
         }
         assert expected.issubset(table_names)
+
+    def test_idempotent_insert_raw_index(self, memory_db):
+        """raw_index 同一天重複寫入不報錯，且資料為最新值。"""
+        memory_db.execute(
+            "INSERT OR REPLACE INTO raw_index (date, open, close) "
+            "VALUES ('2026-06-11', 43172.21, 43149.46)"
+        )
+        memory_db.execute(
+            "INSERT OR REPLACE INTO raw_index (date, open, close) "
+            "VALUES ('2026-06-11', 43172.21, 43200.00)"
+        )
+        row = memory_db.execute(
+            "SELECT close FROM raw_index WHERE date = '2026-06-11'"
+        ).fetchone()
+        assert row[0] == 43200.00
+
+    def test_idempotent_insert_signals(self, memory_db):
+        """signals 同一天重複寫入不報錯，且資料為最新值。"""
+        memory_db.execute(
+            "INSERT OR REPLACE INTO signals (date, direction, confidence) "
+            "VALUES ('2026-06-11', 'bullish', 3)"
+        )
+        memory_db.execute(
+            "INSERT OR REPLACE INTO signals (date, direction, confidence) "
+            "VALUES ('2026-06-11', 'neutral', 2)"
+        )
+        row = memory_db.execute(
+            "SELECT direction, confidence FROM signals WHERE date = '2026-06-11'"
+        ).fetchone()
+        assert row == ("neutral", 2)
 
     def test_idempotent(self):
         """重複執行 create_all_tables 不應報錯。"""

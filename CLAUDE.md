@@ -2,11 +2,20 @@
 
 ## 專案概述
 
-台股開盤前情報收集系統（Pre-Market Intelligence System）Phase 1 MVP。
-自動收集匯率、期貨、籌碼三個維度的原始資料，計算衍生指標，存入 SQLite。
+台股開盤前情報系統（Pre-Market Intelligence System）。
+以常駐 server 形式運行，每日自動閉環：收集匯率、期貨、籌碼三維度原始資料 →
+計算衍生指標 → 08:50 產出訊號判斷（偏多/偏空/中性 + 信心度 + 理由）→
+收盤後驗證判斷與實際走勢，累積命中率。附 Web 畫面與查詢功能。
 
-Phase 1 只做 Collection（Layer 1）和 Integration（Layer 2）。
-**不做訊號判斷、不做分析引擎、不做 UI。**
+**v2 範圍（2026-06-12 起，取代原 Phase 1 限制）：**
+
+- Layer 1 Collection + Layer 2 Integration（已完成，沿用）
+- Layer 3 訊號判斷引擎（規則式，門檻集中 settings.py，每筆訊號記 rule_version）
+- Layer 4 驗證引擎（雙基準：當日收盤漲跌為主、開盤跳空為輔，三分類比對）
+- FastAPI server + APScheduler 內建排程 + server-rendered Web 頁面
+- Docker 部署（Windows Docker Desktop，TZ=Asia/Taipei）
+
+**仍然不做：** 下單／交易執行、盤中即時監控、歷史回測引擎、機器學習模型。
 
 ---
 
@@ -16,6 +25,8 @@ Phase 1 只做 Collection（Layer 1）和 Integration（Layer 2）。
 - SQLite（`sqlite3` 標準庫，不用 ORM）
 - `requests` + `beautifulsoup4`
 - `argparse` 或 `click`（CLI）
+- FastAPI + uvicorn + Jinja2（server 與 Web 頁面，不用前端框架）
+- APScheduler（內建排程，取代 crontab）
 - **不要用 pandas**——資料量極小，用原生 Python 處理
 
 ---
@@ -40,7 +51,15 @@ premarket/
 ├── integration/              # Layer 2
 │   ├── fx_metrics.py
 │   ├── futures_metrics.py
-│   └── chip_metrics.py
+│   ├── chip_metrics.py
+│   ├── summary.py
+│   ├── signal_engine.py      # Layer 3：市場訊號 + 個股觀察訊號
+│   └── verification.py       # Layer 4：收盤驗證 + 命中率統計
+├── server/                   # 常駐 server
+│   ├── app.py                # FastAPI app 工廠
+│   ├── scheduler.py          # APScheduler 排程（取代 crontab）
+│   ├── routes/               # 頁面與 JSON API
+│   └── templates/            # Jinja2 頁面
 ├── db/
 │   ├── schema.py
 │   └── connection.py
@@ -308,6 +327,9 @@ def test_after_close_continues_on_collector_failure(tmp_path):
 | `integration/chip_metrics.py` | 金額計算、連續天數、MA20、price_zone |
 | `utils/trading_calendar.py` | 週末排除、假日排除、前一交易日 |
 | `jobs/*` | collector 失敗時的 graceful degradation |
+| `integration/signal_engine.py` | 兩票合成、各加減分項、夾限 1–5、規則版本記錄、個股過濾與分類 |
+| `integration/verification.py` | 三分類門檻邊界、雙基準命中判定、資料缺失處理、命中率統計 |
+| `server/*` | 各 route 回 200 + 關鍵內容、API 日期區間查詢、無資料時的空狀態 |
 
 ---
 

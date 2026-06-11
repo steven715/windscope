@@ -85,6 +85,53 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
     updated_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS raw_index (
+    date TEXT PRIMARY KEY,
+    open REAL,
+    high REAL,
+    low REAL,
+    close REAL,
+    collected_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS signals (
+    date TEXT PRIMARY KEY,
+    direction TEXT,
+    confidence INTEGER,
+    fx_vote TEXT,
+    futures_vote TEXT,
+    reasons TEXT,
+    rule_version TEXT,
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS stock_signals (
+    date TEXT NOT NULL,
+    stock_id TEXT NOT NULL,
+    broker_name TEXT NOT NULL,
+    category TEXT,
+    reasons TEXT,
+    rule_version TEXT,
+    created_at TEXT,
+    PRIMARY KEY (date, stock_id, broker_name)
+);
+
+CREATE TABLE IF NOT EXISTS verifications (
+    date TEXT PRIMARY KEY,
+    predicted_direction TEXT,
+    confidence INTEGER,
+    prev_close REAL,
+    open REAL,
+    close REAL,
+    open_gap_pct REAL,
+    day_change_pct REAL,
+    open_gap_class TEXT,
+    day_change_class TEXT,
+    hit_day INTEGER,
+    hit_open INTEGER,
+    verified_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS daily_stock_metrics (
     date TEXT NOT NULL,
     stock_id TEXT NOT NULL,

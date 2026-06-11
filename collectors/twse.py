@@ -14,6 +14,7 @@ TWSE_FMTQIK_URL = "https://www.twse.com.tw/rwd/zh/afterTrading/FMTQIK"
 TWSE_STOCK_DAY_URL = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
 TWSE_T86_URL = "https://www.twse.com.tw/rwd/zh/fund/T86"
 TWSE_TWT49U_URL = "https://www.twse.com.tw/rwd/zh/exRight/TWT49U"
+TWSE_MI_5MINS_HIST_URL = "https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST"
 
 WATCHLIST_PATH = Path(__file__).resolve().parent.parent / "config" / "watchlist.json"
 
@@ -208,6 +209,37 @@ class TWSECollector(BaseCollector):
         logger.info("T86 parsed: %d watchlist stocks found for %s", len(results), date)
         return results if results else None
 
+    def collect_index_ohlc(self, date: str) -> dict | None:
+        """取得加權指數當日開高低收（MI_5MINS_HIST，回傳整月資料中篩出當日）。"""
+        date_param = date.replace("-", "")
+        resp = http_get(
+            TWSE_MI_5MINS_HIST_URL,
+            params={"date": date_param, "response": "json"},
+        )
+        data = resp.json()
+
+        if data.get("stat") != "OK":
+            logger.info("MI_5MINS_HIST: no data for %s (stat=%s)", date, data.get("stat"))
+            return None
+
+        target_roc = _to_roc_date(date)
+        for row in data.get("data", []):
+            if row[0].strip() == target_roc:
+                result = {
+                    "open": _parse_amount(row[1]),
+                    "high": _parse_amount(row[2]),
+                    "low": _parse_amount(row[3]),
+                    "close": _parse_amount(row[4]),
+                }
+                logger.info(
+                    "MI_5MINS_HIST parsed: open=%.2f close=%.2f for %s",
+                    result["open"], result["close"], date,
+                )
+                return result
+
+        logger.info("MI_5MINS_HIST: target date %s not found in response", date)
+        return None
+
     def collect_ex_dividend_points(self, date: str) -> dict | None:
         """取得當日除息對加權指數的預估影響點數。"""
         date_param = date.replace("-", "")
@@ -335,6 +367,22 @@ class TWSECollector(BaseCollector):
                     (date, item["stock_id"], item["foreign_net_volume"], now),
                 )
 
+    def save_index_ohlc(self, date: str, data: dict) -> None:
+        """存入 raw_index，用 ON CONFLICT DO UPDATE。"""
+        now = datetime.now().isoformat()
+        with get_connection(self.db_path) as conn:
+            conn.execute(
+                """INSERT INTO raw_index (date, open, high, low, close, collected_at)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(date) DO UPDATE SET
+                    open = excluded.open,
+                    high = excluded.high,
+                    low = excluded.low,
+                    close = excluded.close,
+                    collected_at = excluded.collected_at""",
+                (date, data["open"], data["high"], data["low"], data["close"], now),
+            )
+
     def save_ex_dividend(self, date: str, data: dict) -> None:
         """更新 raw_futures.ex_dividend_points。"""
         now = datetime.now().isoformat()
@@ -383,6 +431,10 @@ class TWSECollector(BaseCollector):
         results["ex_dividend"] = self._try_collect_and_save(
             lambda: self.collect_ex_dividend_points(date),
             lambda data: self.save_ex_dividend(date, data),
+        )
+        results["index_ohlc"] = self._try_collect_and_save(
+            lambda: self.collect_index_ohlc(date),
+            lambda data: self.save_index_ohlc(date, data),
         )
 
         logger.info("TWSECollector results for %s: %s", date, results)

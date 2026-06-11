@@ -353,6 +353,7 @@ class TestRunFlow:
             "STOCK_DAY": _load_fixture("stock_day_2330_202604.json"),
             "T86": _load_fixture("t86_20260408.json"),
             "TWT49U": _load_fixture("twt49u_20260408.json"),
+            "MI_5MINS_HIST": _load_fixture("mi_5mins_hist_202606.json"),
         }
 
         def mock_get(url, **kwargs):
@@ -367,6 +368,8 @@ class TestRunFlow:
                 resp.json.return_value = fixtures["T86"]
             elif "TWT49U" in url:
                 resp.json.return_value = fixtures["TWT49U"]
+            elif "MI_5MINS_HIST" in url:
+                resp.json.return_value = fixtures["MI_5MINS_HIST"]
             return resp
 
         with patch("collectors.twse.http_get", side_effect=mock_get):
@@ -376,3 +379,54 @@ class TestRunFlow:
         assert results["institutional"] is True
         assert results["spot_close"] is True
         assert results["ex_dividend"] is True
+
+
+# ── 加權指數 OHLC（MI_5MINS_HIST）─────────────────────────────────
+
+
+class TestCollectIndexOhlc:
+    def test_parse_normal_response(self, twse_collector):
+        """正常回應能 parse 出當日開高低收。"""
+        fixture = _load_fixture("mi_5mins_hist_202606.json")
+
+        with patch("collectors.twse.http_get", return_value=_mock_resp(fixture)):
+            data = twse_collector.collect_index_ohlc("2026-06-11")
+
+        assert data is not None
+        assert data["open"] == pytest.approx(43172.21)
+        assert data["high"] == pytest.approx(43463.03)
+        assert data["low"] == pytest.approx(42006.39)
+        assert data["close"] == pytest.approx(43149.46)
+
+    def test_no_data_response(self, twse_collector):
+        """假日或無資料時回傳 None。"""
+        with patch(
+            "collectors.twse.http_get",
+            return_value=_mock_resp({"stat": "很抱歉，沒有符合條件的資料!"}),
+        ):
+            data = twse_collector.collect_index_ohlc("2026-06-07")
+
+        assert data is None
+
+    def test_date_not_in_month(self, twse_collector):
+        """回應中找不到目標日期（尚未收盤或非交易日）時回傳 None。"""
+        fixture = _load_fixture("mi_5mins_hist_202606.json")
+
+        with patch("collectors.twse.http_get", return_value=_mock_resp(fixture)):
+            data = twse_collector.collect_index_ohlc("2026-06-30")
+
+        assert data is None
+
+    def test_save_index_ohlc_idempotent(self, twse_collector):
+        """save_index_ohlc 重複寫入同一天，資料為最新值。"""
+        ohlc = {"open": 43172.21, "high": 43463.03, "low": 42006.39, "close": 43149.46}
+        twse_collector.save_index_ohlc("2026-06-11", ohlc)
+        ohlc["close"] = 43200.00
+        twse_collector.save_index_ohlc("2026-06-11", ohlc)
+
+        conn = sqlite3.connect(twse_collector.db_path)
+        row = conn.execute(
+            "SELECT open, close FROM raw_index WHERE date = '2026-06-11'"
+        ).fetchone()
+        conn.close()
+        assert row == (43172.21, 43200.00)
