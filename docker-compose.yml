@@ -1,0 +1,16 @@
+services:
+  premarket:
+    build: .
+    container_name: premarket
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      TZ: Asia/Taipei
+      # 通知設定（用 Telegram 時解除註解並填值，或放到 .env）
+      # PREMARKET_NOTIFY: telegram
+      # TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      # TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs

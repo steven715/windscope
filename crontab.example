@@ -1,4 +1,10 @@
 # Pre-Market Intelligence System 排程設定
+#
+# ⚠️ DEPRECATED（2026-06-12 起）：v2 改用 server 內建排程（APScheduler），
+# 啟動方式：`python main.py serve` 或 `docker compose up -d`。
+# 本檔案保留給「不跑 server、只要排程批次」的情境參考。
+# 注意：v2 新增的 13:40 收盤驗證 job（run verify-close）此檔未包含。
+#
 # 複製此檔案內容到 crontab -e
 
 # 收盤後 job（週一到週五 18:30）
