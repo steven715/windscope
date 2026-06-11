@@ -25,6 +25,16 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 _DIRECTION_LABELS = {"bullish": "↑ 偏多", "bearish": "↓ 偏空", "neutral": "— 中性"}
 _CLASS_LABELS = {"up": "漲", "down": "跌", "flat": "平"}
 
+_TABLE_LABELS = {
+    "raw_fx": "匯率（原始）",
+    "raw_futures": "期貨（原始）",
+    "raw_chip": "分點進出（原始）",
+    "raw_institutional": "三大法人（原始）",
+    "raw_index": "加權指數日K（原始）",
+    "daily_metrics": "每日衍生指標",
+    "daily_stock_metrics": "個股籌碼指標",
+}
+
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
@@ -145,7 +155,8 @@ def data_page(request: Request, table: str = "daily_metrics",
     columns = list(rows[0].keys()) if rows else []
     return templates.TemplateResponse(request, "data.html", {
         "active": "data", "table": table,
-        "tables": sorted(_QUERYABLE_TABLES),
+        "tables": [(t, _TABLE_LABELS.get(t, t)) for t in sorted(_QUERYABLE_TABLES)],
+        "table_label": _TABLE_LABELS.get(table, table),
         "columns": columns, "rows": rows,
         "date_from": date_from or "", "date_to": date_to or "",
     })
@@ -153,9 +164,13 @@ def data_page(request: Request, table: str = "daily_metrics",
 
 @router.get("/watchlist", response_class=HTMLResponse)
 def watchlist_page(request: Request):
-    """觀察名單 + 各股最新的個股觀察訊號。"""
+    """觀察名單 + 各股最新的個股觀察訊號。台股大盤指數固定置頂。"""
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
+        index_rows = conn.execute(
+            "SELECT date, open, high, low, close FROM raw_index "
+            "ORDER BY date DESC LIMIT 11"
+        ).fetchall()
         stocks = conn.execute(
             "SELECT stock_id, stock_name, added_date, reason "
             "FROM watchlist ORDER BY stock_id"
@@ -172,9 +187,22 @@ def watchlist_page(request: Request):
              "category": category, "reasons": reasons}
         )
 
+    # 大盤指數：最近 10 日 OHLC + 對前一日的漲跌幅（多查 1 列算第一天的漲跌）
+    index_days = []
+    for i, (date, open_, high, low, close) in enumerate(index_rows[:10]):
+        change_pct = None
+        if i + 1 < len(index_rows) and index_rows[i + 1][4] and close:
+            prev_close = index_rows[i + 1][4]
+            change_pct = round((close - prev_close) / prev_close * 100, 2)
+        index_days.append({
+            "date": date, "open": open_, "high": high,
+            "low": low, "close": close, "change_pct": change_pct,
+        })
+
     return templates.TemplateResponse(request, "watchlist.html", {
         "active": "watchlist", "stocks": stocks,
         "signals_by_stock": signals_by_stock,
+        "index_days": index_days,
     })
 
 

@@ -114,6 +114,18 @@ class TestPagesWithData:
         assert "台積電" in resp.text
         assert "bottom_watch" in resp.text
 
+    def test_watchlist_page_shows_taiex(self, client_with_data):
+        """觀察名單頁置頂顯示大盤指數。"""
+        resp = client_with_data.get("/watchlist")
+        assert "加權指數" in resp.text
+        assert "43000" in resp.text  # raw_index 的收盤
+
+    def test_data_page_chinese_labels(self, client_with_data):
+        """資料瀏覽下拉選單顯示中文標籤。"""
+        resp = client_with_data.get("/data")
+        assert "每日衍生指標" in resp.text
+        assert "三大法人（原始）" in resp.text
+
 
 class TestApi:
     def test_api_signals(self, client_with_data):

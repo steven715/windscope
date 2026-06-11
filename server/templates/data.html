@@ -5,8 +5,8 @@
 
 <form class="filter" method="get" action="/data">
   <select name="table">
-    {% for t in tables %}
-    <option value="{{ t }}" {{ "selected" if t == table }}>{{ t }}</option>
+    {% for t, label in tables %}
+    <option value="{{ t }}" {{ "selected" if t == table }}>{{ label }}（{{ t }}）</option>
     {% endfor %}
   </select>
   <label>從 <input type="date" name="date_from" value="{{ date_from }}"></label>
@@ -25,6 +25,6 @@
 <div class="dim" style="margin-top:8px">{{ rows | length }} 筆（上限 500）</div>
 </div>
 {% else %}
-<div class="panel empty">{{ table }} 查無資料</div>
+<div class="panel empty">{{ table_label }}（{{ table }}）查無資料</div>
 {% endif %}
 {% endblock %}

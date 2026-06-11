@@ -30,6 +30,7 @@
 | 更新時間 | 每個交易日 ~15:00 |
 | 狀態 | ✅ VERIFIED（2026-04-12 fixture 驗證） |
 | 備註 | `stat` 欄位為 `"OK"` 表示有資料；非交易日回傳 `"很抱歉，沒有符合條件的資料"`。Parser 已處理逗號數字、括號負數、日期比對。|
+| ⚠️ 限制 | **不支援歷史查詢**（2026-06-12 backfill 實測）：date 參數被忽略，永遠回傳最新交易日。Parser 的日期比對防呆會擋下錯置資料，因此歷史回補時此來源一律失敗，法人資料只能逐日累積。|
 
 ---
 
@@ -257,3 +258,5 @@
 |------|----------|
 | 2026-04-12 | 初版建立，所有來源標記為 UNVERIFIED |
 | 2026-04-13 | Round 2 完成：BFI82U/FMTQIK/STOCK_DAY/T86 標記 VERIFIED；期交所 CSV 標記 VERIFIED；台銀 CSV/Yahoo Finance 標記 VERIFIED；TWT49U 標記 PARTIAL；OI/Chip 標記 STUB；CSV import 標記 VERIFIED |
+| 2026-06-12 | v2 R1：新增 MI_5MINS_HIST（加權指數 OHLC）標記 VERIFIED |
+| 2026-06-12 | backfill 實測歷史回補能力：**可回補** = FMTQIK、STOCK_DAY、T86、MI_5MINS_HIST（月查詢含歷史）；**不可回補** = BFI82U（date 參數被忽略）、台銀匯率 CSV（只有即時牌價）、期交所夜盤（僅當日 CSV）。不可回補的來源只能逐日累積。|
