@@ -54,11 +54,24 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
-        # 5. 產出 daily summary 文字摘要
+        # 5. Layer 3: 市場訊號 + 個股觀察訊號
+        signal = None
+        ok, err = run_step("signal", lambda: _compute_signals(date, conn))
+        if ok:
+            from integration.signal_engine import compute_market_signal
+            signal = compute_market_signal(date, conn)
+        results["signal"] = ok
+        if err:
+            errors.append(err)
+
+        # 6. 產出 daily summary 文字摘要（含訊號區塊）
         ok, err = run_step("summary", lambda: _generate_summary(date, conn))
         if ok:
             from integration.summary import generate_daily_summary
             summary_text = generate_daily_summary(date, conn)
+            if summary_text and signal:
+                from integration.signal_engine import format_signal_text
+                summary_text = summary_text + "\n" + format_signal_text(signal)
         results["summary"] = ok
         if err:
             errors.append(err)
@@ -116,6 +129,15 @@ def _compute_fx(date: str, conn: sqlite3.Connection) -> bool:
     from integration.fx_metrics import compute_fx_metrics
 
     result = compute_fx_metrics(date, conn)
+    return result is not None
+
+
+def _compute_signals(date: str, conn: sqlite3.Connection) -> bool:
+    """計算市場訊號與個股觀察訊號。市場訊號算不出來視為失敗。"""
+    from integration.signal_engine import compute_market_signal, compute_stock_signals
+
+    result = compute_market_signal(date, conn)
+    compute_stock_signals(date, conn)  # 個股訊號可為空清單，不影響成敗
     return result is not None
 
 
