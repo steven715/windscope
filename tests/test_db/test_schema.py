@@ -26,8 +26,34 @@ class TestCreateAllTables:
             "signals",
             "stock_signals",
             "verifications",
+            "stock_info",
         }
         assert expected.issubset(table_names)
+
+    def test_import_watchlist_seeds_stock_info(self, memory_db, tmp_path):
+        """匯入 watchlist 時同步建立 stock_info。"""
+        stocks = [{"stock_id": "2330", "stock_name": "台積電",
+                   "added_date": "2026-04-08", "reason": "權值股"}]
+        json_path = tmp_path / "watchlist.json"
+        json_path.write_text(json.dumps(stocks, ensure_ascii=False), encoding="utf-8")
+
+        from db.schema import import_watchlist
+        import_watchlist(memory_db, str(json_path))
+
+        row = memory_db.execute(
+            "SELECT stock_name FROM stock_info WHERE stock_id = '2330'"
+        ).fetchone()
+        assert row[0] == "台積電"
+
+    def test_upsert_stock_info_skips_empty_name(self, memory_db):
+        """空名稱不應覆蓋既有的股名。"""
+        from db.schema import upsert_stock_info
+        upsert_stock_info(memory_db, "2330", "台積電")
+        upsert_stock_info(memory_db, "2330", None)
+        row = memory_db.execute(
+            "SELECT stock_name FROM stock_info WHERE stock_id = '2330'"
+        ).fetchone()
+        assert row[0] == "台積電"
 
     def test_idempotent_insert_raw_index(self, memory_db):
         """raw_index 同一天重複寫入不報錯，且資料為最新值。"""

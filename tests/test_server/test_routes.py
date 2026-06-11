@@ -165,6 +165,52 @@ class TestApi:
         assert resp.json()["total"] == 0
 
 
+class TestWatchlistManagement:
+    def test_add_stock(self, client):
+        """網頁新增觀察股後出現在頁面上，且 stock_info 同步。"""
+        resp = client.post("/watchlist/add", data={
+            "stock_id": "2454", "stock_name": "聯發科", "reason": "測試",
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        assert "聯發科" in resp.text
+
+    def test_remove_stock(self, client_with_data):
+        resp = client_with_data.post("/watchlist/remove",
+                                     data={"stock_id": "2330"},
+                                     follow_redirects=True)
+        assert resp.status_code == 200
+        assert "台積電（2330）" not in resp.text
+
+    def test_remove_nonexistent_no_error(self, client):
+        resp = client.post("/watchlist/remove", data={"stock_id": "9999"},
+                           follow_redirects=True)
+        assert resp.status_code == 200
+
+
+class TestDataPageChipFriendly:
+    def test_chip_markers_translated(self, tmp_path):
+        """raw_chip 的內部標記列以人話顯示，且股名從 stock_info 補齊。"""
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.execute(
+            "INSERT INTO raw_chip (date, stock_id, broker_name, net_volume) "
+            "VALUES ('2026-06-11', '2330', '__FOREIGN__', 9111)"
+        )
+        conn.execute(
+            "INSERT INTO stock_info (stock_id, stock_name) VALUES ('2330', '台積電')"
+        )
+        conn.commit()
+        conn.close()
+        app = create_app(db_path=db_path, enable_scheduler=False)
+        resp = TestClient(app).get("/data?table=raw_chip")
+
+        assert "__FOREIGN__" not in resp.text
+        assert "外資合計" in resp.text
+        assert "台積電" in resp.text
+        assert "此表混合三種列" in resp.text
+
+
 class TestScheduler:
     def test_create_scheduler_has_four_jobs(self):
         from server.scheduler import create_scheduler, get_jobs_info

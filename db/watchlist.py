@@ -42,12 +42,15 @@ def watchlist_add(stock_id: str, stock_name: str, reason: str,
     today = date.today().isoformat()
 
     def _do(c: sqlite3.Connection) -> None:
+        from db.schema import upsert_stock_info
+
         c.execute(
             "INSERT OR REPLACE INTO watchlist "
             "(stock_id, stock_name, added_date, reason) "
             "VALUES (?, ?, ?, ?)",
             (stock_id, stock_name, today, reason),
         )
+        upsert_stock_info(c, stock_id, stock_name)
 
     if conn is not None:
         _do(conn)

@@ -4,8 +4,8 @@ import json
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from db.connection import get_connection
@@ -34,6 +34,32 @@ _TABLE_LABELS = {
     "daily_metrics": "每日衍生指標",
     "daily_stock_metrics": "個股籌碼指標",
 }
+
+# raw_chip 內部標記列的顯示名稱
+_BROKER_MARKER_LABELS = {
+    "__FOREIGN__": "外資合計（T86，單位：張）",
+    "__PRICE_ONLY__": "（收盤價紀錄）",
+}
+
+_TABLE_NOTES = {
+    "raw_chip": (
+        "此表混合三種列：真實分點買賣明細（CSV 匯入）、"
+        "「外資合計」= 外資對該股的每日買賣超合計（張，來自證交所 T86），"
+        "「收盤價紀錄」= 只為計算 MA20 而存的收盤價占位列。"
+    ),
+}
+
+
+def _fill_stock_names(conn, rows: list[dict]) -> None:
+    """用 stock_info 補齊 rows 中缺漏的 stock_name（就地修改）。"""
+    if not rows or "stock_id" not in rows[0]:
+        return
+    info = dict(conn.execute(
+        "SELECT stock_id, stock_name FROM stock_info"
+    ).fetchall())
+    for row in rows:
+        if not row.get("stock_name"):
+            row["stock_name"] = info.get(row["stock_id"], "")
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -151,12 +177,19 @@ def data_page(request: Request, table: str = "daily_metrics",
 
     with get_connection(db_path) as conn:
         rows = _query_by_date_range(conn, table, date_from, date_to)
+        _fill_stock_names(conn, rows)
+
+    # raw_chip 的內部標記改成人話
+    for row in rows:
+        if row.get("broker_name") in _BROKER_MARKER_LABELS:
+            row["broker_name"] = _BROKER_MARKER_LABELS[row["broker_name"]]
 
     columns = list(rows[0].keys()) if rows else []
     return templates.TemplateResponse(request, "data.html", {
         "active": "data", "table": table,
         "tables": [(t, _TABLE_LABELS.get(t, t)) for t in sorted(_QUERYABLE_TABLES)],
         "table_label": _TABLE_LABELS.get(table, table),
+        "table_note": _TABLE_NOTES.get(table),
         "columns": columns, "rows": rows,
         "date_from": date_from or "", "date_to": date_to or "",
     })
@@ -204,6 +237,28 @@ def watchlist_page(request: Request):
         "signals_by_stock": signals_by_stock,
         "index_days": index_days,
     })
+
+
+@router.post("/watchlist/add")
+def watchlist_add_route(request: Request,
+                        stock_id: str = Form(...),
+                        stock_name: str = Form(...),
+                        reason: str = Form("")):
+    """從網頁新增觀察股，完成後導回觀察名單頁。"""
+    from db.watchlist import watchlist_add
+
+    watchlist_add(stock_id.strip(), stock_name.strip(), reason.strip(),
+                  db_path=request.app.state.db_path)
+    return RedirectResponse(url="/watchlist", status_code=303)
+
+
+@router.post("/watchlist/remove")
+def watchlist_remove_route(request: Request, stock_id: str = Form(...)):
+    """從網頁移除觀察股（歷史資料保留），完成後導回觀察名單頁。"""
+    from db.watchlist import watchlist_remove
+
+    watchlist_remove(stock_id.strip(), db_path=request.app.state.db_path)
+    return RedirectResponse(url="/watchlist", status_code=303)
 
 
 @router.get("/scheduler", response_class=HTMLResponse)

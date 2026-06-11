@@ -69,6 +69,12 @@ CREATE TABLE IF NOT EXISTS watchlist (
     reason TEXT
 );
 
+CREATE TABLE IF NOT EXISTS stock_info (
+    stock_id TEXT PRIMARY KEY,
+    stock_name TEXT,
+    updated_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS daily_metrics (
     date TEXT PRIMARY KEY,
     fx_delta_twd REAL,
@@ -195,6 +201,24 @@ def import_watchlist(
                 stock["reason"],
             ),
         )
+        upsert_stock_info(conn, stock["stock_id"], stock["stock_name"])
     conn.commit()
     logger.info("Imported %d watchlist entries", len(stocks))
     return len(stocks)
+
+
+def upsert_stock_info(conn: sqlite3.Connection, stock_id: str,
+                      stock_name: str | None) -> None:
+    """更新股票資訊表。stock_name 為空時不覆蓋既有名稱。"""
+    if not stock_name:
+        return
+    from datetime import datetime
+
+    conn.execute(
+        """INSERT INTO stock_info (stock_id, stock_name, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(stock_id) DO UPDATE SET
+               stock_name = excluded.stock_name,
+               updated_at = excluded.updated_at""",
+        (stock_id, stock_name, datetime.now().isoformat()),
+    )

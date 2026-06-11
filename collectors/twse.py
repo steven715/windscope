@@ -34,8 +34,19 @@ def _to_roc_date(date: str) -> str:
     return f"{roc_year}/{month}/{day}"
 
 
-def _load_watchlist() -> list[dict]:
-    """讀取 watchlist.json。"""
+def _load_watchlist(db_path: str | None = None) -> list[dict]:
+    """讀取觀察名單：以 DB 的 watchlist 表為準（網頁/CLI 增刪即時生效），
+    表不存在或為空時 fallback 到 watchlist.json（初始種子）。"""
+    try:
+        with get_connection(db_path) as conn:
+            rows = conn.execute(
+                "SELECT stock_id, stock_name FROM watchlist ORDER BY stock_id"
+            ).fetchall()
+        if rows:
+            return [{"stock_id": r[0], "stock_name": r[1]} for r in rows]
+    except Exception as e:
+        logger.warning("_load_watchlist: DB read failed (%s), using JSON", e)
+
     with open(WATCHLIST_PATH, encoding="utf-8") as f:
         return json.load(f)
 
@@ -45,7 +56,7 @@ class TWSECollector(BaseCollector):
 
     def __init__(self, db_path: str | None = None):
         super().__init__(db_path)
-        self._watchlist = _load_watchlist()
+        self._watchlist = _load_watchlist(db_path)
 
     # ── collect 方法 ──────────────────────────────────────────────
 
@@ -203,6 +214,7 @@ class TWSECollector(BaseCollector):
                 foreign_net_volume = int(net_shares / 1000)
                 results.append({
                     "stock_id": sid,
+                    "stock_name": row[1].strip(),
                     "foreign_net_volume": foreign_net_volume,
                 })
 
@@ -352,20 +364,24 @@ class TWSECollector(BaseCollector):
                     )
 
     def save_foreign_stock(self, date: str, data_list: list[dict]) -> None:
-        """外資個股買賣超存入 raw_institutional_stock（使用 raw_chip 暫存）。"""
-        # 外資個股買賣超欄位不同於分點資料，存到 raw_chip 的特殊 broker_name
+        """外資個股買賣超存入 raw_chip 的特殊 broker_name，並順手維護 stock_info。"""
+        from db.schema import upsert_stock_info
+
         now = datetime.now().isoformat()
         with get_connection(self.db_path) as conn:
             for item in data_list:
                 conn.execute(
                     """INSERT INTO raw_chip
-                       (date, stock_id, broker_name, net_volume, collected_at)
-                       VALUES (?, ?, '__FOREIGN__', ?, ?)
+                       (date, stock_id, stock_name, broker_name, net_volume, collected_at)
+                       VALUES (?, ?, ?, '__FOREIGN__', ?, ?)
                        ON CONFLICT(date, stock_id, broker_name) DO UPDATE SET
+                        stock_name = excluded.stock_name,
                         net_volume = excluded.net_volume,
                         collected_at = excluded.collected_at""",
-                    (date, item["stock_id"], item["foreign_net_volume"], now),
+                    (date, item["stock_id"], item.get("stock_name"),
+                     item["foreign_net_volume"], now),
                 )
+                upsert_stock_info(conn, item["stock_id"], item.get("stock_name"))
 
     def save_index_ohlc(self, date: str, data: dict) -> None:
         """存入 raw_index，用 ON CONFLICT DO UPDATE。"""

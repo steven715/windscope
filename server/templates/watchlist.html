@@ -24,11 +24,25 @@
   {% endif %}
 </div>
 
+<div class="panel">
+  <form class="filter" method="post" action="/watchlist/add" style="margin-bottom:0">
+    <input name="stock_id" placeholder="代號（如 2454）" required pattern="[0-9A-Za-z]{4,6}" style="width:120px">
+    <input name="stock_name" placeholder="名稱（如 聯發科）" required style="width:140px">
+    <input name="reason" placeholder="加入原因（選填）" style="flex:1; min-width:160px">
+    <button type="submit">＋ 新增觀察股</button>
+  </form>
+</div>
+
 {% if stocks %}
 {% for s in stocks %}
 <div class="panel">
   <b>{{ s[1] }}（{{ s[0] }}）</b>
   <span class="dim">加入於 {{ s[2] }}・{{ s[3] }}</span>
+  <form method="post" action="/watchlist/remove" style="display:inline; float:right"
+        onsubmit="return confirm('移除 {{ s[1] }}（{{ s[0] }}）？歷史資料會保留，只是不再收集新資料。')">
+    <input type="hidden" name="stock_id" value="{{ s[0] }}">
+    <button type="submit" style="background:var(--red); color:#fff; padding:3px 10px; font-size:12px">移除</button>
+  </form>
   {% set sigs = signals_by_stock.get(s[0]) %}
   {% if sigs %}
   <table style="margin-top:8px">

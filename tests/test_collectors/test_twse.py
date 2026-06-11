@@ -381,6 +381,44 @@ class TestRunFlow:
         assert results["ex_dividend"] is True
 
 
+# ── watchlist 載入來源 ────────────────────────────────────────────
+
+
+class TestWatchlistLoading:
+    def test_db_watchlist_takes_precedence(self, tmp_path):
+        """DB watchlist 有資料時，collector 用 DB 而非 JSON。"""
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.execute(
+            "INSERT INTO watchlist (stock_id, stock_name) VALUES ('9999', '測試股')"
+        )
+        conn.commit()
+        conn.close()
+
+        collector = TWSECollector(db_path=db_path)
+        ids = {s["stock_id"] for s in collector._watchlist}
+        assert ids == {"9999"}
+
+    def test_empty_db_falls_back_to_json(self, twse_collector):
+        """DB watchlist 為空時 fallback 到 watchlist.json（種子）。"""
+        ids = {s["stock_id"] for s in twse_collector._watchlist}
+        assert "2330" in ids  # 來自 config/watchlist.json
+
+    def test_t86_upserts_stock_info(self, twse_collector):
+        """save_foreign_stock 順手把 T86 的股名寫進 stock_info。"""
+        twse_collector.save_foreign_stock("2026-06-11", [
+            {"stock_id": "2330", "stock_name": "台積電",
+             "foreign_net_volume": 9111},
+        ])
+        conn = sqlite3.connect(twse_collector.db_path)
+        row = conn.execute(
+            "SELECT stock_name FROM stock_info WHERE stock_id = '2330'"
+        ).fetchone()
+        conn.close()
+        assert row[0] == "台積電"
+
+
 # ── 加權指數 OHLC（MI_5MINS_HIST）─────────────────────────────────
 
 
