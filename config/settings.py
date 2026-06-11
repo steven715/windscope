@@ -45,6 +45,12 @@ STOCK_ACCUMULATION_MIN = 5          # 盤整區吸籌的連買天數門檻
 # === Verification (Layer 4) ===
 VERIFY_FLAT_BAND_PCT = 0.3          # |漲跌幅| <= 0.3% 視為「平」
 
+# === Notify ===
+# provider: "log"（預設，寫進 log）或 "telegram"（需設定 token 與 chat_id）
+NOTIFY_PROVIDER = os.environ.get("PREMARKET_NOTIFY", "log")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
 # === Server ===
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
