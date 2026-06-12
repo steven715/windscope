@@ -10,6 +10,8 @@ services:
       PREMARKET_NOTIFY: telegram
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      # 分點自動收集需 FinMind Sponsor token，.env 留空則停用（改用 import-chip CSV）
+      FINMIND_TOKEN: ${FINMIND_TOKEN:-}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

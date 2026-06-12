@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 BOT_CSV_URL = "https://rate.bot.com.tw/xrt/flcsv/0/day"
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart"
+SP500_SYMBOL = "^GSPC"  # 實測驗證 2026-06-12，回應格式與匯率 chart 相同
 
 
 class FXCollector(BaseCollector):
@@ -107,7 +108,37 @@ class FXCollector(BaseCollector):
             logger.error("Yahoo chart parse error for %s: %s", currency_pair, e)
             return None
 
+    def collect_sp500(self) -> dict | None:
+        """取得 S&P 500 最新收盤價（Yahoo Finance ^GSPC）。回傳 {"close": float} 或 None。"""
+        try:
+            resp = http_get(
+                f"{YAHOO_CHART_URL}/{SP500_SYMBOL}",
+                params={"interval": "1d", "range": "2d"},
+            )
+            data = resp.json()
+        except Exception as e:
+            logger.error("Yahoo Finance request failed for SP500: %s", e)
+            return None
+
+        parsed = self._parse_yahoo_chart(data, "SP500")
+        if parsed is None:
+            return None
+        return {"close": parsed["rate"]}
+
     # ── save 方法 ────────────────────────────────────────────────
+
+    def save_sp500(self, date: str, close: float) -> None:
+        """更新 raw_futures.sp500_close（S&P 500 雖由 FX collector 收集，但欄位在期貨表）。"""
+        now = datetime.now().isoformat()
+        with get_connection(self.db_path) as conn:
+            conn.execute(
+                """INSERT INTO raw_futures (date, sp500_close, collected_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(date) DO UPDATE SET
+                    sp500_close = excluded.sp500_close,
+                    collected_at = excluded.collected_at""",
+                (date, close, now),
+            )
 
     def save(self, date: str, data: dict) -> None:
         """存入 FX 資料（預設 save 介面）。"""

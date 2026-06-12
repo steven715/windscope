@@ -211,3 +211,57 @@ class TestRunFlow:
         assert results["usd_twd"] is True
         assert results["usd_cny"] is False
         assert results["usd_krw"] is False
+
+
+# ── S&P 500（Yahoo Finance ^GSPC）───────────────────────────────
+
+
+class TestCollectSP500:
+    def test_collect_sp500(self, fx_collector):
+        """從真實 fixture 解析 S&P 500 收盤價。"""
+        fixture = _load_json_fixture("yahoo_gspc_20260612.json")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = fixture
+
+        with patch("collectors.fx.http_get", return_value=mock_resp):
+            data = fx_collector.collect_sp500()
+
+        assert data is not None
+        assert data["close"] == pytest.approx(7381.14, abs=0.01)
+
+    def test_collect_sp500_http_failure(self, fx_collector):
+        """HTTP 失敗回傳 None 而非 crash。"""
+        with patch("collectors.fx.http_get", side_effect=Exception("timeout")):
+            data = fx_collector.collect_sp500()
+
+        assert data is None
+
+    def test_collect_sp500_malformed(self, fx_collector):
+        """格式異常回傳 None。"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"chart": {"result": []}}
+
+        with patch("collectors.fx.http_get", return_value=mock_resp):
+            data = fx_collector.collect_sp500()
+
+        assert data is None
+
+    def test_save_sp500(self, fx_collector):
+        """save_sp500 寫入 raw_futures.sp500_close，不覆蓋其他欄位。"""
+        conn = sqlite3.connect(fx_collector.db_path)
+        conn.execute(
+            "INSERT INTO raw_futures (date, night_close) VALUES ('2026-06-12', 42615.0)"
+        )
+        conn.commit()
+        conn.close()
+
+        fx_collector.save_sp500("2026-06-12", 7381.14)
+
+        conn = sqlite3.connect(fx_collector.db_path)
+        row = conn.execute(
+            "SELECT night_close, sp500_close FROM raw_futures WHERE date = '2026-06-12'"
+        ).fetchone()
+        conn.close()
+
+        assert row[0] == 42615.0  # 未被覆蓋
+        assert row[1] == pytest.approx(7381.14)

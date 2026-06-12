@@ -5,12 +5,16 @@ from datetime import datetime
 from pathlib import Path
 
 from collectors.base import BaseCollector
+from config import settings
 from db.connection import get_connection
 from utils.http_client import http_get
 
 logger = logging.getLogger(__name__)
 
-TWSE_TWT43U_URL = "https://www.twse.com.tw/rwd/zh/fund/TWT43U"
+# 分點明細來源：FinMind TaiwanStockTradingDailyReport（需 Sponsor token）。
+# 官方 bsr.twse.com.tw 有 CAPTCHA 無法自動化；TWSE TWT43U 實測為自營商彙總表
+# 而非分點明細（2026-06-12 驗證），故不使用。
+FINMIND_BROKER_DATASET = "TaiwanStockTradingDailyReport"
 WATCHLIST_PATH = Path(__file__).resolve().parent.parent / "config" / "watchlist.json"
 
 
@@ -35,17 +39,88 @@ class ChipCollector(BaseCollector):
     # ── collect 方法 ──────────────────────────────────────────────
 
     def collect(self, date: str) -> dict | None:
-        """嘗試自動收集分點資料（目前為 stub）。"""
+        """自動收集 watchlist 個股的分點資料（預設 collect 介面）。"""
         return self.collect_broker_trading(date)
 
     def collect_broker_trading(self, date: str) -> dict | None:
-        """嘗試取得個股券商進出明細。目前為 STUB。"""
-        # TODO: 待驗證
-        # 來源：證交所券商買賣日報 https://www.twse.com.tw/rwd/zh/fund/TWT43U
-        # 已知問題：此 URL 可能回傳大盤資料而非個股券商明細
-        # 狀態：STUB
-        logger.warning("collect_broker_trading is a stub, returning None")
-        return None
+        """透過 FinMind 取得 watchlist 個股的券商分點進出。
+
+        回傳 {stock_id: {"stock_name": str, "brokers": [{broker_name, buy_volume,
+        sell_volume, net_volume}, ...]}}；未設定 FINMIND_TOKEN 或全部失敗時回傳 None。
+        """
+        if not settings.FINMIND_TOKEN:
+            logger.warning(
+                "collect_broker_trading: FINMIND_TOKEN not set, "
+                "auto chip collection disabled (use `import-chip` CSV instead)"
+            )
+            return None
+
+        results: dict = {}
+        for stock in self._watchlist:
+            stock_id = stock["stock_id"]
+            brokers = self._fetch_finmind_broker(stock_id, date)
+            if not brokers:
+                continue
+            results[stock_id] = {
+                "stock_name": stock.get("stock_name", ""),
+                "brokers": brokers,
+            }
+
+        if not results:
+            logger.info("collect_broker_trading: no broker data for %s", date)
+            return None
+        return results
+
+    def _fetch_finmind_broker(self, stock_id: str, date: str) -> list[dict] | None:
+        """呼叫 FinMind API 取得單一個股的分點明細並彙總。失敗回傳 None。"""
+        try:
+            resp = http_get(
+                settings.FINMIND_API_URL,
+                params={
+                    "dataset": FINMIND_BROKER_DATASET,
+                    "data_id": stock_id,
+                    "start_date": date,
+                    "end_date": date,
+                    "token": settings.FINMIND_TOKEN,
+                },
+            )
+            payload = resp.json()
+        except Exception as e:
+            logger.error("FinMind request failed for %s %s: %s", stock_id, date, e)
+            return None
+
+        if payload.get("status") != 200:
+            logger.error(
+                "FinMind error for %s %s: %s",
+                stock_id, date, str(payload.get("msg", ""))[:200],
+            )
+            return None
+
+        return self.aggregate_broker_rows(payload.get("data", []))
+
+    @staticmethod
+    def aggregate_broker_rows(rows: list[dict]) -> list[dict]:
+        """把 FinMind 的逐價位明細彙總成每券商一筆 buy/sell/net（股數）。"""
+        agg: dict[str, dict] = {}
+        for row in rows:
+            try:
+                name = row["securities_trader"]
+                buy = int(row["buy"])
+                sell = int(row["sell"])
+            except (KeyError, TypeError, ValueError) as e:
+                logger.warning("Skipping malformed FinMind row: %s — %s", row, e)
+                continue
+            entry = agg.setdefault(
+                name, {"broker_name": name, "buy_volume": 0, "sell_volume": 0}
+            )
+            entry["buy_volume"] += buy
+            entry["sell_volume"] += sell
+
+        result = []
+        for entry in agg.values():
+            entry["net_volume"] = entry["buy_volume"] - entry["sell_volume"]
+            result.append(entry)
+        return result
 
     def import_from_csv(self, csv_path: str) -> int:
         """從 CSV 匯入分點籌碼資料。回傳匯入筆數。"""
@@ -95,8 +170,9 @@ class ChipCollector(BaseCollector):
     # ── save 方法 ────────────────────────────────────────────────
 
     def save(self, date: str, data: dict) -> None:
-        """存入分點資料（預設 save 介面）。預留給自動來源。"""
-        pass
+        """存入 collect_broker_trading 回傳的多檔個股分點資料。"""
+        for stock_id, item in data.items():
+            self.save_broker_trading(date, stock_id, item["stock_name"], item["brokers"])
 
     def save_broker_trading(self, date: str, stock_id: str, stock_name: str,
                             data_list: list[dict]) -> None:
@@ -128,13 +204,13 @@ class ChipCollector(BaseCollector):
     # ── run ──────────────────────────────────────────────────────
 
     def run(self, date: str) -> dict:
-        """執行分點籌碼收集（目前自動來源為 stub）。"""
+        """執行分點籌碼收集（FinMind 自動來源，無 token 時為 no-op）。"""
         logger.info("ChipCollector: starting all tasks for %s", date)
         results = {}
 
         results["broker_trading"] = self._try_collect_and_save(
             lambda: self.collect_broker_trading(date),
-            lambda data: None,
+            lambda data: self.save(date, data),
         )
 
         logger.info("ChipCollector results for %s: %s", date, results)

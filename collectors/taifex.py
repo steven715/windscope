@@ -9,8 +9,10 @@ from utils.http_client import http_post
 
 logger = logging.getLogger(__name__)
 
-TAIFEX_FUT_CSV_URL = "https://www.taifex.com.tw/cht/3/futContractsDateDown"
-TAIFEX_OI_URL = "https://www.taifex.com.tw/cht/3/totalTableDate"
+# 期貨每日交易行情下載（含一般/盤後時段），實測驗證 2026-06-12
+TAIFEX_FUT_CSV_URL = "https://www.taifex.com.tw/cht/3/futDataDown"
+# 三大法人—區分各期貨契約—依日期 下載，實測驗證 2026-06-12
+TAIFEX_OI_CSV_URL = "https://www.taifex.com.tw/cht/3/futContractsDateDown"
 
 
 def _parse_int(s: str) -> int:
@@ -42,10 +44,10 @@ class TAIFEXCollector(BaseCollector):
             resp = http_post(
                 TAIFEX_FUT_CSV_URL,
                 data={
-                    "queryType": "1",
-                    "marketCode": "0",
+                    "down_type": "1",
                     "commodity_id": "TX",
-                    "queryDate": query_date,
+                    "queryStartDate": query_date,
+                    "queryEndDate": query_date,
                 },
                 encoding="big5",
             )
@@ -98,12 +100,22 @@ class TAIFEXCollector(BaseCollector):
 
     def collect_oi_foreign(self, date: str) -> dict | None:
         """取得外資台指期未平倉淨額（口數）。回傳 {"oi_net_foreign": int} 或 None。"""
-        # TODO: 待驗證
-        # 來源：期交所三大法人期貨留倉 https://www.taifex.com.tw/cht/3/totalTableDate
-        # 已知問題：需要 POST 查詢，回傳 HTML 或 CSV，欄位位置未確認
-        # 狀態：STUB — 改用 CSV fixture 測試 parse 邏輯
-        logger.warning("collect_oi_foreign is a stub, returning None")
-        return None
+        query_date = date.replace("-", "/")  # YYYY/MM/DD
+        try:
+            resp = http_post(
+                TAIFEX_OI_CSV_URL,
+                data={
+                    "queryStartDate": query_date,
+                    "queryEndDate": query_date,
+                    "commodityId": "TXF",
+                },
+                encoding="big5",
+            )
+        except Exception as e:
+            logger.error("TAIFEX OI request failed for %s: %s", date, e)
+            return None
+
+        return self.collect_oi_foreign_from_csv(resp.text, date)
 
     def collect_oi_foreign_from_csv(self, csv_text: str, date: str) -> dict | None:
         """從期交所三大法人留倉 CSV 解析外資未平倉淨額。供測試及未來接通真實來源使用。"""
@@ -127,9 +139,10 @@ class TAIFEXCollector(BaseCollector):
             product = row_dict.get("商品名稱", "")
             identity = row_dict.get("身份別", "")
 
+            # 身份別實測為「外資及陸資」，用 in 比對涵蓋
             if "臺股期貨" in product and "外資" in identity:
                 try:
-                    oi_net = _parse_int(row_dict.get("多空淨額口數", "0"))
+                    oi_net = _parse_int(row_dict.get("多空未平倉口數淨額", "0"))
                     logger.info("TAIFEX OI parsed: oi_net_foreign=%d for %s", oi_net, date)
                     return {"oi_net_foreign": oi_net}
                 except (ValueError, KeyError) as e:

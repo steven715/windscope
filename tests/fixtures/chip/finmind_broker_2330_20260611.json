@@ -1,0 +1,11 @@
+{
+  "_comment": "fixture 建立日期: 2026-06-12; 依 FinMind 官方文件 schema 構造（https://finmind.github.io/tutor/TaiwanMarket/Chip/ TaiwanStockTradingDailyReport），非真實 API 回應——該 dataset 需 Sponsor token 才能實抓。同券商多列代表不同成交價位，collector 需加總。",
+  "msg": "success",
+  "status": 200,
+  "data": [
+    {"securities_trader": "凱基-台北", "price": 1050.0, "buy": 4000, "sell": 2000, "securities_trader_id": "9268", "stock_id": "2330", "date": "2026-06-11"},
+    {"securities_trader": "凱基-台北", "price": 1055.0, "buy": 1000, "sell": 5000, "securities_trader_id": "9268", "stock_id": "2330", "date": "2026-06-11"},
+    {"securities_trader": "兆豐-嘉義", "price": 1050.0, "buy": 8000, "sell": 1000, "securities_trader_id": "7005", "stock_id": "2330", "date": "2026-06-11"},
+    {"securities_trader": "港商麥格理", "price": 1052.0, "buy": 0, "sell": 12000, "securities_trader_id": "1560", "stock_id": "2330", "date": "2026-06-11"}
+  ]
+}

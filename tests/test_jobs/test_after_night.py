@@ -38,7 +38,7 @@ def test_after_night_partial_failure(memory_db, monkeypatch):
 
     def mock_step(name, fn):
         if name == "sp500_close":
-            return False, "sp500_close: stub"
+            return False, "sp500_close: failed"
         return True, None
 
     monkeypatch.setattr(after_night, "run_step", mock_step)

@@ -111,12 +111,12 @@
 | 項目 | 內容 |
 |------|------|
 | 用途 | 取得台指期夜盤收盤價和成交量 |
-| URL | `https://www.taifex.com.tw/cht/3/futContractsDateDown` |
+| URL | `https://www.taifex.com.tw/cht/3/futDataDown` |
 | 方法 | POST（表單查詢） |
 | 回傳格式 | CSV |
 | 更新時間 | 夜盤收盤後（次日 ~05:15） |
-| 狀態 | ✅ VERIFIED（fixture 驗證） |
-| 備註 | POST 參數：`queryType=1`、`marketCode=0`、`commodity_id=TX`、`queryDate={YYYY/MM/DD}`。Parser 解析 CSV 找到近月 TX 的「盤後」交易時段。CSV 編碼為 Big5。|
+| 狀態 | ✅ VERIFIED（2026-06-12 真實回應驗證，fixture: `fut_data_20260611.csv`） |
+| 備註 | POST 參數：`down_type=1`、`commodity_id=TX`、`queryStartDate={YYYY/MM/DD}`、`queryEndDate={YYYY/MM/DD}`。Parser 解析 CSV 找到近月 TX 的「盤後」交易時段。CSV 編碼為 Big5。**注意：** 原先用的 `futContractsDateDown` + `queryType/marketCode` 參數實測回傳 HTML 錯誤頁（該 URL 是三大法人下載端點），2026-06-12 修正。假日/查無資料時回傳 HTML 錯誤頁（非 CSV），parser 找不到 header 會回 None。|
 
 ---
 
@@ -125,12 +125,12 @@
 | 項目 | 內容 |
 |------|------|
 | 用途 | 取得外資台指期未平倉淨額（口數） |
-| URL | `https://www.taifex.com.tw/cht/3/totalTableDate` |
+| URL | `https://www.taifex.com.tw/cht/3/futContractsDateDown` |
 | 方法 | POST |
-| 回傳格式 | HTML 或 CSV |
+| 回傳格式 | CSV（Big5） |
 | 更新時間 | 每個交易日 ~15:00 |
-| 狀態 | 📌 STUB |
-| 備註 | `collect_oi_foreign()` 目前為 stub 回傳 None。CSV 解析邏輯已在 `collect_oi_foreign_from_csv()` 實作並通過測試。待實測確認真實 API 的 POST 參數和回傳格式後接通。|
+| 狀態 | ✅ VERIFIED（2026-06-12 真實回應驗證，fixture: `oi_foreign_20260611.csv`） |
+| 備註 | POST 參數：`queryStartDate={YYYY/MM/DD}`、`queryEndDate={YYYY/MM/DD}`、`commodityId=TXF`。實際欄位：身份別為「外資及陸資」、淨額欄位為「多空未平倉口數淨額」（與原推測的「外資」「多空淨額口數」不同，parser 已修正）。假日回傳 HTML 錯誤頁，parser 回 None。|
 
 ---
 
@@ -182,12 +182,23 @@
 | 項目 | 內容 |
 |------|------|
 | 用途 | 取得個股分點進出明細 |
-| URL | `https://www.twse.com.tw/rwd/zh/fund/TWT43U?date={YYYYMMDD}&stockNo={stock_id}&response=json` |
+| URL | `https://www.twse.com.tw/rwd/zh/fund/TWT43U` / `https://bsr.twse.com.tw/bshtm/` |
+| 狀態 | 🚫 BLOCKED（2026-06-12 實測確認） |
+| 備註 | TWT43U 實測回傳「自營商買賣超彙總表」（全市場彙總，`stockNo` 參數被忽略），**不是**分點明細。官方券商買賣日報表（bsr.twse.com.tw）有 CAPTCHA，無法（也不應）自動化。TWSE OpenAPI 亦無分點資料集（已查 swagger）。自動來源改用 FinMind（見 4.1b）。|
+
+---
+
+### 4.1b FinMind 券商分點（自動來源）
+
+| 項目 | 內容 |
+|------|------|
+| 用途 | 取得 watchlist 個股的券商分點買賣明細 |
+| URL | `https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockTradingDailyReport&data_id={stock_id}&start_date={date}&end_date={date}&token={token}` |
 | 方法 | GET |
-| 回傳格式 | JSON（待確認） |
-| 更新時間 | 每個交易日 ~18:00 |
-| 狀態 | 📌 STUB |
-| 備註 | `collect_broker_trading()` 目前為 stub 回傳 None。需實測確認此 URL 是否回傳個股的券商買賣明細。|
+| 回傳格式 | JSON |
+| 更新時間 | 週一至五 21:00（FinMind 文件） |
+| 狀態 | 🔧 PARTIAL（程式已接通；需使用者取得 FinMind **Sponsor 等級** token 才會啟用） |
+| 備註 | 設定環境變數 `FINMIND_TOKEN` 後自動啟用，未設定時 `collect_broker_trading()` 回 None（after_close job 該步驟顯示失敗但不中斷）。回應每列為「同券商不同成交價位」，collector 會加總成每券商一筆 buy/sell/net（單位：股）。Schema 依官方文件（finmind.github.io/tutor/TaiwanMarket/Chip/）構造 fixture，2026-06-12 無付費 token 無法實抓驗證；等級不足時 API 回 `{"status": 400, "msg": "Your level is free..."}`，已處理。免費等級實測確認不含此 dataset。|
 
 ---
 
@@ -224,10 +235,10 @@
 
 | 項目 | 內容 |
 |------|------|
-| 用途 | 美股收盤對照 |
-| URL | `https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=5d` |
-| 狀態 | ❓ UNVERIFIED |
-| 備註 | 與 FX 共用 Yahoo Finance 來源。代碼 `^GSPC`。|
+| 用途 | 美股收盤對照（存入 `raw_futures.sp500_close`） |
+| URL | `https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=2d` |
+| 狀態 | ✅ VERIFIED（2026-06-12 真實回應驗證，fixture: `yahoo_gspc_20260612.json`） |
+| 備註 | 與 FX 共用 Yahoo Finance chart API 與 parser（`FXCollector.collect_sp500()`）。代碼 `^GSPC`。after_night job 收集。|
 
 ---
 
@@ -241,12 +252,12 @@
 | 外資個股買賣超 | 證交所 JSON API ✅ | — | — |
 | 除息點數 | 證交所 JSON API 🔧 | — | 回傳 0（安全降級） |
 | 期貨夜盤 | 期交所 CSV ✅ | 期交所 HTML | — |
-| 外資期貨未平倉 | 期交所 CSV 📌 | — | — |
+| 外資期貨未平倉 | 期交所 CSV ✅ | — | — |
 | USD/TWD 匯率 | 台灣銀行 CSV ✅ | 鉅亨網 | 手動輸入 |
 | USD/CNY 匯率 | Yahoo Finance ✅ | 鉅亨網 | 手動輸入 |
 | USD/KRW 匯率 | Yahoo Finance ✅ | 鉅亨網 | 手動輸入 |
-| 分點籌碼 | 證交所券商日報 📌 | — | CSV 手動匯入 ✅ |
-| S&P 500 | Yahoo Finance ❓ | — | — |
+| 分點籌碼 | FinMind API 🔧（需 Sponsor token） | — | CSV 手動匯入 ✅ |
+| S&P 500 | Yahoo Finance ✅ | — | — |
 | 富台指 | — | — | Phase 1 略過 |
 | 紐約盤匯率 | — | — | Phase 1 略過 |
 
@@ -260,3 +271,4 @@
 | 2026-04-13 | Round 2 完成：BFI82U/FMTQIK/STOCK_DAY/T86 標記 VERIFIED；期交所 CSV 標記 VERIFIED；台銀 CSV/Yahoo Finance 標記 VERIFIED；TWT49U 標記 PARTIAL；OI/Chip 標記 STUB；CSV import 標記 VERIFIED |
 | 2026-06-12 | v2 R1：新增 MI_5MINS_HIST（加權指數 OHLC）標記 VERIFIED |
 | 2026-06-12 | backfill 實測歷史回補能力：**可回補** = FMTQIK、STOCK_DAY、T86、MI_5MINS_HIST（月查詢含歷史）；**不可回補** = BFI82U（date 參數被忽略）、台銀匯率 CSV（只有即時牌價）、期交所夜盤（僅當日 CSV）。不可回補的來源只能逐日累積。|
+| 2026-06-12 | 補齊三個 STUB：(1) 外資 OI 實測接通（futContractsDateDown，VERIFIED），順帶發現並修正夜盤端點錯誤（futContractsDateDown→futDataDown）；(2) 分點：TWT43U 實測為自營商彙總表非分點、bsr 有 CAPTCHA → 標 BLOCKED，自動來源改接 FinMind（PARTIAL，需 Sponsor token，環境變數 `FINMIND_TOKEN`）；(3) S&P 500 ^GSPC 實測接通（VERIFIED）。|

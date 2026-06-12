@@ -63,7 +63,7 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
-        # 6. TAIFEX: 外資期貨未平倉（STUB）
+        # 6. TAIFEX: 外資期貨未平倉
         ok, err = run_step("taifex_oi", lambda: _collect_taifex_oi(date, conn))
         results["taifex_oi"] = ok
         if err:
@@ -75,7 +75,7 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
-        # 8. Chip: 分點進出（STUB）
+        # 8. Chip: 分點進出（FinMind，未設 FINMIND_TOKEN 時跳過）
         ok, err = run_step("chip", lambda: _collect_chip(date, conn))
         results["chip"] = ok
         if err:
@@ -156,7 +156,7 @@ def _collect_twse_ex_dividend(date: str, conn: sqlite3.Connection) -> bool:
 
 
 def _collect_taifex_oi(date: str, conn: sqlite3.Connection) -> bool:
-    """收集外資期貨未平倉（目前 STUB）。"""
+    """收集外資期貨未平倉。"""
     from collectors.taifex import TAIFEXCollector
 
     c = TAIFEXCollector()
@@ -180,13 +180,14 @@ def _collect_fx_close(date: str, conn: sqlite3.Connection) -> bool:
 
 
 def _collect_chip(date: str, conn: sqlite3.Connection) -> bool:
-    """收集分點進出（目前 STUB）。"""
+    """收集分點進出（FinMind 自動來源，未設 token 時回 False 但不報錯）。"""
     from collectors.chip import ChipCollector
 
     c = ChipCollector()
     data = c.collect_broker_trading(date)
     if data is None:
         return False
+    c.save(date, data)
     return True
 
 

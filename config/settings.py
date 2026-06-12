@@ -45,6 +45,13 @@ STOCK_ACCUMULATION_MIN = 5          # 盤整區吸籌的連買天數門檻
 # === Verification (Layer 4) ===
 VERIFY_FLAT_BAND_PCT = 0.3          # |漲跌幅| <= 0.3% 視為「平」
 
+# === Chip 自動來源（FinMind）===
+# 分點明細唯一可自動化的合法來源是 FinMind TaiwanStockTradingDailyReport，
+# 需要 Sponsor 等級的 token（https://finmindtrade.com）。未設定時自動來源停用，
+# 改用手動 CSV 匯入（python main.py import-chip）。
+FINMIND_API_URL = "https://api.finmindtrade.com/api/v4/data"
+FINMIND_TOKEN = os.environ.get("FINMIND_TOKEN", "")
+
 # === Notify ===
 # provider: "log"（預設，寫進 log）或 "telegram"（需設定 token 與 chat_id）
 NOTIFY_PROVIDER = os.environ.get("PREMARKET_NOTIFY", "log")

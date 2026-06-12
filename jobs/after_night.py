@@ -68,17 +68,15 @@ def _collect_taifex_night(date: str, conn: sqlite3.Connection) -> bool:
 
 
 def _collect_sp500(date: str, conn: sqlite3.Connection) -> bool:
-    """收集 S&P 500 收盤價（Yahoo Finance）。"""
+    """收集 S&P 500 收盤價（Yahoo Finance ^GSPC）。"""
     from collectors.fx import FXCollector
 
     c = FXCollector()
-    try:
-        data = c.collect_foreign_fx("USD/CNY")  # 借用 Yahoo Finance 介面
-        # TODO: S&P 500 需要另外的 symbol，目前為 STUB
-        logger.warning("sp500_close is a stub, returning False")
+    data = c.collect_sp500()
+    if data is None:
         return False
-    except Exception:
-        return False
+    c.save_sp500(date, data["close"])
+    return True
 
 
 def _compute_futures(date: str, conn: sqlite3.Connection) -> bool:

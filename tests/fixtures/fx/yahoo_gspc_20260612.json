@@ -1,0 +1,106 @@
+{
+ "_comment": "fixture 取得日期: 2026-06-12; 來源: GET https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d&range=2d (真實回應)",
+ "chart": {
+  "result": [
+   {
+    "meta": {
+     "currency": "USD",
+     "symbol": "^GSPC",
+     "exchangeName": "SNP",
+     "fullExchangeName": "SNP",
+     "instrumentType": "INDEX",
+     "firstTradeDate": -1325583000,
+     "regularMarketTime": 1781272768,
+     "hasPrePostMarketData": false,
+     "gmtoffset": -14400,
+     "timezone": "EDT",
+     "exchangeTimezoneName": "America/New_York",
+     "regularMarketPrice": 7381.14,
+     "fiftyTwoWeekHigh": 7620.9,
+     "fiftyTwoWeekLow": 5943.23,
+     "regularMarketDayHigh": 7417.38,
+     "regularMarketDayLow": 7363.01,
+     "regularMarketVolume": 384712433,
+     "longName": "S&P 500",
+     "shortName": "S&P 500",
+     "chartPreviousClose": 7266.99,
+     "priceHint": 2,
+     "currentTradingPeriod": {
+      "pre": {
+       "timezone": "EDT",
+       "end": 1781271000,
+       "start": 1781251200,
+       "gmtoffset": -14400
+      },
+      "regular": {
+       "timezone": "EDT",
+       "end": 1781294400,
+       "start": 1781271000,
+       "gmtoffset": -14400
+      },
+      "post": {
+       "timezone": "EDT",
+       "end": 1781308800,
+       "start": 1781294400,
+       "gmtoffset": -14400
+      }
+     },
+     "dataGranularity": "1d",
+     "range": "2d",
+     "validRanges": [
+      "1d",
+      "5d",
+      "1mo",
+      "3mo",
+      "6mo",
+      "1y",
+      "2y",
+      "5y",
+      "10y",
+      "ytd",
+      "max"
+     ]
+    },
+    "timestamp": [
+     1781184600,
+     1781271000
+    ],
+    "indicators": {
+     "quote": [
+      {
+       "high": [
+        7412.68017578125,
+        7417.3798828125
+       ],
+       "low": [
+        7257.330078125,
+        7363.009765625
+       ],
+       "volume": [
+        5658920000,
+        384712433
+       ],
+       "open": [
+        7287.669921875,
+        7410.85009765625
+       ],
+       "close": [
+        7394.2998046875,
+        7381.14013671875
+       ]
+      }
+     ],
+     "adjclose": [
+      {
+       "adjclose": [
+        7394.2998046875,
+        7381.14013671875
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "error": null
+ }
+}
