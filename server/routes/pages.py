@@ -3,6 +3,7 @@
 import json
 import logging
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -262,12 +263,43 @@ def watchlist_remove_route(request: Request, stock_id: str = Form(...)):
 
 
 @router.get("/scheduler", response_class=HTMLResponse)
-def scheduler_page(request: Request):
-    """排程狀態：各 job 的下次執行時間。"""
+def scheduler_page(request: Request, msg: str | None = None):
+    """排程狀態：各 job 的排程時間、下次執行、上次結果，可手動執行與調整時間。"""
     from server.scheduler import get_jobs_info
 
-    jobs = get_jobs_info(request.app.state.scheduler)
+    jobs = get_jobs_info(request.app.state.scheduler,
+                         db_path=request.app.state.db_path)
     return templates.TemplateResponse(request, "scheduler.html", {
-        "active": "scheduler", "jobs": jobs,
+        "active": "scheduler", "jobs": jobs, "msg": msg,
         "scheduler_enabled": request.app.state.scheduler is not None,
     })
+
+
+@router.post("/scheduler/run")
+def scheduler_run_route(request: Request, job_id: str = Form(...)):
+    """手動觸發一次 job（背景執行，不影響原排程），完成後導回排程頁。"""
+    from server.scheduler import JOB_DEFS, run_job_now
+
+    ok = run_job_now(request.app.state.scheduler, job_id,
+                     db_path=request.app.state.db_path)
+    if ok:
+        msg = f"已觸發「{JOB_DEFS[job_id]['name']}」，在背景執行中——稍後重新整理查看上次執行結果"
+    else:
+        msg = "觸發失敗：排程器未啟用或 job 不存在"
+    return RedirectResponse(url=f"/scheduler?msg={quote(msg)}", status_code=303)
+
+
+@router.post("/scheduler/time")
+def scheduler_time_route(request: Request, job_id: str = Form(...),
+                         time_hhmm: str = Form(...)):
+    """調整 job 的排程時間（存入 DB，重啟後沿用），完成後導回排程頁。"""
+    from server.scheduler import JOB_DEFS, set_schedule_time
+
+    ok = set_schedule_time(job_id, time_hhmm.strip(),
+                           scheduler=request.app.state.scheduler,
+                           db_path=request.app.state.db_path)
+    if ok:
+        msg = f"「{JOB_DEFS[job_id]['name']}」排程時間已改為 {time_hhmm.strip()}"
+    else:
+        msg = "更新失敗：時間格式需為 HH:MM（24 小時制）"
+    return RedirectResponse(url=f"/scheduler?msg={quote(msg)}", status_code=303)

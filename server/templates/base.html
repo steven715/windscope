@@ -77,6 +77,14 @@
   .rate-big { font-size: 28px; font-weight: bold; color: var(--green); }
   .tag { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 10px;
          background: var(--panel2); border: 1px solid var(--border); color: var(--dim); }
+  table.sortable thead th { cursor: pointer; user-select: none; white-space: nowrap; }
+  table.sortable thead th:hover { color: var(--text); }
+  table.sortable thead th.sort-asc::after { content: " ▲"; color: var(--accent); font-size: 10px; }
+  table.sortable thead th.sort-desc::after { content: " ▼"; color: var(--accent); font-size: 10px; }
+  .msg-banner {
+    background: rgba(102,187,106,.12); border: 1px solid rgba(102,187,106,.45);
+    border-radius: 10px; padding: 10px 16px; margin-bottom: 14px; font-size: 13px;
+  }
 </style>
 </head>
 <body>
@@ -91,5 +99,62 @@
   <main class="main">
     {% block content %}{% endblock %}
   </main>
+<script>
+// 表格排序：table.sortable 的表頭可點擊排序（數字感知，再點切換升降冪）
+document.querySelectorAll("table.sortable").forEach(function (table) {
+  var tbody = table.querySelector("tbody");
+  if (!tbody) return;
+  table.querySelectorAll("thead th").forEach(function (th, colIdx) {
+    th.addEventListener("click", function () {
+      var asc = !th.classList.contains("sort-asc");
+      table.querySelectorAll("thead th").forEach(function (h) {
+        h.classList.remove("sort-asc", "sort-desc");
+      });
+      th.classList.add(asc ? "sort-asc" : "sort-desc");
+
+      var rows = Array.from(tbody.querySelectorAll("tr"));
+      rows.sort(function (a, b) {
+        var va = cellValue(a, colIdx), vb = cellValue(b, colIdx);
+        // 空值（—）永遠排最後
+        if (va.empty && vb.empty) return 0;
+        if (va.empty) return 1;
+        if (vb.empty) return -1;
+        var cmp;
+        if (va.num !== null && vb.num !== null) cmp = va.num - vb.num;
+        else cmp = va.text.localeCompare(vb.text, "zh-Hant");
+        return asc ? cmp : -cmp;
+      });
+      rows.forEach(function (r) { tbody.appendChild(r); });
+    });
+  });
+
+  function cellValue(tr, idx) {
+    var cell = tr.children[idx];
+    var text = cell ? cell.textContent.trim() : "";
+    if (text === "" || text === "—") return { empty: true, num: null, text: "" };
+    // 去除千分位逗號、%、+ 後嘗試轉數字
+    var cleaned = text.replace(/,/g, "").replace(/%/g, "").replace(/^\+/, "");
+    var num = cleaned !== "" && !isNaN(cleaned) ? parseFloat(cleaned) : null;
+    return { empty: false, num: num, text: text };
+  }
+});
+
+// 表格過濾：input[data-filter="<table 選擇器>"]，輸入即時過濾列（任一欄包含關鍵字）
+document.querySelectorAll("input[data-filter]").forEach(function (input) {
+  var table = document.querySelector(input.dataset.filter);
+  if (!table) return;
+  var counter = document.querySelector(input.dataset.count || null);
+  input.addEventListener("input", function () {
+    var kw = input.value.trim().toLowerCase();
+    var shown = 0;
+    table.querySelectorAll("tbody tr").forEach(function (tr) {
+      var match = kw === "" || tr.textContent.toLowerCase().indexOf(kw) !== -1;
+      tr.style.display = match ? "" : "none";
+      if (match) shown++;
+    });
+    if (counter) counter.textContent = shown;
+  });
+});
+</script>
 </body>
 </html>

@@ -20,13 +20,23 @@
 
 {% if rows %}
 <div class="panel" style="overflow-x:auto">
-<table>
-  <tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr>
+<div style="margin-bottom:10px">
+  <input type="search" data-filter="#data-table" data-count="#shown-count"
+         placeholder="🔍 過濾（任一欄包含關鍵字）" style="width:260px">
+</div>
+<table class="sortable" id="data-table">
+  <thead>
+    <tr>{% for c in columns %}<th title="點擊排序">{{ c }}</th>{% endfor %}</tr>
+  </thead>
+  <tbody>
   {% for row in rows %}
   <tr>{% for c in columns %}<td>{{ row[c] if row[c] is not none else "—" }}</td>{% endfor %}</tr>
   {% endfor %}
+  </tbody>
 </table>
-<div class="dim" style="margin-top:8px">{{ rows | length }} 筆（上限 500）</div>
+<div class="dim" style="margin-top:8px">
+  顯示 <span id="shown-count">{{ rows | length }}</span> / {{ rows | length }} 筆（查詢上限 500）・點表頭可排序
+</div>
 </div>
 {% else %}
 <div class="panel empty">{{ table_label }}（{{ table }}）查無資料</div>

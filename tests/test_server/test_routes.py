@@ -213,13 +213,139 @@ class TestDataPageChipFriendly:
 
 class TestScheduler:
     def test_create_scheduler_has_four_jobs(self):
-        from server.scheduler import create_scheduler, get_jobs_info
+        from server.scheduler import create_scheduler
 
         scheduler = create_scheduler(db_path=":memory:")
         jobs = {j.id for j in scheduler.get_jobs()}
         assert jobs == {"after_night", "before_open", "verify_close", "after_close"}
 
-    def test_get_jobs_info_none_scheduler(self):
+    def test_get_jobs_info_none_scheduler_lists_config(self, tmp_path):
+        """scheduler 未啟用時仍列出四個 job 的設定（無 next_run）。"""
         from server.scheduler import get_jobs_info
 
-        assert get_jobs_info(None) == []
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.close()
+
+        jobs = get_jobs_info(None, db_path=db_path)
+        assert [j["id"] for j in jobs] == [
+            "after_night", "before_open", "verify_close", "after_close"]
+        assert all(j["next_run"] is None for j in jobs)
+        assert jobs[1]["time_hhmm"] == "08:50"  # settings 預設
+
+    def test_set_schedule_time_persists_and_reschedules(self, tmp_path):
+        """改時間：寫入 DB、live scheduler 立即 reschedule、重建 scheduler 沿用。"""
+        from server.scheduler import (
+            create_scheduler, get_schedule_times, set_schedule_time,
+        )
+
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.close()
+
+        scheduler = create_scheduler(db_path=db_path)
+        ok = set_schedule_time("after_close", "20:15",
+                               scheduler=scheduler, db_path=db_path)
+        assert ok is True
+
+        # live job 已改
+        trigger = scheduler.get_job("after_close").trigger
+        assert "hour='20'" in str(trigger) and "minute='15'" in str(trigger)
+        # DB 持久化，重建 scheduler 沿用
+        assert get_schedule_times(db_path)["after_close"] == "20:15"
+        scheduler2 = create_scheduler(db_path=db_path)
+        assert "hour='20'" in str(scheduler2.get_job("after_close").trigger)
+        # 其他 job 不受影響
+        assert get_schedule_times(db_path)["before_open"] == "08:50"
+
+    def test_set_schedule_time_rejects_bad_input(self, tmp_path):
+        from server.scheduler import set_schedule_time
+
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.close()
+
+        assert set_schedule_time("after_close", "25:00", db_path=db_path) is False
+        assert set_schedule_time("after_close", "abc", db_path=db_path) is False
+        assert set_schedule_time("nonexistent_job", "10:00", db_path=db_path) is False
+
+    def test_run_job_now(self, tmp_path, monkeypatch):
+        """run_job_now 在背景觸發一次 job 並記錄結果；None scheduler 回 False。"""
+        import threading
+        import server.scheduler as sched_mod
+        from server.scheduler import create_scheduler, run_job_now
+
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.close()
+
+        assert run_job_now(None, "after_close", db_path=db_path) is False
+
+        ran = threading.Event()
+
+        def fake_job(db):
+            ran.set()
+            return {"status": "completed"}
+
+        monkeypatch.setitem(sched_mod.JOB_DEFS["after_close"], "func", fake_job)
+        scheduler = create_scheduler(db_path=db_path)
+        scheduler.start()
+        try:
+            assert run_job_now(scheduler, "after_close", db_path=db_path) is True
+            assert ran.wait(timeout=5), "manual job did not run within 5s"
+            # 等 wrapper 寫完 _last_runs
+            for _ in range(50):
+                if "after_close" in sched_mod._last_runs:
+                    break
+                threading.Event().wait(0.1)
+            assert sched_mod._last_runs["after_close"]["status"] == "completed"
+        finally:
+            scheduler.shutdown(wait=False)
+
+        assert run_job_now(scheduler, "no_such_job", db_path=db_path) is False
+
+
+class TestSchedulerRoutes:
+    def test_scheduler_page_lists_jobs_when_disabled(self, client):
+        """排程器未啟用仍顯示四個 job 的設定列。"""
+        resp = client.get("/scheduler")
+        assert resp.status_code == 200
+        assert "after_close" in resp.text
+        assert "排程器未啟用" in resp.text
+
+    def test_post_time_updates_and_shows_msg(self, client):
+        resp = client.post("/scheduler/time",
+                           data={"job_id": "after_close", "time_hhmm": "19:00"},
+                           follow_redirects=True)
+        assert resp.status_code == 200
+        assert "已改為 19:00" in resp.text
+        assert 'value="19:00"' in resp.text
+
+    def test_post_time_invalid_shows_error(self, client):
+        resp = client.post("/scheduler/time",
+                           data={"job_id": "after_close", "time_hhmm": "99:99"},
+                           follow_redirects=True)
+        assert "更新失敗" in resp.text
+
+    def test_post_run_without_scheduler_fails_gracefully(self, client):
+        resp = client.post("/scheduler/run", data={"job_id": "after_close"},
+                           follow_redirects=True)
+        assert resp.status_code == 200
+        assert "觸發失敗" in resp.text
+
+
+class TestTableUX:
+    def test_data_page_sortable_and_filter(self, client_with_data):
+        """資料瀏覽表格有排序 class 與過濾輸入框。"""
+        resp = client_with_data.get("/data?table=raw_index")
+        assert 'class="sortable"' in resp.text
+        assert "data-filter" in resp.text
+
+    def test_signals_page_sortable_and_filter(self, client_with_data):
+        resp = client_with_data.get("/signals")
+        assert 'class="sortable"' in resp.text
+        assert "data-filter" in resp.text

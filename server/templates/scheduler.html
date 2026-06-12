@@ -3,23 +3,62 @@
 {% block content %}
 <h2>排程狀態</h2>
 
-{% if scheduler_enabled %}
-<div class="panel">
+{% if msg %}
+<div class="msg-banner">✅ {{ msg }}</div>
+{% endif %}
+
+{% if not scheduler_enabled %}
+<div class="panel empty">
+  排程器未啟用（測試模式）。以 <code>python main.py serve</code> 啟動 server 時會自動啟用。
+  下方仍可檢視與調整排程時間，設定會在排程器下次啟動時生效。
+</div>
+{% endif %}
+
+<div class="panel" style="overflow-x:auto">
   <table>
-    <tr><th>Job</th><th>說明</th><th>下次執行</th></tr>
+    <thead>
+    <tr><th>Job</th><th>說明</th><th>排程時間</th><th>下次執行</th><th>上次執行</th><th>操作</th></tr>
+    </thead>
+    <tbody>
     {% for j in jobs %}
     <tr>
       <td><span class="tag">{{ j.id }}</span></td>
       <td>{{ j.name }}</td>
+      <td>
+        <form method="post" action="/scheduler/time" style="display:flex; gap:6px; align-items:center; margin:0">
+          <input type="hidden" name="job_id" value="{{ j.id }}">
+          <input type="time" name="time_hhmm" value="{{ j.time_hhmm }}" required style="width:110px">
+          <button type="submit" title="儲存排程時間（重啟後沿用）">儲存</button>
+        </form>
+        {% if j.time_hhmm != j.default_time %}
+        <div class="dim" style="font-size:11px">預設 {{ j.default_time }}（已覆寫）</div>
+        {% endif %}
+      </td>
       <td>{{ j.next_run or "—" }}</td>
+      <td>
+        {% if j.last_run %}
+        <div>{{ j.last_run.time }}</div>
+        <div class="{{ 'up' if j.last_run.status == 'completed' else ('flat' if j.last_run.status in ('partial', 'skipped') else 'down') }}"
+             style="font-size:12px">{{ j.last_run.status }}</div>
+        {% else %}
+        <span class="dim">（本次啟動後尚未執行）</span>
+        {% endif %}
+      </td>
+      <td>
+        <form method="post" action="/scheduler/run" style="margin:0"
+              onsubmit="return confirm('立即執行「{{ j.name }}」？會以今天日期跑一次完整流程。')">
+          <input type="hidden" name="job_id" value="{{ j.id }}">
+          <button type="submit" {{ "disabled" if not scheduler_enabled }}
+                  {% if not scheduler_enabled %}title="排程器未啟用時無法手動執行"{% endif %}>▶ 立即執行</button>
+        </form>
+      </td>
     </tr>
     {% endfor %}
+    </tbody>
   </table>
+  <div class="dim" style="margin-top:8px">
+    手動執行＝用今天的日期立刻跑一次該 job（背景執行，不影響原排程）。
+    排程時間存於資料庫，container 重啟後沿用；上次執行結果只保留在記憶體，重啟後清空。
+  </div>
 </div>
-{% else %}
-<div class="panel empty">
-  排程器未啟用。以 <code>python main.py serve</code> 啟動 server 時會自動啟用；
-  測試模式下保持關閉。
-</div>
-{% endif %}
 {% endblock %}

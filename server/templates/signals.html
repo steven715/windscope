@@ -17,9 +17,16 @@
 
 {% if records %}
 <div class="panel">
-<table>
-  <tr><th>日期</th><th>判斷</th><th>信心</th><th>規則</th>
-      <th>收盤漲跌</th><th>結果</th><th>跳空</th><th>理由</th></tr>
+<div style="margin-bottom:10px">
+  <input type="search" data-filter="#signals-table"
+         placeholder="🔍 過濾（如：偏多、✗、v1）" style="width:260px">
+</div>
+<table class="sortable" id="signals-table">
+  <thead>
+  <tr><th title="點擊排序">日期</th><th title="點擊排序">判斷</th><th title="點擊排序">信心</th><th title="點擊排序">規則</th>
+      <th title="點擊排序">收盤漲跌</th><th title="點擊排序">結果</th><th title="點擊排序">跳空</th><th>理由</th></tr>
+  </thead>
+  <tbody>
   {% for r in records %}
   <tr>
     <td>{{ r.date }}</td>
@@ -32,6 +39,7 @@
     <td class="dim" style="font-size:12px">{{ r.reasons | join("；") }}</td>
   </tr>
   {% endfor %}
+  </tbody>
 </table>
 </div>
 {% else %}

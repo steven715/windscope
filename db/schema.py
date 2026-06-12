@@ -138,6 +138,12 @@ CREATE TABLE IF NOT EXISTS verifications (
     verified_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS schedule_config (
+    job_id TEXT PRIMARY KEY,
+    time_hhmm TEXT NOT NULL,
+    updated_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS daily_stock_metrics (
     date TEXT NOT NULL,
     stock_id TEXT NOT NULL,
