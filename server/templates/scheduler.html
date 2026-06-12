@@ -25,9 +25,10 @@
       <td><span class="tag">{{ j.id }}</span></td>
       <td>{{ j.name }}</td>
       <td>
-        <form method="post" action="/scheduler/time" style="display:flex; gap:6px; align-items:center; margin:0">
+        <form method="post" action="/scheduler/time" style="display:flex; gap:8px; align-items:center; margin:0">
           <input type="hidden" name="job_id" value="{{ j.id }}">
-          <input type="time" name="time_hhmm" value="{{ j.time_hhmm }}" required style="width:110px">
+          <input type="time" name="time_hhmm" value="{{ j.time_hhmm }}" required
+                 style="width:150px; min-width:150px; padding:5px 10px">
           <button type="submit" title="儲存排程時間（重啟後沿用）">儲存</button>
         </form>
         {% if j.time_hhmm != j.default_time %}
