@@ -26,11 +26,11 @@
 </div>
 <table class="sortable" id="data-table">
   <thead>
-    <tr>{% for c in columns %}<th title="點擊排序">{{ c }}</th>{% endfor %}</tr>
+    <tr>{% for name, label in columns %}<th title="{{ name }}・點擊排序">{{ label }}</th>{% endfor %}</tr>
   </thead>
   <tbody>
   {% for row in rows %}
-  <tr>{% for c in columns %}<td>{{ row[c] if row[c] is not none else "—" }}</td>{% endfor %}</tr>
+  <tr>{% for name, label in columns %}<td>{{ row[name] if row[name] is not none else "—" }}</td>{% endfor %}</tr>
   {% endfor %}
   </tbody>
 </table>

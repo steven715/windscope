@@ -36,6 +36,70 @@ _TABLE_LABELS = {
     "daily_stock_metrics": "個股籌碼指標",
 }
 
+# 資料瀏覽頁的欄位中文標籤（缺漏的欄位 fallback 原名）。
+# 各表共用同一個 dict：同名欄位語意一致（date、stock_id...）。
+_COLUMN_LABELS = {
+    # 共用
+    "date": "日期",
+    "stock_id": "代號",
+    "stock_name": "名稱",
+    "broker_name": "分點券商",
+    "collected_at": "收集時間",
+    "updated_at": "更新時間",
+    # raw_fx
+    "currency_pair": "幣別",
+    "close_16": "16:00 收盤",
+    "quote_0845": "08:45 報價",
+    "ny_close": "紐約盤收盤",
+    # raw_futures
+    "night_close": "夜盤收盤",
+    "night_volume": "夜盤成交量",
+    "spot_close": "加權指數收盤",
+    "oi_net_foreign": "外資未平倉淨額（口）",
+    "ex_dividend_points": "除息點數",
+    "ftse_tw_close": "富台指收盤",
+    "sp500_close": "S&P 500 收盤",
+    # raw_chip
+    "buy_volume": "買進（張）",
+    "sell_volume": "賣出（張）",
+    "net_volume": "買賣超（張）",
+    "close_price": "收盤價",
+    # raw_institutional（單位：元）
+    "foreign_buy": "外資買進（元）",
+    "foreign_sell": "外資賣出（元）",
+    "foreign_net": "外資買賣超（元）",
+    "trust_buy": "投信買進（元）",
+    "trust_sell": "投信賣出（元）",
+    "trust_net": "投信買賣超（元）",
+    "dealer_buy": "自營商買進（元）",
+    "dealer_sell": "自營商賣出（元）",
+    "dealer_net": "自營商買賣超（元）",
+    "total_net": "合計買賣超（元）",
+    # raw_index
+    "open": "開盤",
+    "high": "最高",
+    "low": "最低",
+    "close": "收盤",
+    # daily_metrics
+    "fx_delta_twd": "台幣升貶（Δ）",
+    "fx_delta_cny": "人民幣升貶（Δ）",
+    "fx_delta_krw": "韓元升貶（Δ）",
+    "fx_direction": "匯率方向",
+    "fx_asia_sync": "亞幣同步",
+    "fx_asia_detail": "亞幣明細",
+    "futures_spread": "期現價差",
+    "futures_spread_adjusted": "調整後價差",
+    "futures_volume_ratio": "夜盤量比",
+    "oi_delta": "未平倉增減（口）",
+    # daily_stock_metrics
+    "net_amount": "買賣超金額（元）",
+    "consecutive_days": "連續天數",
+    "price_vs_ma20": "價格 vs MA20（%）",
+    "price_zone": "價位區間",
+    "both_sides_flag": "兩面手法",
+    "broker_type": "分點屬性",
+}
+
 # raw_chip 內部標記列的顯示名稱
 _BROKER_MARKER_LABELS = {
     "__FOREIGN__": "外資合計（T86，單位：張）",
@@ -185,7 +249,10 @@ def data_page(request: Request, table: str = "daily_metrics",
         if row.get("broker_name") in _BROKER_MARKER_LABELS:
             row["broker_name"] = _BROKER_MARKER_LABELS[row["broker_name"]]
 
-    columns = list(rows[0].keys()) if rows else []
+    # (欄位原名, 中文標籤)；模板以原名取值、顯示中文標籤
+    columns = (
+        [(c, _COLUMN_LABELS.get(c, c)) for c in rows[0].keys()] if rows else []
+    )
     return templates.TemplateResponse(request, "data.html", {
         "active": "data", "table": table,
         "tables": [(t, _TABLE_LABELS.get(t, t)) for t in sorted(_QUERYABLE_TABLES)],

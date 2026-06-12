@@ -56,12 +56,12 @@ class TestCollectBrokerTrading:
         assert data is not None
         assert "2330" in data
         brokers = {b["broker_name"]: b for b in data["2330"]["brokers"]}
-        # 凱基-台北 兩列加總：buy 4000+1000, sell 2000+5000 → net -2000
-        assert brokers["凱基-台北"]["buy_volume"] == 5000
-        assert brokers["凱基-台北"]["sell_volume"] == 7000
-        assert brokers["凱基-台北"]["net_volume"] == -2000
-        assert brokers["兆豐-嘉義"]["net_volume"] == 7000
-        assert brokers["港商麥格理"]["net_volume"] == -12000
+        # 凱基-台北 兩列加總（股→張）：buy 4000+1000=5張, sell 2000+5000=7張 → net -2張
+        assert brokers["凱基-台北"]["buy_volume"] == 5
+        assert brokers["凱基-台北"]["sell_volume"] == 7
+        assert brokers["凱基-台北"]["net_volume"] == -2
+        assert brokers["兆豐-嘉義"]["net_volume"] == 7
+        assert brokers["港商麥格理"]["net_volume"] == -12
 
     def test_collect_api_error_returns_none(self, chip_collector, monkeypatch):
         """FinMind 回非 200 狀態（如等級不足）時回傳 None。"""
@@ -83,7 +83,7 @@ class TestCollectBrokerTrading:
     def test_aggregate_skips_malformed_rows(self, chip_collector):
         """格式錯誤的列被跳過，不影響其他列。"""
         rows = [
-            {"securities_trader": "凱基-台北", "buy": 1000, "sell": 500},
+            {"securities_trader": "凱基-台北", "buy": 3000, "sell": 1000},
             {"securities_trader": "壞資料", "buy": "not_a_number", "sell": 0},
             {"buy": 100, "sell": 0},  # 缺 securities_trader
         ]
@@ -91,7 +91,7 @@ class TestCollectBrokerTrading:
 
         assert len(result) == 1
         assert result[0]["broker_name"] == "凱基-台北"
-        assert result[0]["net_volume"] == 500
+        assert result[0]["net_volume"] == 2  # 2000 股 = 2 張
 
     def test_run_no_token(self, chip_collector, monkeypatch):
         """run() 在無 token 時回傳 dict 且 broker_trading=False。"""
@@ -115,7 +115,7 @@ class TestCollectBrokerTrading:
         ).fetchone()
         conn.close()
 
-        assert row == (5000, 7000, -2000)
+        assert row == (5, 7, -2)
 
 
 # ── CSV Import ──────────────────────────────────────────────────

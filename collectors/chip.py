@@ -100,7 +100,11 @@ class ChipCollector(BaseCollector):
 
     @staticmethod
     def aggregate_broker_rows(rows: list[dict]) -> list[dict]:
-        """把 FinMind 的逐價位明細彙總成每券商一筆 buy/sell/net（股數）。"""
+        """把 FinMind 的逐價位明細彙總成每券商一筆 buy/sell/net。
+
+        FinMind 的 buy/sell 單位是「股」，raw_chip 與 chip_metrics 以「張」計
+        （net_amount = net_volume × close_price × 1000），故彙總後除以 1000。
+        """
         agg: dict[str, dict] = {}
         for row in rows:
             try:
@@ -111,14 +115,18 @@ class ChipCollector(BaseCollector):
                 logger.warning("Skipping malformed FinMind row: %s — %s", row, e)
                 continue
             entry = agg.setdefault(
-                name, {"broker_name": name, "buy_volume": 0, "sell_volume": 0}
+                name, {"broker_name": name, "buy_shares": 0, "sell_shares": 0}
             )
-            entry["buy_volume"] += buy
-            entry["sell_volume"] += sell
+            entry["buy_shares"] += buy
+            entry["sell_shares"] += sell
 
         result = []
         for entry in agg.values():
-            entry["net_volume"] = entry["buy_volume"] - entry["sell_volume"]
+            buy_lots = round(entry.pop("buy_shares") / 1000)
+            sell_lots = round(entry.pop("sell_shares") / 1000)
+            entry["buy_volume"] = buy_lots
+            entry["sell_volume"] = sell_lots
+            entry["net_volume"] = buy_lots - sell_lots
             result.append(entry)
         return result
 

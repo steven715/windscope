@@ -198,7 +198,7 @@
 | 回傳格式 | JSON |
 | 更新時間 | 週一至五 21:00（FinMind 文件） |
 | 狀態 | 🔧 PARTIAL（程式已接通；需使用者取得 FinMind **Sponsor 等級** token 才會啟用） |
-| 備註 | 設定環境變數 `FINMIND_TOKEN` 後自動啟用，未設定時 `collect_broker_trading()` 回 None（after_close job 該步驟顯示失敗但不中斷）。回應每列為「同券商不同成交價位」，collector 會加總成每券商一筆 buy/sell/net（單位：股）。Schema 依官方文件（finmind.github.io/tutor/TaiwanMarket/Chip/）構造 fixture，2026-06-12 無付費 token 無法實抓驗證；等級不足時 API 回 `{"status": 400, "msg": "Your level is free..."}`，已處理。免費等級實測確認不含此 dataset。|
+| 備註 | 設定環境變數 `FINMIND_TOKEN` 後自動啟用，未設定時 `collect_broker_trading()` 回 None（after_close job 該步驟顯示失敗但不中斷）。回應每列為「同券商不同成交價位」且單位是「股」，collector 會加總成每券商一筆 buy/sell/net 並換算為「張」（÷1000，與 raw_chip 其他來源及 chip_metrics 的金額計算一致）。Schema 依官方文件（finmind.github.io/tutor/TaiwanMarket/Chip/）構造 fixture，2026-06-12 無付費 token 無法實抓驗證；等級不足時 API 回 `{"status": 400, "msg": "Your level is free..."}`，已處理。免費等級實測確認不含此 dataset。|
 
 ---
 

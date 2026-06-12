@@ -126,6 +126,16 @@ class TestPagesWithData:
         assert "每日衍生指標" in resp.text
         assert "三大法人（原始）" in resp.text
 
+    def test_data_page_chinese_column_headers(self, client_with_data):
+        """欄位名稱顯示中文（原名放 tooltip）。"""
+        resp = client_with_data.get("/data?table=raw_index")
+        assert "<th" in resp.text and "開盤" in resp.text and "收盤" in resp.text
+        assert 'title="open・點擊排序"' in resp.text
+
+        resp = client_with_data.get("/data?table=daily_metrics")
+        assert "台幣升貶（Δ）" in resp.text
+        assert "夜盤量比" in resp.text
+
 
 class TestApi:
     def test_api_signals(self, client_with_data):
