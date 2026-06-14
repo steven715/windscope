@@ -40,7 +40,7 @@ class TestCollectTWD:
 
         assert data is not None
         assert data["currency_pair"] == "USD/TWD"
-        assert data["rate"] == 31.27
+        assert data["rate"] == 31.545
 
     def test_parse_bot_csv_empty(self, fx_collector):
         """空 CSV 回傳 None。"""
@@ -57,7 +57,7 @@ class TestCollectTWD:
             data = fx_collector.collect_twd("2026-04-08")
 
         assert data is not None
-        assert data["rate"] == 31.27
+        assert data["rate"] == 31.545
 
     def test_collect_twd_failure(self, fx_collector):
         """HTTP 失敗回傳 None。"""

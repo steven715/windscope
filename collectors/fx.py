@@ -34,33 +34,41 @@ class FXCollector(BaseCollector):
         return self._parse_bot_csv(resp.text)
 
     def _parse_bot_csv(self, csv_text: str) -> dict | None:
-        """從台銀 CSV 解析 USD 即期買入匯率。"""
+        """從台銀 flcsv 解析 USD 即期買入匯率。
+
+        flcsv 表頭為「幣別,匯率,現金,即期,遠期10天…遠期180天」買入區塊，
+        後接相同欄位的賣出區塊，故「即期」出現兩次：第一個是即期買入。
+        回傳 {"currency_pair": "USD/TWD", "rate": float} 或 None。
+        """
+        # 台銀 CSV 帶 UTF-8 BOM，會讓表頭第一格變成 "﻿幣別"，
+        # 導致 "幣別" 比對失敗。先去除 BOM。
+        csv_text = csv_text.lstrip("﻿")
         reader = csv.reader(io.StringIO(csv_text))
         header = None
+        cur_idx = None
+        spot_idx = None
 
         for row in reader:
-            if not row:
-                continue
+            cleaned = [c.strip() for c in row]
             if header is None:
-                cleaned = [c.strip() for c in row]
-                if "幣別" in cleaned:
-                    header = cleaned
+                # 表頭需同時含「幣別」與「即期」才視為有效表頭（跳過註解行）
+                if "幣別" not in cleaned or "即期" not in cleaned:
+                    continue
+                header = cleaned
+                cur_idx = header.index("幣別")
+                spot_idx = header.index("即期")  # 第一個即期 = 即期買入
                 continue
 
-            if len(row) < len(header):
+            if len(cleaned) <= spot_idx or cleaned[cur_idx] != "USD":
                 continue
 
-            row_dict = {header[i]: row[i].strip() for i in range(len(header))}
-            currency = row_dict.get("幣別", "")
-
-            if currency == "USD":
-                rate_str = row_dict.get("即期買入", "")
-                if not rate_str:
-                    logger.warning("BOT CSV: USD found but no 即期買入 value")
-                    return None
-                rate = float(rate_str)
-                logger.info("BOT CSV parsed: USD/TWD=%.4f", rate)
-                return {"currency_pair": "USD/TWD", "rate": rate}
+            rate_str = cleaned[spot_idx]
+            if not rate_str:
+                logger.warning("BOT CSV: USD found but no 即期 value")
+                return None
+            rate = float(rate_str)
+            logger.info("BOT CSV parsed: USD/TWD=%.4f", rate)
+            return {"currency_pair": "USD/TWD", "rate": rate}
 
         logger.warning("BOT CSV: USD row not found")
         return None
