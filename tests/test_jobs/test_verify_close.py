@@ -4,7 +4,7 @@ import sqlite3
 from unittest.mock import patch
 
 from db.schema import create_all_tables
-from jobs.verify_close import run_verify_close
+from jobs.verify_close import _ensure_prev_index_baseline, run_verify_close
 
 
 def _setup_db(tmp_path) -> str:
@@ -41,7 +41,7 @@ def test_full_flow_hit(tmp_path):
 
 
 def test_collector_failure_does_not_crash(tmp_path):
-    """OHLC 收集失敗 → verify 也失敗，但 job 正常回傳 failed。"""
+    """OHLC 收集失敗 → verify 也失敗，但 job 不崩潰、不寫驗證紀錄。"""
     db_path = _setup_db(tmp_path)
 
     with patch(
@@ -50,8 +50,10 @@ def test_collector_failure_does_not_crash(tmp_path):
     ):
         result = run_verify_close("2026-06-12", db_path=db_path)
 
-    assert result["status"] == "failed"
+    # 前日基準(6/11)本來就在 → prev_index_baseline 成功，整體為 partial
+    assert result["status"] == "partial"
     assert result["results"]["index_ohlc"] is False
+    assert result["results"]["verify"] is False
     assert result["verification"] is None
     assert len(result["errors"]) > 0
 
@@ -82,3 +84,74 @@ def test_skips_non_trading_day(tmp_path):
     result = run_verify_close("2026-06-13", db_path=str(tmp_path / "t.db"))  # 週六
     assert result["status"] == "skipped"
     assert result["results"] == {}
+
+
+def _db_prev_marker(tmp_path, with_prev_index: bool) -> str:
+    """建立 DB：前一交易日 marker（raw_futures 6/12），可選是否含 raw_index 基準。"""
+    db_path = str(tmp_path / "b.db")
+    conn = sqlite3.connect(db_path)
+    create_all_tables(conn)
+    conn.execute("INSERT INTO raw_futures (date) VALUES ('2026-06-12')")
+    if with_prev_index:
+        conn.execute(
+            "INSERT INTO raw_index (date, open, close) "
+            "VALUES ('2026-06-12', 43587, 44169.04)"
+        )
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+class TestEnsurePrevBaseline:
+    def test_present_skips_backfill(self, tmp_path):
+        """前日基準已存在 → 回 True 且不打網路。"""
+        db_path = _db_prev_marker(tmp_path, with_prev_index=True)
+        with patch("collectors.twse.TWSECollector.collect_index_ohlc") as m:
+            ok = _ensure_prev_index_baseline("2026-06-15", db_path)
+        assert ok is True
+        m.assert_not_called()
+
+    def test_backfills_when_missing(self, tmp_path):
+        """前日基準缺失 → 從 MI_5MINS_HIST 補上並寫入 raw_index。"""
+        db_path = _db_prev_marker(tmp_path, with_prev_index=False)
+        ohlc = {"open": 43587.0, "high": 44798.0, "low": 43587.0, "close": 44169.04}
+        with patch("collectors.twse.TWSECollector.collect_index_ohlc",
+                   return_value=ohlc) as m:
+            ok = _ensure_prev_index_baseline("2026-06-15", db_path)
+        assert ok is True
+        m.assert_called_once_with("2026-06-12")
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT close FROM raw_index WHERE date = '2026-06-12'").fetchone()
+        conn.close()
+        assert row[0] == 44169.04
+
+    def test_returns_false_when_backfill_unavailable(self, tmp_path):
+        """前日缺失且補不到（假日/無資料）→ 回 False，不報錯。"""
+        db_path = _db_prev_marker(tmp_path, with_prev_index=False)
+        with patch("collectors.twse.TWSECollector.collect_index_ohlc",
+                   return_value=None):
+            ok = _ensure_prev_index_baseline("2026-06-15", db_path)
+        assert ok is False
+
+
+def test_full_flow_backfills_prev_then_completes(tmp_path):
+    """重現 6/15 情境：前日指數缺失時自動補齊後仍能完成驗證。"""
+    db_path = str(tmp_path / "t.db")
+    conn = sqlite3.connect(db_path)
+    create_all_tables(conn)
+    conn.execute("INSERT INTO raw_futures (date) VALUES ('2026-06-12')")  # 無 raw_index
+    conn.execute(
+        "INSERT INTO signals (date, direction, confidence) "
+        "VALUES ('2026-06-15', 'neutral', 2)"
+    )
+    conn.commit()
+    conn.close()
+
+    ohlc = {"open": 44447.0, "high": 45483.0, "low": 44447.0, "close": 45396.0}
+    with patch("collectors.twse.TWSECollector.collect_index_ohlc", return_value=ohlc):
+        result = run_verify_close("2026-06-15", db_path=db_path)
+
+    assert result["results"]["prev_index_baseline"] is True
+    assert result["status"] == "completed"
+    assert result["verification"] is not None

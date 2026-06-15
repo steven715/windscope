@@ -35,6 +35,14 @@ def run_verify_close(date: str, db_path: str | None = None) -> dict:
     if err:
         errors.append(err)
 
+    # 1b. 確保前一交易日的指數基準存在：缺則從 MI_5MINS_HIST 補。
+    #     避免單日驗證漏跑造成隔日驗證因「無前日收盤」連環失敗。
+    ok, err = run_step("prev_index_baseline",
+                       lambda: _ensure_prev_index_baseline(date, db_path))
+    results["prev_index_baseline"] = ok
+    if err:
+        errors.append(err)
+
     # 2. 驗證訊號
     with get_connection(db_path) as conn:
         ok, err = run_step("verify", lambda: _verify(date, conn))
@@ -66,6 +74,34 @@ def _collect_index_ohlc(date: str, db_path: str | None) -> bool:
     if data is None:
         return False
     c.save_index_ohlc(date, data)
+    return True
+
+
+def _ensure_prev_index_baseline(date: str, db_path: str | None) -> bool:
+    """確保前一交易日的 raw_index 收盤基準存在，缺則從 MI_5MINS_HIST 補。
+
+    回傳 True：基準已存在或補齊成功。False：無前一交易日或補不到。
+    """
+    from collectors.twse import TWSECollector
+    from utils.trading_calendar import get_previous_trading_day
+
+    with get_connection(db_path) as conn:
+        prev_day = get_previous_trading_day(date, conn)
+        if prev_day is None:
+            return False
+        row = conn.execute(
+            "SELECT close FROM raw_index WHERE date = ?", (prev_day,)
+        ).fetchone()
+        if row is not None and row[0] is not None:
+            return True  # 基準已存在，免補
+
+    c = TWSECollector(db_path=db_path)
+    data = c.collect_index_ohlc(prev_day)
+    if data is None:
+        logger.warning("_ensure_prev_index_baseline: 無法回補 %s 指數基準", prev_day)
+        return False
+    c.save_index_ohlc(prev_day, data)
+    logger.info("_ensure_prev_index_baseline: 已回補 raw_index %s", prev_day)
     return True
 
 
