@@ -83,24 +83,37 @@ def _run_after_close(db_path: str | None) -> dict:
 JOB_DEFS: dict[str, dict] = {
     "after_night": {
         "name": "夜盤後收集 (週二~六)",
+        "desc": "收夜盤台指期收盤價與成交量（期交所）、S&P 500 收盤（Yahoo ^GSPC），"
+                "計算期貨衍生指標：台指夜盤 vs 現貨價差、除息點數調整、夜盤量比（對近 5 日均量）。"
+                "夜盤凌晨 5:00 收盤歸屬當日，故週二~六執行。",
         "func": _run_after_night,
         "days": "tue-sat",
         "default": settings.SCHEDULE_AFTER_NIGHT,
     },
     "before_open": {
         "name": "開盤前收集+訊號判斷 (週一~五)",
+        "desc": "收開盤前即時匯率：USD/TWD 即期（台銀）、USD/CNY、USD/KRW（Yahoo），"
+                "計算台幣升貶幅與亞幣同步方向；合成當日市場訊號（偏多/偏空/中性＋信心 1–5＋理由，"
+                "記 rule_version）與 watchlist 個股觀察訊號，產出開盤前情報摘要。",
         "func": _run_before_open,
         "days": "mon-fri",
         "default": settings.SCHEDULE_BEFORE_OPEN,
     },
     "verify_close": {
         "name": "收盤驗證 (週一~五)",
+        "desc": "收當日加權指數開高低收（證交所），以雙基準三分類比對早上的訊號是否命中："
+                "主基準＝當日收盤漲跌、輔基準＝開盤跳空（漲/跌/平以 ±0.3% 為界），"
+                "記錄命中與否並累積命中率統計。",
         "func": _run_verify_close,
         "days": "mon-fri",
         "default": settings.SCHEDULE_VERIFY_CLOSE,
     },
     "after_close": {
         "name": "收盤後收集 (週一~五)",
+        "desc": "收當日收盤後完整資料：加權指數收盤、三大法人與外資個股買賣超、watchlist 個股收盤、"
+                "除息預估點數（以上證交所）、外資期貨未平倉（期交所）、USD/TWD 16:00 收盤"
+                "（台銀，作為隔日開盤前匯率票的比較基準）、分點籌碼（FinMind，需 token），"
+                "並計算籌碼衍生指標（買賣超金額、連續天數、MA20、價格區間）。",
         "func": _run_after_close,
         "days": "mon-fri",
         "default": settings.SCHEDULE_AFTER_CLOSE,
@@ -212,6 +225,7 @@ def get_jobs_info(scheduler: BackgroundScheduler | None,
         jobs.append({
             "id": job_id,
             "name": d["name"],
+            "desc": d.get("desc", ""),
             "time_hhmm": times[job_id],
             "default_time": d["default"],
             "next_run": next_run,

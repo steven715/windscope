@@ -23,7 +23,12 @@
     {% for j in jobs %}
     <tr>
       <td><span class="tag">{{ j.id }}</span></td>
-      <td>{{ j.name }}</td>
+      <td style="max-width:420px">
+        <div>{{ j.name }}</div>
+        {% if j.desc %}
+        <div class="dim" style="font-size:12px; line-height:1.5; margin-top:4px">{{ j.desc }}</div>
+        {% endif %}
+      </td>
       <td>
         <form method="post" action="/scheduler/time" style="display:flex; gap:8px; align-items:center; margin:0">
           <input type="hidden" name="job_id" value="{{ j.id }}">
