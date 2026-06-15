@@ -95,3 +95,17 @@ def query_stats(request: Request, last_n: int = 20) -> dict:
     """近 N 日命中率統計。"""
     with get_connection(request.app.state.db_path) as conn:
         return get_verification_stats(conn, last_n=last_n)
+
+
+@router.get("/live")
+def query_live(request: Request) -> dict:
+    """盤中即時驗證：當日訊號 + 即時加權指數雙基準比對（供 /live 頁輪詢）。"""
+    from datetime import datetime
+
+    from integration.live_verification import get_live_verification
+
+    date = datetime.now().strftime("%Y-%m-%d")
+    with get_connection(request.app.state.db_path) as conn:
+        data = get_live_verification(date, conn)
+    data["as_of"] = datetime.now().strftime("%H:%M:%S")
+    return data

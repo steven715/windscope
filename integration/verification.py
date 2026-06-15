@@ -26,6 +26,33 @@ def _classify_change(pct: float) -> str:
         return "flat"
 
 
+def classify_against_benchmarks(
+    predicted_direction: str | None,
+    prev_close: float,
+    open_price: float,
+    current_price: float,
+) -> dict:
+    """以即時或收盤價對雙基準做三分類，回傳各 pct/class 與命中旗標。
+
+    current_price 盤中傳即時成交價、收盤後傳當日收盤價，邏輯一致。
+    讓盤中即時驗證與收盤驗證共用同一份門檻，結果保證收斂一致。
+    """
+    open_gap_pct = round((open_price - prev_close) / prev_close * 100, 4)
+    day_change_pct = round((current_price - prev_close) / prev_close * 100, 4)
+    open_gap_class = _classify_change(open_gap_pct)
+    day_change_class = _classify_change(day_change_pct)
+    predicted_class = _DIRECTION_TO_CLASS.get(predicted_direction)
+    return {
+        "open_gap_pct": open_gap_pct,
+        "day_change_pct": day_change_pct,
+        "open_gap_class": open_gap_class,
+        "day_change_class": day_change_class,
+        "predicted_class": predicted_class,
+        "hit_day": 1 if predicted_class == day_change_class else 0,
+        "hit_open": 1 if predicted_class == open_gap_class else 0,
+    }
+
+
 def verify_signal(date: str, conn: sqlite3.Connection) -> dict | None:
     """驗證 date 的訊號：比對 raw_index 實際走勢，寫入 verifications。
 
@@ -60,15 +87,14 @@ def verify_signal(date: str, conn: sqlite3.Connection) -> dict | None:
         return None
     prev_close = prev_row[0]
 
-    open_gap_pct = round((open_price - prev_close) / prev_close * 100, 4)
-    day_change_pct = round((close_price - prev_close) / prev_close * 100, 4)
-
-    open_gap_class = _classify_change(open_gap_pct)
-    day_change_class = _classify_change(day_change_pct)
-    predicted_class = _DIRECTION_TO_CLASS.get(predicted_direction)
-
-    hit_day = 1 if predicted_class == day_change_class else 0
-    hit_open = 1 if predicted_class == open_gap_class else 0
+    c = classify_against_benchmarks(
+        predicted_direction, prev_close, open_price, close_price)
+    open_gap_pct = c["open_gap_pct"]
+    day_change_pct = c["day_change_pct"]
+    open_gap_class = c["open_gap_class"]
+    day_change_class = c["day_change_class"]
+    hit_day = c["hit_day"]
+    hit_open = c["hit_open"]
 
     result = {
         "date": date,

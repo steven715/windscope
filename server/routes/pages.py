@@ -127,6 +127,25 @@ def _fill_stock_names(conn, rows: list[dict]) -> None:
             row["stock_name"] = info.get(row["stock_id"], "")
 
 
+@router.get("/live", response_class=HTMLResponse)
+def live_page(request: Request):
+    """盤中即時驗證：用即時加權指數對早上訊號做雙基準比對，JS 輪詢自動更新。"""
+    from datetime import datetime
+
+    from integration.live_verification import get_live_verification
+
+    date = datetime.now().strftime("%Y-%m-%d")
+    with get_connection(request.app.state.db_path) as conn:
+        d = get_live_verification(date, conn)
+    d["as_of"] = datetime.now().strftime("%H:%M:%S")
+    if d.get("has_signal"):
+        d["direction_label"] = _DIRECTION_LABELS.get(
+            d["predicted_direction"], d["predicted_direction"])
+    return templates.TemplateResponse(request, "live.html", {
+        "active": "live", "d": d, "class_labels": _CLASS_LABELS,
+    })
+
+
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     """今日情報：最新訊號 + 指標卡片 + 命中率 + 最近驗證。"""

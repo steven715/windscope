@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}盤中即時驗證{% endblock %}
+{% block content %}
+<h2>盤中即時驗證 <span id="market-badge" class="tag">—</span></h2>
+
+{% if not d.has_signal %}
+<div class="panel empty">
+  今日（{{ d.date }}）尚無訊號。開盤前 08:50 產出訊號後，此頁才會即時比對盤中走勢是否走對。
+</div>
+{% else %}
+<div class="banner {{ d.predicted_direction }}">
+  <div>
+    <div class="big">{{ d.direction_label }}</div>
+    <div class="dim">早上 08:50 判斷 · 信心 {{ d.confidence }}/5</div>
+  </div>
+  {% if d.reasons %}
+  <ul>{% for r in d.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+
+<div class="cards">
+  <div class="card"><div class="ct">加權指數即時</div><div class="cv" id="price">—</div></div>
+  <div class="card"><div class="ct">即時漲跌（vs 昨收）</div><div class="cv" id="daychg">—</div></div>
+  <div class="card"><div class="ct">開盤跳空</div><div class="cv" id="opengap">—</div></div>
+  <div class="card"><div class="ct">目前驗證（主基準：當日漲跌）</div><div class="cv" id="verdict">—</div></div>
+</div>
+
+<div class="panel" style="max-width:520px">
+  <table>
+    <tr><th>昨收</th><td id="prevclose">—</td><th>開盤</th><td id="open">—</td></tr>
+    <tr><th>最高</th><td id="high">—</td><th>最低</th><td id="low">—</td></tr>
+  </table>
+  <div class="dim" id="asof" style="margin-top:8px">載入中…</div>
+</div>
+<div class="dim">
+  每 15 秒自動更新。主基準＝當日漲跌（收盤定案，盤中即時推估）、輔基準＝開盤跳空；
+  漲/跌/平以 ±0.3% 為界，與 13:40 收盤驗證同一套門檻。
+  資料來源：證交所 MIS 即時行情（約 5–20 秒一檔快照），唯讀、不寫入資料庫。
+</div>
+
+<script>
+var CLASS_LABEL = {up: "漲", down: "跌", flat: "平"};
+
+function fmtPct(p) { return (p >= 0 ? "+" : "") + p.toFixed(2) + "%"; }
+function clsColor(c) { return c === "up" ? "up" : (c === "down" ? "down" : "flat"); }
+function setText(id, t) { var e = document.getElementById(id); if (e) e.textContent = t; }
+function setColored(id, t, cls) {
+  var e = document.getElementById(id);
+  if (e) { e.textContent = t; e.className = "cv " + cls; }
+}
+
+function render(d) {
+  var badge = document.getElementById("market-badge");
+  if (badge) badge.textContent = d.market_open ? "● 盤中" : "已收盤 / 非交易時段";
+  if (!d.has_signal) return;
+
+  var asof = document.getElementById("asof");
+  if (d.quote) {
+    var q = d.quote;
+    setText("price", q.price.toFixed(2));
+    setColored("daychg", fmtPct(d.day_change_pct), clsColor(d.day_change_class));
+    setColored("opengap", fmtPct(d.open_gap_pct), clsColor(d.open_gap_class));
+    setText("prevclose", q.prev_close.toFixed(2));
+    setText("open", q.open != null ? q.open.toFixed(2) : "—");
+    setText("high", q.high != null ? q.high.toFixed(2) : "—");
+    setText("low", q.low != null ? q.low.toFixed(2) : "—");
+
+    var v = document.getElementById("verdict");
+    if (v) {
+      v.textContent = (d.hit_day_now ? "✓ 符合" : "✗ 背離")
+        + "（實際" + (CLASS_LABEL[d.day_change_class] || "?") + "）";
+      v.className = "cv " + (d.hit_day_now ? "hit" : "miss");
+    }
+    asof.textContent = "更新時間 " + d.as_of
+      + (d.market_open ? "" : "（已收盤，顯示最後一筆狀態）");
+  } else {
+    asof.textContent = "即時行情暫時取不到（" + (d.as_of || "") + "），下次自動重試";
+  }
+}
+
+function poll() {
+  fetch("/api/live", {headers: {"ngrok-skip-browser-warning": "1"}})
+    .then(function (r) { return r.json(); })
+    .then(render)
+    .catch(function () { /* 暫時失敗，下次再試 */ });
+}
+poll();
+setInterval(poll, 15000);
+</script>
+{% endif %}
+{% endblock %}
