@@ -22,10 +22,8 @@ _QUERYABLE_TABLES = {
 _MAX_ROWS = 500
 
 
-def _query_by_date_range(conn: sqlite3.Connection, table: str,
-                         date_from: str | None, date_to: str | None) -> list[dict]:
-    """以日期區間查表，回傳 dict 列表（新到舊，上限 _MAX_ROWS）。"""
-    sql = f"SELECT * FROM {table}"  # table 已通過白名單檢查
+def _date_conditions(date_from: str | None, date_to: str | None):
+    """組出 date 區間的 WHERE 片段與參數。"""
     conditions = []
     params: list[str] = []
     if date_from:
@@ -34,24 +32,42 @@ def _query_by_date_range(conn: sqlite3.Connection, table: str,
     if date_to:
         conditions.append("date <= ?")
         params.append(date_to)
-    if conditions:
-        sql += " WHERE " + " AND ".join(conditions)
-    sql += f" ORDER BY date DESC LIMIT {_MAX_ROWS}"
+    where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+    return where, params
 
-    cursor = conn.execute(sql, params)
+
+def _query_by_date_range(conn: sqlite3.Connection, table: str,
+                         date_from: str | None, date_to: str | None,
+                         limit: int = _MAX_ROWS, offset: int = 0) -> list[dict]:
+    """以日期區間查表，回傳 dict 列表（新到舊）。支援 limit/offset 分頁。"""
+    where, params = _date_conditions(date_from, date_to)
+    sql = f"SELECT * FROM {table}{where} ORDER BY date DESC LIMIT ? OFFSET ?"
+    cursor = conn.execute(sql, [*params, limit, offset])
     columns = [c[0] for c in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 
+def _count_by_date_range(conn: sqlite3.Connection, table: str,
+                         date_from: str | None, date_to: str | None) -> int:
+    """回傳符合日期區間的總筆數（供分頁計算頁數）。"""
+    where, params = _date_conditions(date_from, date_to)
+    return conn.execute(f"SELECT COUNT(*) FROM {table}{where}", params).fetchone()[0]
+
+
 @router.get("/raw/{table}")
 def query_raw(table: str, request: Request,
-              date_from: str | None = None, date_to: str | None = None) -> dict:
-    """查詢原始資料表（白名單內），可選日期區間。"""
+              date_from: str | None = None, date_to: str | None = None,
+              limit: int = 100, offset: int = 0) -> dict:
+    """查詢原始資料表（白名單內），可選日期區間。limit/offset 分頁，回傳 total。"""
     if table not in _QUERYABLE_TABLES:
         raise HTTPException(status_code=404, detail=f"unknown table: {table}")
+    limit = max(1, min(limit, _MAX_ROWS))
+    offset = max(0, offset)
     with get_connection(request.app.state.db_path) as conn:
-        rows = _query_by_date_range(conn, table, date_from, date_to)
-    return {"table": table, "count": len(rows), "rows": rows}
+        total = _count_by_date_range(conn, table, date_from, date_to)
+        rows = _query_by_date_range(conn, table, date_from, date_to, limit, offset)
+    return {"table": table, "total": total, "count": len(rows),
+            "limit": limit, "offset": offset, "rows": rows}
 
 
 # signals/stock_signals/verifications 屬於判斷紀錄，各自有專屬 endpoint，
@@ -99,13 +115,11 @@ def query_stats(request: Request, last_n: int = 20) -> dict:
 
 @router.get("/live")
 def query_live(request: Request) -> dict:
-    """盤中即時驗證：當日訊號 + 即時加權指數雙基準比對（供 /live 頁輪詢）。"""
+    """盤中即時驗證：當日訊號 + 即時加權指數雙基準比對。讀背景快取，瞬間返回。"""
     from datetime import datetime
 
     from integration.live_verification import get_live_verification
 
     date = datetime.now().strftime("%Y-%m-%d")
     with get_connection(request.app.state.db_path) as conn:
-        data = get_live_verification(date, conn)
-    data["as_of"] = datetime.now().strftime("%H:%M:%S")
-    return data
+        return get_live_verification(date, conn)

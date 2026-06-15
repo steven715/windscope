@@ -84,6 +84,10 @@
   .rate-big { font-size: 28px; font-weight: bold; color: var(--green); }
   .tag { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 10px;
          background: var(--panel2); border: 1px solid var(--border); color: var(--dim); }
+  .pgbtn { display: inline-block; padding: 6px 12px; border: 1px solid var(--border);
+           border-radius: 8px; color: var(--text); text-decoration: none; font-size: 13px;
+           background: var(--panel2); }
+  .pgbtn:hover { border-color: var(--accent); color: var(--accent); }
   table.sortable thead th { cursor: pointer; user-select: none; white-space: nowrap; }
   table.sortable thead th:hover { color: var(--text); }
   table.sortable thead th.sort-asc::after { content: " ▲"; color: var(--accent); font-size: 10px; }
@@ -109,6 +113,9 @@
     .main { padding: 14px; }
     h2 { font-size: 17px; }
     .panel { overflow-x: auto; }
+    /* 資料表格（sortable）改成水平捲動：欄位不換行、不被壓縮，撐寬由 .panel 捲動 */
+    table.sortable { width: auto; min-width: 100%; }
+    table.sortable th, table.sortable td { white-space: nowrap; }
     .card { min-width: 130px; }
     .cards { gap: 8px; }
     .banner { flex-wrap: wrap; }

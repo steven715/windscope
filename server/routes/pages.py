@@ -9,12 +9,17 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from config import settings
 from db.connection import get_connection
 from integration.verification import (
     get_recent_verifications,
     get_verification_stats,
 )
-from server.routes.api import _QUERYABLE_TABLES, _query_by_date_range
+from server.routes.api import (
+    _QUERYABLE_TABLES,
+    _count_by_date_range,
+    _query_by_date_range,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +202,6 @@ def live_page(request: Request):
     date = datetime.now().strftime("%Y-%m-%d")
     with get_connection(request.app.state.db_path) as conn:
         d = get_live_verification(date, conn)
-    d["as_of"] = datetime.now().strftime("%H:%M:%S")
     if d.get("has_signal"):
         d["direction_label"] = _DIRECTION_LABELS.get(
             d["predicted_direction"], d["predicted_direction"])
@@ -313,14 +317,21 @@ def signals_page(request: Request, date_from: str | None = None,
 
 @router.get("/data", response_class=HTMLResponse)
 def data_page(request: Request, table: str = "daily_metrics",
-              date_from: str | None = None, date_to: str | None = None):
-    """資料瀏覽：白名單內的表 + 日期區間，通用表格渲染。"""
+              date_from: str | None = None, date_to: str | None = None,
+              page: int = 1):
+    """資料瀏覽：白名單內的表 + 日期區間，server-side 分頁（每頁一次只拉一頁）。"""
     db_path = request.app.state.db_path
     if table not in _QUERYABLE_TABLES:
         table = "daily_metrics"
 
+    page_size = settings.DATA_PAGE_SIZE
     with get_connection(db_path) as conn:
-        rows = _query_by_date_range(conn, table, date_from, date_to)
+        total = _count_by_date_range(conn, table, date_from, date_to)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = max(1, min(page, total_pages))
+        offset = (page - 1) * page_size
+        rows = _query_by_date_range(conn, table, date_from, date_to,
+                                    limit=page_size, offset=offset)
         _fill_stock_names(conn, rows)
 
     # raw_chip 的內部標記改成人話
@@ -339,6 +350,8 @@ def data_page(request: Request, table: str = "daily_metrics",
         "table_note": _TABLE_NOTES.get(table),
         "columns": columns, "rows": rows,
         "date_from": date_from or "", "date_to": date_to or "",
+        "page": page, "total_pages": total_pages, "total": total,
+        "row_start": offset + 1 if rows else 0, "row_end": offset + len(rows),
     })
 
 

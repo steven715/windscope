@@ -61,6 +61,11 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 # === Server ===
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
+# 盤中即時行情背景刷新間隔（秒）：背景排程每隔此秒數抓一次 MIS 存入記憶體快取，
+# 頁面/API 只讀快取不阻塞。
+LIVE_REFRESH_SECONDS = 12
+# 資料瀏覽頁每頁筆數（server-side 分頁，不一次拉全部）
+DATA_PAGE_SIZE = 50
 SCHEDULE_AFTER_NIGHT = "05:30"
 SCHEDULE_BEFORE_OPEN = "08:50"
 SCHEDULE_VERIFY_CLOSE = "13:40"

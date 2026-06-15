@@ -72,15 +72,27 @@ class TestGetLiveVerification:
         d = get_live_verification("2026-06-16", db_with_signal, quote=_quote(44500.0))
         assert d["has_signal"] is False
 
-    def test_quote_unavailable(self, db_with_signal):
-        """MIS 抓不到（quote=None 注入無法觸發 fetch，故顯式傳 None 走 fetch 分支）。"""
-        # 直接驗證有訊號但行情缺失時的結構：用 monkeypatch 讓 collect 回 None
-        from unittest.mock import patch
-        with patch("integration.live_verification.MISCollector") as mock_cls:
-            mock_cls.return_value.collect_index.return_value = None
-            d = get_live_verification("2026-06-15", db_with_signal)
+    def test_quote_unavailable_when_cache_empty(self, db_with_signal):
+        """快取尚無報價時：有訊號但 quote 為 None，不打網路。"""
+        from integration import live_tracker
+        live_tracker._reset_cache()
+        d = get_live_verification("2026-06-15", db_with_signal)  # 不注入 quote → 讀快取
         assert d["has_signal"] is True
         assert d["quote"] is None
+        assert d["as_of"] is None
+
+    def test_reads_from_cache_when_no_quote_injected(self, db_with_signal):
+        """未注入 quote 時，從背景快取讀取報價。"""
+        from integration import live_tracker
+        live_tracker._cache["quote"] = _quote(44500.0)
+        live_tracker._cache["as_of"] = "10:30:00"
+        try:
+            d = get_live_verification("2026-06-15", db_with_signal)
+            assert d["quote"]["price"] == 44500.0
+            assert d["as_of"] == "10:30:00"
+            assert d["hit_day_now"] is True
+        finally:
+            live_tracker._reset_cache()
 
     def test_open_fallback_to_price_when_missing(self, db_with_signal):
         """開盤價缺失時 fallback 即時價，不丟例外。"""

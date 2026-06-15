@@ -71,7 +71,7 @@ function render(d) {
         + "（實際" + (CLASS_LABEL[d.day_change_class] || "?") + "）";
       v.className = "cv " + (d.hit_day_now ? "hit" : "miss");
     }
-    asof.textContent = "更新時間 " + d.as_of
+    asof.textContent = "更新時間 " + (d.as_of || "—")
       + (d.market_open ? "" : "（已收盤，顯示最後一筆狀態）");
   } else {
     asof.textContent = "即時行情暫時取不到（" + (d.as_of || "") + "），下次自動重試";

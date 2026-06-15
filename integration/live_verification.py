@@ -9,22 +9,11 @@ import logging
 import sqlite3
 from datetime import datetime
 
-from collectors.mis import MISCollector
+# is_market_open 從 live_tracker 重新匯出，保持既有 import 路徑相容
+from integration.live_tracker import get_cached_quote, is_market_open  # noqa: F401
 from integration.verification import classify_against_benchmarks
 
 logger = logging.getLogger(__name__)
-
-# 台股現貨交易時段（含試撮前後略寬鬆）
-_TRADING_START = (9, 0)
-_TRADING_END = (13, 30)
-
-
-def is_market_open(now: datetime | None = None) -> bool:
-    """是否在台股現貨交易時段內（交易日 09:00–13:30）。"""
-    now = now or datetime.now()
-    if now.weekday() >= 5:
-        return False
-    return _TRADING_START <= (now.hour, now.minute) <= _TRADING_END
 
 
 def get_live_verification(
@@ -35,8 +24,8 @@ def get_live_verification(
 ) -> dict:
     """回傳 date 當日盤中即時驗證資料。
 
-    quote 可注入（測試用）；未提供時向 MIS 抓加權指數 t00。
-    無當日訊號或 MIS 失敗時回退化結果（has_signal / quote 為對應狀態）。
+    quote 可注入（測試用）；未提供時讀背景快取（不在請求路徑上打 MIS）。
+    無當日訊號或無快取報價時回退化結果（has_signal / quote 為對應狀態）。
     """
     market_open = is_market_open(now)
 
@@ -50,6 +39,10 @@ def get_live_verification(
     direction, confidence, reasons_json = row
     reasons = json.loads(reasons_json) if reasons_json else []
 
+    as_of = None
+    if quote is None:
+        quote, as_of = get_cached_quote()
+
     base = {
         "date": date,
         "has_signal": True,
@@ -57,10 +50,9 @@ def get_live_verification(
         "confidence": confidence,
         "reasons": reasons,
         "market_open": market_open,
+        "as_of": as_of,
     }
 
-    if quote is None:
-        quote = MISCollector().collect_index("t00")
     if quote is None:
         return {**base, "quote": None}
 

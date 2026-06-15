@@ -11,6 +11,7 @@ from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from config import settings
 from db.connection import get_connection
@@ -206,6 +207,18 @@ def create_scheduler(db_path: str | None = None) -> BackgroundScheduler:
             CronTrigger(day_of_week=d["days"], hour=h, minute=m),
             args=[db_path], id=job_id, name=d["name"],
         )
+
+    # 盤中即時行情背景刷新：每 N 秒抓 MIS 存入記憶體快取，與使用者請求解耦。
+    # 非刷新時段（盤前盤後）refresh_live_quote 內部自動 no-op。
+    from integration.live_tracker import refresh_live_quote
+
+    scheduler.add_job(
+        refresh_live_quote,
+        IntervalTrigger(seconds=settings.LIVE_REFRESH_SECONDS),
+        id="live_refresh", name="盤中即時行情刷新",
+        max_instances=1, coalesce=True, replace_existing=True,
+        next_run_time=datetime.now(),
+    )
 
     logger.info("Scheduler created with %d jobs", len(scheduler.get_jobs()))
     return scheduler

@@ -35,8 +35,24 @@
   </tbody>
 </table>
 <div class="dim" style="margin-top:8px">
-  顯示 <span id="shown-count">{{ rows | length }}</span> / {{ rows | length }} 筆（查詢上限 500）・點表頭可排序
+  第 {{ row_start }}–{{ row_end }} 筆，共 {{ total }} 筆
+  （顯示中 <span id="shown-count">{{ rows | length }}</span>）・點表頭可排序、過濾僅作用於本頁
 </div>
+
+{% if total_pages > 1 %}
+{% set qs = "&table=" ~ table ~ ("&date_from=" ~ date_from if date_from else "") ~ ("&date_to=" ~ date_to if date_to else "") %}
+<div class="pager" style="display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap">
+  {% if page > 1 %}
+  <a class="pgbtn" href="/data?page=1{{ qs }}">« 第一頁</a>
+  <a class="pgbtn" href="/data?page={{ page - 1 }}{{ qs }}">‹ 上一頁</a>
+  {% endif %}
+  <span class="dim">第 {{ page }} / {{ total_pages }} 頁</span>
+  {% if page < total_pages %}
+  <a class="pgbtn" href="/data?page={{ page + 1 }}{{ qs }}">下一頁 ›</a>
+  <a class="pgbtn" href="/data?page={{ total_pages }}{{ qs }}">最後頁 »</a>
+  {% endif %}
+</div>
+{% endif %}
 </div>
 {% else %}
 <div class="panel empty">{{ table_label }}（{{ table }}）查無資料</div>

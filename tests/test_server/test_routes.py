@@ -222,12 +222,15 @@ class TestDataPageChipFriendly:
 
 
 class TestScheduler:
-    def test_create_scheduler_has_four_jobs(self):
+    def test_create_scheduler_has_daily_jobs_plus_live_refresh(self):
         from server.scheduler import create_scheduler
 
         scheduler = create_scheduler(db_path=":memory:")
         jobs = {j.id for j in scheduler.get_jobs()}
-        assert jobs == {"after_night", "before_open", "verify_close", "after_close"}
+        # 四個每日 job + 盤中即時行情背景刷新
+        assert {"after_night", "before_open", "verify_close",
+                "after_close"}.issubset(jobs)
+        assert "live_refresh" in jobs
 
     def test_get_jobs_info_none_scheduler_lists_config(self, tmp_path):
         """scheduler 未啟用時仍列出四個 job 的設定（無 next_run）。"""
@@ -359,6 +362,49 @@ class TestTableUX:
         resp = client_with_data.get("/signals")
         assert 'class="sortable"' in resp.text
         assert "data-filter" in resp.text
+
+
+class TestPagination:
+    @staticmethod
+    def _seed(tmp_path, n):
+        """建立含 n 筆 raw_index 的 DB，回傳 TestClient。"""
+        from datetime import datetime, timedelta
+        db_path = str(tmp_path / "page.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        base = datetime(2026, 1, 1)
+        for i in range(n):
+            d = (base + timedelta(days=i)).strftime("%Y-%m-%d")
+            conn.execute("INSERT INTO raw_index (date, open, close) VALUES (?, ?, ?)",
+                         (d, 100 + i, 200 + i))
+        conn.commit()
+        conn.close()
+        return TestClient(create_app(db_path=db_path, enable_scheduler=False))
+
+    def test_api_raw_pagination(self, tmp_path):
+        """/api/raw 回 total 與分頁 limit/offset，一次只拉一頁。"""
+        client = self._seed(tmp_path, 60)
+        r = client.get("/api/raw/raw_index?limit=20&offset=0").json()
+        assert r["total"] == 60
+        assert r["count"] == 20
+        assert r["limit"] == 20 and r["offset"] == 0
+        # 第二頁
+        r2 = client.get("/api/raw/raw_index?limit=20&offset=20").json()
+        assert r2["count"] == 20
+        assert r2["rows"][0]["date"] != r["rows"][0]["date"]
+
+    def test_data_page_shows_pager(self, tmp_path):
+        """資料頁超過一頁時顯示分頁控制。"""
+        client = self._seed(tmp_path, 60)  # > DATA_PAGE_SIZE(50)
+        resp = client.get("/data?table=raw_index")
+        assert "下一頁" in resp.text
+        assert "第 1 /" in resp.text
+
+    def test_data_page_second_page(self, tmp_path):
+        client = self._seed(tmp_path, 60)
+        resp = client.get("/data?table=raw_index&page=2")
+        assert resp.status_code == 200
+        assert "第 2 /" in resp.text
 
 
 class TestMobilePWA:
