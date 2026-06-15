@@ -62,6 +62,20 @@
 
 ---
 
+### 1.2c 加權指數盤中即時（MIS）
+
+| 項目 | 內容 |
+|------|------|
+| 用途 | 開盤後即時加權指數，供 `/live` 盤中即時驗證觀察（對早上訊號做雙基準三分類） |
+| URL | `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_t00.tw&json=1&delay=0` |
+| 方法 | GET（需帶 `Referer: https://mis.twse.com.tw/stock/index.jsp` 與 UA） |
+| 回傳格式 | JSON |
+| 更新時間 | 盤中（09:00–13:30）約 5–20 秒一檔快照；非真串流，輪詢取得 |
+| 狀態 | ✅ VERIFIED（2026-06-15 真實回應驗證，fixture: `mis/getstockinfo_t00_2330.json`） |
+| 備註 | `tse_t00.tw` = 加權指數，個股用 `tse_<code>.tw`。`rtcode="0000"` 為 OK，資料在 `msgArray[]`。關鍵欄位：`y`=昨收（雙基準 prev_close）、`o`=開盤（開盤跳空）、`z`=即時成交（即時漲跌）、`h`/`l`=當日高低、`tlong`=毫秒時間戳。**無成交時 `z='-'`**，parser fallback 到 `o`。**唯讀，不寫入 premarket.db**（即時資料只進記憶體，避免污染日線模型）。collector：`collectors/mis.py`（不繼承 BaseCollector）。|
+
+---
+
 ### 1.3 個股每日收盤價
 
 | 項目 | 內容 |
@@ -145,8 +159,8 @@
 | 方法 | GET |
 | 回傳格式 | CSV |
 | 更新時間 | 營業日即時更新 |
-| 狀態 | ✅ VERIFIED（fixture 驗證） |
-| 備註 | Parser 尋找「幣別=USD」列的「即期買入」欄位值。CSV 格式穩定。|
+| 狀態 | ✅ VERIFIED（2026-06-15 真實回應驗證，fixture: `bot_tw_csv.csv`） |
+| 備註 | **2026-06-15 修正：** (1) CSV 帶 UTF-8 BOM，表頭第一格變 `﻿幣別`，`.strip()` 不去 BOM 導致 `幣別` 比對失敗 → parser 先 `lstrip("﻿")`。(2) 台銀已改 flcsv 格式：表頭為「幣別,匯率,現金,**即期**,遠期10天…」買入區塊後接相同欄位的賣出區塊，「即期」出現兩次；即期買入 = **第一個「即期」欄**（賣出在第二區塊）。原 parser 找的 `即期買入` 欄名已不存在。修正前 collector 對 live 資料 100% 失效（回 None）。|
 
 ---
 
@@ -272,3 +286,4 @@
 | 2026-06-12 | v2 R1：新增 MI_5MINS_HIST（加權指數 OHLC）標記 VERIFIED |
 | 2026-06-12 | backfill 實測歷史回補能力：**可回補** = FMTQIK、STOCK_DAY、T86、MI_5MINS_HIST（月查詢含歷史）；**不可回補** = BFI82U（date 參數被忽略）、台銀匯率 CSV（只有即時牌價）、期交所夜盤（僅當日 CSV）。不可回補的來源只能逐日累積。|
 | 2026-06-12 | 補齊三個 STUB：(1) 外資 OI 實測接通（futContractsDateDown，VERIFIED），順帶發現並修正夜盤端點錯誤（futContractsDateDown→futDataDown）；(2) 分點：TWT43U 實測為自營商彙總表非分點、bsr 有 CAPTCHA → 標 BLOCKED，自動來源改接 FinMind（PARTIAL，需 Sponsor token，環境變數 `FINMIND_TOKEN`）；(3) S&P 500 ^GSPC 實測接通（VERIFIED）。|
+| 2026-06-15 | 台銀匯率 CSV 修正：UTF-8 BOM + 台銀改 flcsv 格式（即期買入＝第一個「即期」欄），修正前對 live 資料 100% 失效（見 3.1）。新增 MIS 盤中即時加權指數（1.2c，VERIFIED），供 `/live` 盤中即時驗證觀察。|

@@ -15,7 +15,11 @@
 - FastAPI server + APScheduler 內建排程 + server-rendered Web 頁面
 - Docker 部署（Windows Docker Desktop，TZ=Asia/Taipei）
 
-**仍然不做：** 下單／交易執行、盤中即時監控、歷史回測引擎、機器學習模型。
+**仍然不做：** 下單／交易執行、盤中即時監控（除訊號驗證觀察外）、歷史回測引擎、機器學習模型。
+
+> 註：2026-06-15 起新增「盤中即時驗證觀察」（`/live` 頁）—— 開盤後即時抓加權指數，
+> 用收盤驗證同一套雙基準三分類，盤中連續顯示早上訊號是否走對。唯讀、不產生新訊號、
+> 不寫入 DB，屬驗證目的的延伸，不視為盤中監控。spec 見 `docs/spec_live_verification.md`。
 
 ---
 
