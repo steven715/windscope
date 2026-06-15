@@ -2,6 +2,13 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f1419">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="開盤前情報">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 <title>{% block title %}開盤前情報{% endblock %}</title>
 <style>
   :root {
@@ -85,6 +92,30 @@
     background: rgba(102,187,106,.12); border: 1px solid rgba(102,187,106,.45);
     border-radius: 10px; padding: 10px 16px; margin-bottom: 14px; font-size: 13px;
   }
+
+  /* ── 手機：側邊欄收合成頂部 bar、卡片堆疊、寬表格水平捲動、放大觸控 ── */
+  @media (max-width: 760px) {
+    body { flex-direction: column; min-height: auto; }
+    .sidebar {
+      width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+      padding: 8px 10px; border-right: none; border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 10; background: #11161c;
+    }
+    .sidebar .logo { width: 100%; padding: 2px 8px 6px; }
+    .sidebar a { padding: 7px 11px; font-size: 13px; border-radius: 8px; }
+    .sidebar a.active {
+      border-left: none; padding-left: 11px; background: rgba(79,195,247,.16);
+    }
+    .main { padding: 14px; }
+    h2 { font-size: 17px; }
+    .panel { overflow-x: auto; }
+    .card { min-width: 130px; }
+    .cards { gap: 8px; }
+    .banner { flex-wrap: wrap; }
+    .banner .conf { margin-left: 0; }
+    .banner .big { font-size: 22px; }
+    button, input, select { padding: 8px 12px; font-size: 14px; }
+  }
 </style>
 </head>
 <body>
@@ -156,6 +187,13 @@ document.querySelectorAll("input[data-filter]").forEach(function (input) {
     if (counter) counter.textContent = shown;
   });
 });
+
+// PWA：註冊 service worker（手機可加到主畫面、全螢幕開啟）
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("/sw.js").catch(function () { /* 忽略 */ });
+  });
+}
 </script>
 </body>
 </html>

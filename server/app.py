@@ -41,9 +41,16 @@ def create_app(db_path: str | None = None,
     app.state.db_path = db_path or settings.DB_PATH
     app.state.scheduler = None
 
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
+
     from server.routes import api, pages
 
     app.include_router(pages.router)
     app.include_router(api.router, prefix="/api")
+
+    static_dir = Path(__file__).resolve().parent / "static"
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     return app

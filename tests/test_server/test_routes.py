@@ -359,3 +359,32 @@ class TestTableUX:
         resp = client_with_data.get("/signals")
         assert 'class="sortable"' in resp.text
         assert "data-filter" in resp.text
+
+
+class TestMobilePWA:
+    def test_viewport_meta_present(self, client):
+        """頁面含 viewport meta（手機正確縮放的關鍵）。"""
+        resp = client.get("/")
+        assert 'name="viewport"' in resp.text
+        assert "width=device-width" in resp.text
+
+    def test_manifest_served(self, client):
+        """PWA manifest 回 200 且為 manifest 型別，含圖示。"""
+        resp = client.get("/manifest.webmanifest")
+        assert resp.status_code == 200
+        assert "manifest" in resp.headers["content-type"]
+        assert "icon-192.png" in resp.text
+
+    def test_service_worker_served_at_root(self, client):
+        """service worker 從根路徑提供（scope 涵蓋全站）。"""
+        resp = client.get("/sw.js")
+        assert resp.status_code == 200
+        assert "javascript" in resp.headers["content-type"]
+        assert "addEventListener" in resp.text
+
+    def test_icons_served(self, client):
+        """PWA 圖示靜態檔可取得且為 PNG。"""
+        resp = client.get("/static/icons/icon-192.png")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "image/png"
+        assert resp.content[:8] == b"\x89PNG\r\n\x1a\n"

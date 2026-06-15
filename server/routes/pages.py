@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from db.connection import get_connection
@@ -125,6 +125,66 @@ def _fill_stock_names(conn, rows: list[dict]) -> None:
     for row in rows:
         if not row.get("stock_name"):
             row["stock_name"] = info.get(row["stock_id"], "")
+
+
+_MANIFEST = json.dumps({
+    "name": "開盤前情報",
+    "short_name": "開盤前情報",
+    "description": "台股開盤前情報系統",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#0f1419",
+    "theme_color": "#0f1419",
+    "icons": [
+        {"src": "/static/icons/icon-192.png", "sizes": "192x192",
+         "type": "image/png", "purpose": "any maskable"},
+        {"src": "/static/icons/icon-512.png", "sizes": "512x512",
+         "type": "image/png", "purpose": "any maskable"},
+    ],
+}, ensure_ascii=False)
+
+# Service worker：network-first，/api/ 一律走網路（即時資料不快取），離線回退快取殼。
+_SERVICE_WORKER = """\
+const CACHE = "premarket-v1";
+const SHELL = ["/", "/live"];
+self.addEventListener("install", function (e) {
+  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).catch(function () {}));
+  self.skipWaiting();
+});
+self.addEventListener("activate", function (e) {
+  e.waitUntil(caches.keys().then(function (keys) {
+    return Promise.all(keys.filter(function (k) { return k !== CACHE; })
+                           .map(function (k) { return caches.delete(k); }));
+  }));
+  self.clients.claim();
+});
+self.addEventListener("fetch", function (e) {
+  var req = e.request;
+  if (req.method !== "GET") return;
+  e.respondWith(
+    fetch(req).then(function (res) {
+      if (res.ok && new URL(req.url).pathname.indexOf("/api/") !== 0) {
+        var copy = res.clone();
+        caches.open(CACHE).then(function (c) { c.put(req, copy); });
+      }
+      return res;
+    }).catch(function () { return caches.match(req); })
+  );
+});
+"""
+
+
+@router.get("/manifest.webmanifest")
+def manifest():
+    """PWA manifest（手機可加到主畫面、全螢幕開啟）。"""
+    return Response(content=_MANIFEST, media_type="application/manifest+json")
+
+
+@router.get("/sw.js")
+def service_worker():
+    """Service worker（從根路徑提供，scope 涵蓋整個 app）。"""
+    return Response(content=_SERVICE_WORKER, media_type="application/javascript")
 
 
 @router.get("/live", response_class=HTMLResponse)
