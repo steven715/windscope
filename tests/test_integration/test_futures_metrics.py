@@ -6,6 +6,7 @@ import pytest
 
 from db.schema import create_all_tables
 from integration.futures_metrics import compute_futures_metrics
+from utils.trading_calendar import get_previous_trading_day
 
 
 @pytest.fixture
@@ -31,7 +32,19 @@ def _seed_history(conn, volumes):
 
 
 def _insert_target(conn, date="2026-04-08", **kwargs):
-    """塞入目標日的 raw_futures。"""
+    """塞入目標日的 raw_futures。
+
+    spot_close 是「前一交易日現貨收盤」基準（符合實際：early-morning 算
+    夜盤 vs 前日現貨），故自動寫到前一交易日的列而非目標日。
+    """
+    spot = kwargs.pop("spot_close", None)
+    if spot is not None:
+        prev = get_previous_trading_day(date)
+        conn.execute(
+            "INSERT INTO raw_futures (date, spot_close) VALUES (?, ?) "
+            "ON CONFLICT(date) DO UPDATE SET spot_close = excluded.spot_close",
+            (prev, spot),
+        )
     cols = ["date"] + list(kwargs.keys())
     vals = [date] + list(kwargs.values())
     placeholders = ", ".join(["?"] * len(vals))
@@ -93,6 +106,27 @@ class TestFuturesSpread:
         """完全無期貨資料 → 回傳 None。"""
         result = compute_futures_metrics("2026-04-08", fut_db)
         assert result is None
+
+    def test_spread_uses_prev_day_spot(self, fut_db):
+        """回歸：spread = 今日夜盤 − 前一交易日現貨收盤。"""
+        fut_db.execute("INSERT INTO raw_futures (date, spot_close) "
+                       "VALUES ('2026-04-07', 45000.0)")
+        fut_db.execute("INSERT INTO raw_futures (date, night_close, night_volume) "
+                       "VALUES ('2026-04-08', 45850.0, 10000)")
+        fut_db.commit()
+
+        result = compute_futures_metrics("2026-04-08", fut_db)
+        assert result["futures_spread"] == pytest.approx(850.0)
+
+    def test_today_own_spot_not_used(self, fut_db):
+        """回歸：當日自己的 spot_close 不可拿來算 spread（早上還沒收盤）。"""
+        fut_db.execute(
+            "INSERT INTO raw_futures (date, night_close, spot_close, night_volume) "
+            "VALUES ('2026-04-08', 45850.0, 45850.0, 10000)")
+        fut_db.commit()
+
+        result = compute_futures_metrics("2026-04-08", fut_db)
+        assert result["futures_spread"] is None  # 無前日基準 → None
 
 
 class TestFuturesVolumeRatio:

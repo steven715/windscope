@@ -7,6 +7,7 @@ import pytest
 
 from db.schema import create_all_tables
 from integration.fx_metrics import compute_fx_metrics
+from utils.trading_calendar import get_previous_trading_day
 
 
 @pytest.fixture
@@ -18,10 +19,15 @@ def fx_db():
 
 
 def _insert_fx(conn, date, pair, close_16, quote_0845):
+    """符合實際時間軸：close_16 屬於前一交易日（基準），quote_0845 屬於當日今早報價。"""
+    prev = get_previous_trading_day(date)
     conn.execute(
-        "INSERT INTO raw_fx (date, currency_pair, close_16, quote_0845) "
-        "VALUES (?, ?, ?, ?)",
-        (date, pair, close_16, quote_0845),
+        "INSERT INTO raw_fx (date, currency_pair, close_16) VALUES (?, ?, ?)",
+        (prev, pair, close_16),
+    )
+    conn.execute(
+        "INSERT INTO raw_fx (date, currency_pair, quote_0845) VALUES (?, ?, ?)",
+        (date, pair, quote_0845),
     )
     conn.commit()
 
@@ -131,6 +137,33 @@ class TestFxDelta:
         assert result["fx_delta_cny"] is None
         assert result["fx_delta_krw"] is None
         assert result["fx_asia_sync"] is None
+
+
+class TestFxBaselineTimeline:
+    """回歸：delta 必須用前一交易日 close_16，不能用當日（當日早上還沒收）。"""
+
+    def test_delta_uses_prev_day_close(self, fx_db):
+        """前一交易日 close_16 + 當日 quote_0845 → 正確算出隔夜 delta。"""
+        fx_db.execute("INSERT INTO raw_fx (date, currency_pair, close_16) "
+                      "VALUES ('2026-04-07', 'USD/TWD', 31.50)")
+        fx_db.execute("INSERT INTO raw_fx (date, currency_pair, quote_0845) "
+                      "VALUES ('2026-04-08', 'USD/TWD', 31.35)")
+        fx_db.commit()
+
+        result = compute_fx_metrics("2026-04-08", fx_db)
+        assert result["fx_delta_twd"] == pytest.approx(-0.15)
+        assert result["fx_direction"] == "bullish"
+
+    def test_only_today_quote_no_prev_close_gives_none(self, fx_db):
+        """只有當日報價、無前一交易日收盤 → delta None（不可退回同列 bug）。"""
+        fx_db.execute("INSERT INTO raw_fx (date, currency_pair, quote_0845) "
+                      "VALUES ('2026-04-08', 'USD/TWD', 31.35)")
+        fx_db.commit()
+
+        result = compute_fx_metrics("2026-04-08", fx_db)
+        assert result is not None
+        assert result["fx_delta_twd"] is None
+        assert result["fx_direction"] is None
 
 
 class TestFxWriteToDb:

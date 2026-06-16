@@ -6,6 +6,7 @@ import sqlite3
 from datetime import datetime
 
 from config import settings
+from utils.trading_calendar import get_previous_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -32,27 +33,43 @@ def _classify_direction(delta: float | None, threshold: float) -> str | None:
 
 def compute_fx_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
     """計算匯率衍生指標，寫入 daily_metrics。回傳結果 dict 或 None（無原始資料）。"""
-    # Read raw FX data
-    fx_data = {}
+    # delta = 當日 08:45 報價 − 前一交易日 16:00 收盤（隔夜匯率變動）。
+    # 當日 close_16 要等當天 18:30 才收，故基準必取「前一交易日」的 close_16。
+    prev_day = get_previous_trading_day(date, conn)
+
+    # 讀當日報價：只要當日有 row（即使值為 NULL）就視為有資料
+    today_quotes = {}
     for pair in _PAIRS:
         row = conn.execute(
-            "SELECT close_16, quote_0845 FROM raw_fx "
-            "WHERE date = ? AND currency_pair = ?",
+            "SELECT quote_0845 FROM raw_fx WHERE date = ? AND currency_pair = ?",
             (date, pair),
         ).fetchone()
         if row:
-            fx_data[pair] = {"close_16": row[0], "quote_0845": row[1]}
+            today_quotes[pair] = row[0]
 
-    if not fx_data:
+    if not today_quotes:
         logger.warning("compute_fx_metrics: no FX data for %s", date)
         return None
+
+    # 讀前一交易日收盤基準
+    prev_closes = {}
+    for pair in _PAIRS:
+        prev_closes[pair] = None
+        if prev_day:
+            prev_row = conn.execute(
+                "SELECT close_16 FROM raw_fx WHERE date = ? AND currency_pair = ?",
+                (prev_day, pair),
+            ).fetchone()
+            if prev_row:
+                prev_closes[pair] = prev_row[0]
 
     # Compute deltas
     deltas = {}
     for pair in _PAIRS:
-        d = fx_data.get(pair)
-        if d and d["close_16"] is not None and d["quote_0845"] is not None:
-            deltas[pair] = round(d["quote_0845"] - d["close_16"], 6)
+        quote = today_quotes.get(pair)
+        prev_close = prev_closes[pair]
+        if quote is not None and prev_close is not None:
+            deltas[pair] = round(quote - prev_close, 6)
         else:
             deltas[pair] = None
 

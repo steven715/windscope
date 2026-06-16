@@ -23,11 +23,23 @@ def compute_futures_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
         logger.warning("compute_futures_metrics: no futures data for %s", date)
         return None
 
-    night_close, night_volume, spot_close, ex_div, oi_net_foreign = row
+    night_close, night_volume, _spot_close_today, ex_div, oi_net_foreign = row
 
-    # 1. futures_spread
-    if night_close is not None and spot_close is not None:
-        futures_spread = round(night_close - spot_close, 2)
+    prev_date = get_previous_trading_day(date, conn)
+
+    # 1. futures_spread = 今日夜盤收盤 − 前一交易日現貨收盤（隔夜期貨缺口）。
+    #    當日 spot_close 要等收盤後(18:30)才有，而 spread 在 after_night(05:30)
+    #    就要算，故基準必取「前一交易日」的 spot_close。
+    prev_spot = None
+    if prev_date:
+        prev_row = conn.execute(
+            "SELECT spot_close FROM raw_futures WHERE date = ?", (prev_date,)
+        ).fetchone()
+        if prev_row:
+            prev_spot = prev_row[0]
+
+    if night_close is not None and prev_spot is not None:
+        futures_spread = round(night_close - prev_spot, 2)
     else:
         futures_spread = None
 
@@ -57,15 +69,13 @@ def compute_futures_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
     # 4. oi_net_foreign (passthrough from raw)
     # 5. oi_delta
     oi_delta = None
-    if oi_net_foreign is not None:
-        prev_date = get_previous_trading_day(date, conn)
-        if prev_date:
-            prev_row = conn.execute(
-                "SELECT oi_net_foreign FROM raw_futures WHERE date = ?",
-                (prev_date,),
-            ).fetchone()
-            if prev_row and prev_row[0] is not None:
-                oi_delta = oi_net_foreign - prev_row[0]
+    if oi_net_foreign is not None and prev_date:
+        prev_oi_row = conn.execute(
+            "SELECT oi_net_foreign FROM raw_futures WHERE date = ?",
+            (prev_date,),
+        ).fetchone()
+        if prev_oi_row and prev_oi_row[0] is not None:
+            oi_delta = oi_net_foreign - prev_oi_row[0]
 
     result = {
         "futures_spread": futures_spread,
