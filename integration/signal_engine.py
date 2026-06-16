@@ -148,6 +148,83 @@ def compute_market_signal(date: str, conn: sqlite3.Connection) -> dict | None:
     return result
 
 
+def _classify_foreign(direction: int, streak: int, cum: float,
+                      latest_net: float) -> tuple[str, str] | None:
+    """外資流向分類。回傳 (category, reason) 或 None。"""
+    buy = direction > 0
+    if streak >= settings.FOREIGN_CONSECUTIVE_MIN and abs(cum) >= settings.FOREIGN_CUM_NET_MIN:
+        if buy:
+            return "外資連買", f"外資連買 {streak} 天（累計 {cum:,.0f} 張），值得觀察，站回月線才進"
+        return "外資連賣", f"外資連賣 {streak} 天（累計 {abs(cum):,.0f} 張），籌碼轉弱"
+    if abs(latest_net) >= settings.FOREIGN_BIG_NET:
+        if buy:
+            return "外資大買", f"外資單日大買 {latest_net:,.0f} 張（反手買，僅觀察，站回月線才進）"
+        return "外資大賣", f"外資單日大賣 {abs(latest_net):,.0f} 張"
+    return None
+
+
+def compute_foreign_stock_signals(date: str, conn: sqlite3.Connection) -> list[dict]:
+    """用 T86 每檔外資買賣超（raw_chip __FOREIGN__）產生個股觀察訊號，寫入 stock_signals。
+
+    訊號於 08:50 產出時今日 T86 尚未收（18:30 才收），故用「今日之前」最新（前一交易日）
+    的外資資料。對 watchlist 每檔算外資連買/連賣天數與累計張數。
+    """
+    watch = conn.execute(
+        "SELECT stock_id FROM watchlist ORDER BY stock_id"
+    ).fetchall()
+    results = []
+    now = datetime.now().isoformat()
+
+    for (stock_id,) in watch:
+        rows = conn.execute(
+            "SELECT net_volume FROM raw_chip "
+            "WHERE stock_id = ? AND broker_name = '__FOREIGN__' "
+            "      AND date < ? AND net_volume IS NOT NULL "
+            "ORDER BY date DESC LIMIT 30",
+            (stock_id, date),
+        ).fetchall()
+        if not rows:
+            continue
+        latest_net = rows[0][0]
+        direction = 1 if latest_net > 0 else -1 if latest_net < 0 else 0
+        if direction == 0:
+            continue
+
+        streak = 0
+        cum = 0.0
+        for (net,) in rows:
+            if net is None or net == 0:
+                break
+            if (1 if net > 0 else -1) == direction:
+                streak += 1
+                cum += net
+            else:
+                break
+
+        classified = _classify_foreign(direction, streak, cum, latest_net)
+        if classified is None:
+            continue
+        category, reason = classified
+
+        conn.execute(
+            """INSERT INTO stock_signals
+                   (date, stock_id, broker_name, category, reasons,
+                    rule_version, created_at)
+               VALUES (?, ?, '外資', ?, ?, ?, ?)
+               ON CONFLICT(date, stock_id, broker_name) DO UPDATE SET
+                   category = excluded.category,
+                   reasons = excluded.reasons,
+                   rule_version = excluded.rule_version,
+                   created_at = excluded.created_at""",
+            (date, stock_id, category, reason, settings.SIGNAL_RULE_VERSION, now),
+        )
+        results.append({"stock_id": stock_id, "category": category, "reason": reason})
+
+    conn.commit()
+    logger.info("Foreign stock signals for %s: %d records", date, len(results))
+    return results
+
+
 def _classify_stock(net_amount: float | None, consecutive: int | None,
                     price_zone: str | None) -> tuple[str, str] | None:
     """個股訊號分類，回傳 (category, reason) 或 None（不產生訊號）。"""

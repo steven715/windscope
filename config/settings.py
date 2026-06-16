@@ -47,6 +47,12 @@ STOCK_NET_AMOUNT_MIN = 5e7          # 買超金額門檻：5,000 萬
 STOCK_CONSECUTIVE_MIN = 3           # 連買/連賣天數門檻
 STOCK_ACCUMULATION_MIN = 5          # 盤整區吸籌的連買天數門檻
 
+# === 外資流向個股訊號（用 T86 每檔外資買賣超，單位：張）===
+# 訊號於 08:50 產出時今日 T86 未收，故用「今日之前」最新（前一交易日）的外資資料。
+FOREIGN_CONSECUTIVE_MIN = 2         # 外資連買/連賣天數門檻
+FOREIGN_CUM_NET_MIN = 3000          # 連續期間累計張數門檻（過濾雜訊）
+FOREIGN_BIG_NET = 10000             # 單日大買/大賣門檻（如「反手大買」）
+
 # === Verification (Layer 4) ===
 VERIFY_FLAT_BAND_PCT = 0.3          # |漲跌幅| <= 0.3% 視為「平」
 

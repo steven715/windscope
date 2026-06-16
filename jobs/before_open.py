@@ -152,10 +152,15 @@ def _compute_fx(date: str, conn: sqlite3.Connection) -> bool:
 
 def _compute_signals(date: str, conn: sqlite3.Connection) -> bool:
     """計算市場訊號與個股觀察訊號。市場訊號算不出來視為失敗。"""
-    from integration.signal_engine import compute_market_signal, compute_stock_signals
+    from integration.signal_engine import (
+        compute_foreign_stock_signals,
+        compute_market_signal,
+        compute_stock_signals,
+    )
 
     result = compute_market_signal(date, conn)
-    compute_stock_signals(date, conn)  # 個股訊號可為空清單，不影響成敗
+    compute_stock_signals(date, conn)          # 分點訊號（需籌碼資料）
+    compute_foreign_stock_signals(date, conn)  # 外資流向訊號（用 T86，免費自動）
     return result is not None
 
 

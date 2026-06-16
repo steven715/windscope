@@ -15,7 +15,11 @@ import sqlite3
 from integration.chip_metrics import compute_chip_metrics
 from integration.futures_metrics import compute_futures_metrics
 from integration.fx_metrics import compute_fx_metrics
-from integration.signal_engine import compute_market_signal, compute_stock_signals
+from integration.signal_engine import (
+    compute_foreign_stock_signals,
+    compute_market_signal,
+    compute_stock_signals,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +30,7 @@ def recompute_date(date: str, conn: sqlite3.Connection) -> dict:
     futures = compute_futures_metrics(date, conn)
     chip = compute_chip_metrics(date, conn)
     stock_signals = compute_stock_signals(date, conn)
+    foreign_signals = compute_foreign_stock_signals(date, conn)
     signal = compute_market_signal(date, conn)
 
     logger.info(
@@ -40,5 +45,6 @@ def recompute_date(date: str, conn: sqlite3.Connection) -> dict:
         "futures_metrics": futures is not None,
         "chip_metrics": len(chip) if chip else 0,
         "stock_signals": len(stock_signals) if stock_signals else 0,
+        "foreign_signals": len(foreign_signals) if foreign_signals else 0,
         "signal": signal,
     }
