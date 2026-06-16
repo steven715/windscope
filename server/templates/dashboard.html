@@ -45,6 +45,25 @@
 </div>
 {% endif %}
 
+{% if explain %}
+<div class="panel" style="overflow-x:auto">
+  <div style="margin-bottom:8px"><b>盤前解讀</b> <span class="dim">原數據 → 判讀 → 為什麼（學習用，依據原文〈開盤前三件事〉）</span></div>
+  <table>
+    <thead><tr><th>維度</th><th>原數據</th><th>判讀</th><th>為什麼</th></tr></thead>
+    <tbody>
+    {% for e in explain %}
+    <tr>
+      <td style="white-space:nowrap"><b>{{ e.dim }}</b></td>
+      <td style="white-space:nowrap">{{ e.raw }}</td>
+      <td class="{{ e.css }}" style="white-space:nowrap">{{ e.verdict }}</td>
+      <td class="dim" style="min-width:280px">{{ e.why }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {% if stock_signals %}
 <div class="panel">
   <div class="dim" style="margin-bottom:8px">個股觀察訊號</div>

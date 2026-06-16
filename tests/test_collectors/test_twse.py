@@ -13,10 +13,18 @@ FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "twse"
 
 @pytest.fixture
 def twse_collector(tmp_path):
-    """建立 TWSECollector，使用 tmp_path 的 DB。"""
+    """建立 TWSECollector，使用 tmp_path 的 DB。
+
+    明確塞入 watchlist（2330、2409）使測試與 config/watchlist.json 解耦——
+    外資個股 parser 依 watchlist 過濾，不應隨正式名單增刪而壞掉。
+    """
     db_path = str(tmp_path / "test.db")
     conn = sqlite3.connect(db_path)
     create_all_tables(conn)
+    conn.execute("INSERT INTO watchlist (stock_id, stock_name, added_date, reason) "
+                 "VALUES ('2330', '台積電', '2026-04-08', 'test'), "
+                 "('2409', '友達', '2026-04-08', 'test')")
+    conn.commit()
     conn.close()
     return TWSECollector(db_path=db_path)
 
