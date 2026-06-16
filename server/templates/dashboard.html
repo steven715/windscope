@@ -17,11 +17,16 @@
 {% if metrics %}
 <div class="cards">
   <div class="card">
-    <div class="ct">匯率 FX</div>
-    <div class="cv {{ 'up' if metrics.fx_direction == 'bullish' else 'down' if metrics.fx_direction == 'bearish' else 'flat' }}">
-      {% if metrics.fx_delta_twd is not none %}Δ {{ "%+.4f"|format(metrics.fx_delta_twd) }}{% else %}N/A{% endif %}
+    <div class="ct">匯率 FX（隔夜變動 vs 前一交易日收盤）</div>
+    <div style="font-size:13px; margin:2px 0">
+      {% for p in metrics.fx_pairs %}
+      <div style="display:flex; justify-content:space-between; gap:10px">
+        <span class="dim">{{ p.label }}</span>
+        <span class="{{ p.css }}">{% if p.delta is not none %}{{ "%+.4f"|format(p.delta) }} {{ p.zh }}{% else %}—{% endif %}</span>
+      </div>
+      {% endfor %}
     </div>
-    <div class="dim">{{ metrics.fx_direction or "N/A" }}・亞幣同步 {{ "✓" if metrics.fx_asia_sync == 1 else "✗" if metrics.fx_asia_sync == 0 else "?" }}</div>
+    <div class="dim">亞幣同步 {{ "✓ 同向" if metrics.fx_asia_sync == 1 else "✗ 分歧" if metrics.fx_asia_sync == 0 else "資料不足" }}</div>
   </div>
   <div class="card">
     <div class="ct">期貨 Futures</div>
@@ -31,11 +36,11 @@
     <div class="dim">調整後價差・量比 {% if metrics.volume_ratio is not none %}{{ "%.2f"|format(metrics.volume_ratio) }}x{% else %}N/A{% endif %}</div>
   </div>
   <div class="card">
-    <div class="ct">外資未平倉</div>
+    <div class="ct">外資未平倉（前一交易日收盤）</div>
     <div class="cv {{ 'up' if metrics.oi_net and metrics.oi_net > 0 else 'down' if metrics.oi_net and metrics.oi_net < 0 else 'flat' }}">
-      {% if metrics.oi_net is not none %}{{ "{:+,}".format(metrics.oi_net) }}{% else %}N/A{% endif %}
+      {% if metrics.oi_net is not none %}{{ "{:+,}".format(metrics.oi_net) }}{% else %}尚未收集{% endif %}
     </div>
-    <div class="dim">口</div>
+    <div class="dim">口{% if metrics.oi_delta is not none %}・較前日 {{ "{:+,}".format(metrics.oi_delta) }}{% endif %}</div>
   </div>
 </div>
 {% endif %}

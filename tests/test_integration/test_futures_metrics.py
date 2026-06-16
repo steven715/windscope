@@ -175,30 +175,29 @@ class TestFuturesOI:
         assert result["oi_net_foreign"] is None
         assert result["oi_delta"] is None
 
-    def test_oi_with_previous(self, fut_db):
-        """OI 有值且前一天也有 → 計算 delta。"""
-        fut_db.execute(
-            "INSERT INTO raw_futures (date, oi_net_foreign, night_close, spot_close) "
-            "VALUES (?, ?, ?, ?)",
-            ("2026-04-07", 50000, 20000.0, 19950.0),
-        )
+    def test_oi_uses_prev_day_close(self, fut_db):
+        """OI 取前一交易日收盤的外資未平倉（訊號時點已知部位）；當日自己的 OI 不採用。"""
+        fut_db.execute("INSERT INTO raw_futures (date, oi_net_foreign) "
+                       "VALUES ('2026-04-06', 48000)")
+        fut_db.execute("INSERT INTO raw_futures (date, oi_net_foreign) "
+                       "VALUES ('2026-04-07', 50000)")
         fut_db.commit()
-        _insert_target(fut_db, night_close=20100.0, spot_close=20050.0,
-                       night_volume=10000, oi_net_foreign=52000)
+        _insert_target(fut_db, night_close=20100.0, night_volume=10000,
+                       oi_net_foreign=52000)  # 今日 OI，應被忽略
 
         result = compute_futures_metrics("2026-04-08", fut_db)
 
-        assert result["oi_net_foreign"] == 52000
-        assert result["oi_delta"] == 2000
+        assert result["oi_net_foreign"] == 50000   # 前一交易日(04-07)
+        assert result["oi_delta"] == 2000          # 50000 - 48000(04-06)
 
-    def test_oi_no_previous(self, fut_db):
-        """OI 有值但無前一天 → oi_delta=None。"""
-        _insert_target(fut_db, night_close=20100.0, spot_close=20050.0,
-                       night_volume=10000, oi_net_foreign=52000)
+    def test_oi_no_prev_day_oi(self, fut_db):
+        """前一交易日無 OI → oi_net_foreign 與 oi_delta 皆 None。"""
+        _insert_target(fut_db, night_close=20100.0, night_volume=10000,
+                       oi_net_foreign=52000)
 
         result = compute_futures_metrics("2026-04-08", fut_db)
 
-        assert result["oi_net_foreign"] == 52000
+        assert result["oi_net_foreign"] is None
         assert result["oi_delta"] is None
 
 

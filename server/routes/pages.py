@@ -30,6 +30,9 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 _DIRECTION_LABELS = {"bullish": "↑ 偏多", "bearish": "↓ 偏空", "neutral": "— 中性"}
 _CLASS_LABELS = {"up": "漲", "down": "跌", "flat": "平"}
+# 亞幣方向中文 + 卡片配色（升值對台股偏多→綠/up；貶值→紅/down）
+_FX_DIR_ZH = {"bullish": ("升", "up"), "bearish": ("貶", "down"),
+              "neutral": ("平", "flat")}
 
 _TABLE_LABELS = {
     "raw_fx": "匯率（原始）",
@@ -238,15 +241,23 @@ def dashboard(request: Request):
             m = conn.execute(
                 "SELECT fx_delta_twd, fx_direction, fx_asia_sync, "
                 "       futures_spread_adjusted, futures_volume_ratio, "
-                "       oi_net_foreign "
+                "       oi_net_foreign, fx_delta_cny, fx_delta_krw, "
+                "       fx_asia_detail, oi_delta "
                 "FROM daily_metrics WHERE date = ?",
                 (signal["date"],),
             ).fetchone()
             if m:
+                detail = json.loads(m[8]) if m[8] else {}
+                fx_pairs = []
+                for label, delta in (("TWD", m[0]), ("CNY", m[6]), ("KRW", m[7])):
+                    zh, css = _FX_DIR_ZH.get(detail.get(label), ("—", "flat"))
+                    fx_pairs.append({"label": label, "delta": delta,
+                                     "zh": zh, "css": css})
                 metrics = {
                     "fx_delta_twd": m[0], "fx_direction": m[1],
                     "fx_asia_sync": m[2], "spread_adjusted": m[3],
                     "volume_ratio": m[4], "oi_net": m[5],
+                    "fx_pairs": fx_pairs, "oi_delta": m[9],
                 }
             stock_signals = conn.execute(
                 "SELECT stock_id, broker_name, category, reasons "

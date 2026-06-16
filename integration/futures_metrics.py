@@ -23,7 +23,7 @@ def compute_futures_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
         logger.warning("compute_futures_metrics: no futures data for %s", date)
         return None
 
-    night_close, night_volume, _spot_close_today, ex_div, oi_net_foreign = row
+    night_close, night_volume, _spot_close_today, ex_div, _oi_today = row
 
     prev_date = get_previous_trading_day(date, conn)
 
@@ -66,16 +66,24 @@ def compute_futures_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
             if avg_volume > 0:
                 futures_volume_ratio = round(night_volume / avg_volume, 2)
 
-    # 4. oi_net_foreign (passthrough from raw)
-    # 5. oi_delta
+    # 4/5. 外資未平倉：訊號於 08:50 產出時，今日 OI 尚未收（18:30 才收），故採
+    #      「前一交易日收盤」的外資未平倉作為訊號時點已知的最新部位；oi_delta 為
+    #      其相對「再前一交易日」的增減（最近一場的部位變化，供摘要顯示）。
+    oi_net_foreign = None
     oi_delta = None
-    if oi_net_foreign is not None and prev_date:
+    if prev_date:
         prev_oi_row = conn.execute(
-            "SELECT oi_net_foreign FROM raw_futures WHERE date = ?",
-            (prev_date,),
+            "SELECT oi_net_foreign FROM raw_futures WHERE date = ?", (prev_date,)
         ).fetchone()
         if prev_oi_row and prev_oi_row[0] is not None:
-            oi_delta = oi_net_foreign - prev_oi_row[0]
+            oi_net_foreign = prev_oi_row[0]
+            prev2 = get_previous_trading_day(prev_date, conn)
+            if prev2:
+                prev2_row = conn.execute(
+                    "SELECT oi_net_foreign FROM raw_futures WHERE date = ?", (prev2,)
+                ).fetchone()
+                if prev2_row and prev2_row[0] is not None:
+                    oi_delta = oi_net_foreign - prev2_row[0]
 
     result = {
         "futures_spread": futures_spread,
