@@ -23,6 +23,10 @@ def _setup(conn):
                  "VALUES ('2026-06-15', 45396.99, 7431.46)")
     conn.execute("INSERT INTO raw_futures (date, night_close, sp500_close) "
                  "VALUES ('2026-06-16', 46246.0, 7554.29)")
+    # 盤前 5 分序列：台幣緩步升（USD/TWD 31.55→31.49，最大單根 0.02 < 0.03）
+    for ts, close in [(1, 31.55), (2, 31.53), (3, 31.51), (4, 31.49)]:
+        conn.execute("INSERT INTO intraday_fx (date, currency_pair, ts, close) "
+                     "VALUES ('2026-06-16', 'USD/TWD', ?, ?)", (ts, close))
     conn.commit()
 
 
@@ -34,12 +38,13 @@ def test_build_explain_rows():
     rows = build_explain("2026-06-16", conn)
     by_dim = {r["dim"]: r for r in rows}
 
-    # 六個維度都在，且都有原數據 + 判讀 + 為什麼
-    assert len(rows) == 6
+    # 七個維度都在，且都有原數據 + 判讀 + 為什麼
+    assert len(rows) == 7
     for r in rows:
         assert r["raw"] and r["verdict"] and r["why"]
 
     assert "平盤" in by_dim["匯率（台幣）"]["verdict"]
+    assert "緩步" in by_dim["匯率節奏"]["verdict"]  # 台幣緩步升
     assert "正價差" in by_dim["期貨價差"]["verdict"]
     assert "夜盤46246" in by_dim["期貨價差"]["raw"]
     assert "淨空" in by_dim["外資未平倉"]["verdict"]
@@ -52,6 +57,21 @@ def test_build_explain_no_metrics_returns_empty():
     conn = sqlite3.connect(":memory:")
     create_all_tables(conn)
     assert build_explain("2026-06-16", conn) == []
+
+
+def test_fx_rhythm_surge_flagged():
+    """盤前 5 分序列出現急拉（單根 ≥ 0.03）→ 標『急拉、別追』。"""
+    conn = sqlite3.connect(":memory:")
+    create_all_tables(conn)
+    conn.execute("INSERT INTO daily_metrics (date, fx_delta_twd, fx_direction) "
+                 "VALUES ('2026-06-16', -0.02, 'neutral')")
+    for ts, close in [(1, 31.55), (2, 31.55), (3, 31.51)]:  # 單根 0.04 急拉
+        conn.execute("INSERT INTO intraday_fx (date, currency_pair, ts, close) "
+                     "VALUES ('2026-06-16', 'USD/TWD', ?, ?)", (ts, close))
+    conn.commit()
+
+    rhythm = next(r for r in build_explain("2026-06-16", conn) if r["dim"] == "匯率節奏")
+    assert "急拉" in rhythm["verdict"]
 
 
 def test_anomaly_divergence_flagged():

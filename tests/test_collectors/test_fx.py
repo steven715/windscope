@@ -66,6 +66,20 @@ class TestCollectTWD:
 
         assert data is None
 
+    def test_collect_twd_intraday(self, fx_collector):
+        """解析 Yahoo 5 分序列，回最近 N 根有效 K（含過濾 None）。"""
+        chart = {"chart": {"result": [{
+            "timestamp": [1, 2, 3, 4],
+            "indicators": {"quote": [{"close": [31.50, None, 31.52, 31.55]}]},
+        }]}}
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = chart
+        with patch("collectors.fx.http_get", return_value=mock_resp):
+            bars = fx_collector.collect_twd_intraday()
+
+        assert [b["close"] for b in bars] == [31.50, 31.52, 31.55]  # None 被過濾
+        assert bars[0]["ts"] == 1
+
 
 # ── USD/CNY、USD/KRW（Yahoo Finance）────────────────────────────
 

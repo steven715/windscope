@@ -14,6 +14,11 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 FX_THRESHOLD_TWD = 0.1
 FX_THRESHOLD_CNY = 0.005
 FX_THRESHOLD_KRW = 5.0
+# 盤前匯率節奏（原文第一件事①）：跳空＝08:45 vs 前日16:00 變動 ≥ 0.05（5分）；
+# 急拉＝最近 5 分 K 單根變動 ≥ 0.03（3分）；取最近 FX_INTRADAY_BARS 根看形狀。
+FX_GAP_THRESHOLD = 0.05
+FX_INTRADAY_SURGE = 0.03
+FX_INTRADAY_BARS = 12
 
 # === Futures ===
 FUTURES_VOLUME_LOOKBACK = 5

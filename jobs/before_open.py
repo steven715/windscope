@@ -48,6 +48,12 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
+        # 3b. FX: 盤前 5 分序列（升貶節奏用，Yahoo 離岸報價）
+        ok, err = run_step("fx_intraday", lambda: _collect_fx_intraday(date, conn))
+        results["fx_intraday"] = ok
+        if err:
+            errors.append(err)
+
         # 4. Integration: compute_fx_metrics
         ok, err = run_step("integration_fx", lambda: _compute_fx(date, conn))
         results["integration_fx"] = ok
@@ -97,6 +103,18 @@ def _collect_fx_quote(date: str, pair: str, conn: sqlite3.Connection) -> bool:
     if data is None:
         return False
     c.save_fx(date, data["currency_pair"], data["rate"], "quote_0845")
+    return True
+
+
+def _collect_fx_intraday(date: str, conn: sqlite3.Connection) -> bool:
+    """收集 USD/TWD 盤前 5 分序列（升貶節奏用）。"""
+    from collectors.fx import FXCollector
+
+    c = FXCollector()
+    bars = c.collect_twd_intraday()
+    if not bars:
+        return False
+    c.save_intraday_fx(date, "USD/TWD", bars)
     return True
 
 

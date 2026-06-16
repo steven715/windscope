@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 
 from collectors.base import BaseCollector
+from config import settings
 from db.connection import get_connection
 from utils.http_client import http_get
 
@@ -133,7 +134,51 @@ class FXCollector(BaseCollector):
             return None
         return {"close": parsed["rate"]}
 
+    def collect_twd_intraday(self) -> list[dict] | None:
+        """取得 USD/TWD 盤前 5 分鐘序列（Yahoo USDTWD=X，離岸報價，作節奏形狀參考）。
+
+        回傳最近 settings.FX_INTRADAY_BARS 根有效 K 的 [{"ts": int, "close": float}]，
+        由舊到新；失敗回 None。
+        """
+        try:
+            resp = http_get(
+                f"{YAHOO_CHART_URL}/USDTWD=X",
+                params={"interval": "5m", "range": "1d"},
+            )
+            data = resp.json()
+        except Exception as e:
+            logger.error("Yahoo USDTWD intraday request failed: %s", e)
+            return None
+        try:
+            result = data["chart"]["result"][0]
+            ts_list = result["timestamp"]
+            closes = result["indicators"]["quote"][0]["close"]
+        except (KeyError, IndexError, TypeError) as e:
+            logger.error("Yahoo USDTWD intraday parse error: %s", e)
+            return None
+
+        bars = [{"ts": int(t), "close": float(c)}
+                for t, c in zip(ts_list, closes) if c is not None]
+        if not bars:
+            logger.warning("Yahoo USDTWD intraday: no valid bars")
+            return None
+        return bars[-settings.FX_INTRADAY_BARS:]
+
     # ── save 方法 ────────────────────────────────────────────────
+
+    def save_intraday_fx(self, date: str, currency_pair: str,
+                         bars: list[dict]) -> None:
+        """存入 intraday_fx（盤前匯率 5 分序列）。冪等覆寫。"""
+        now = datetime.now().isoformat()
+        with get_connection(self.db_path) as conn:
+            for b in bars:
+                conn.execute(
+                    "INSERT INTO intraday_fx (date, currency_pair, ts, close, collected_at) "
+                    "VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(date, currency_pair, ts) DO UPDATE SET "
+                    "close = excluded.close, collected_at = excluded.collected_at",
+                    (date, currency_pair, b["ts"], b["close"], now),
+                )
 
     def save_sp500(self, date: str, close: float) -> None:
         """更新 raw_futures.sp500_close（S&P 500 雖由 FX collector 收集，但欄位在期貨表）。"""

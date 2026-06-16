@@ -53,6 +53,9 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
                      "跟前一天16:00收盤比，升貶超過0.1元才算明顯。台幣是外資的腳印——"
                      "先看匯率才不會被新聞帶風向。"))
 
+    # 1b. 匯率節奏（跳空 + 緩步/急拉，用盤前 5 分序列）
+    rows.append(_fx_rhythm(date, conn, fx_delta_twd))
+
     # 2. 亞幣同步
     detail = json.loads(asia_json) if asia_json else {}
     raw = (f"台幣{_ASIA_ZH.get(detail.get('TWD'))}／"
@@ -140,6 +143,49 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
                      "重點不是看漲跌、是看有沒有異常：美股大漲但台指夜盤沒怎麼動→台股相對弱勢，不建議追高。"))
 
     return rows
+
+
+def _fx_rhythm(date: str, conn: sqlite3.Connection, fx_delta_twd: float | None) -> dict:
+    """升貶節奏：跳空（08:45 vs 前日16:00）+ 緩步/急拉（盤前 5 分序列）。"""
+    why = ("緩步連3-5根小紅＝外資分批匯入、常連買；5分內急拉一根（>3分）＝可能央行或單一"
+           "鉅額、隔天易回貶別追；跳空（比前日16:00高/低5分以上）＝外資半夜已動、開高機率高"
+           "但小心開高走低。")
+
+    # 跳空（台幣升＝USD/TWD delta 為負）
+    gap = None
+    if fx_delta_twd is not None and abs(fx_delta_twd) >= settings.FX_GAP_THRESHOLD:
+        gap = "跳空升" if fx_delta_twd <= 0 else "跳空貶"
+
+    bars = conn.execute(
+        "SELECT close FROM intraday_fx WHERE date=? AND currency_pair='USD/TWD' "
+        "ORDER BY ts", (date,),
+    ).fetchall()
+    closes = [b[0] for b in bars if b[0] is not None]
+
+    if len(closes) < 2:
+        raw = "盤前序列無" + ("" if gap is None else f"（{gap}）")
+        verdict = gap or "資料累積中"
+        css = "flat" if gap is None else ("up" if gap == "跳空升" else "down")
+        return _row("匯率節奏", raw, verdict, css, why)
+
+    steps = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    max_step = max(abs(s) for s in steps)
+    total = closes[-1] - closes[0]
+    css = "up" if total < 0 else "down" if total > 0 else "flat"  # 台幣升=USD跌
+    raw = f"近{len(closes)}根5分 {closes[0]:.3f}→{closes[-1]:.3f}（最大單根 {max_step:.3f}）"
+
+    if max_step >= settings.FX_INTRADAY_SURGE:
+        verdict = "急拉（恐央行/單一鉅額，隔天易回貶，別追）"
+        css = "flat"
+    elif gap:
+        verdict = f"{gap}（外資半夜已動，小心開高走低）"
+    elif abs(total) >= settings.FX_GAP_THRESHOLD:
+        verdict = ("緩步台幣升（外資分批匯入，常連買）" if total < 0
+                   else "緩步台幣貶（資金流出）")
+    else:
+        verdict = "盤前無明顯節奏"
+        css = "flat"
+    return _row("匯率節奏", raw, verdict, css, why)
 
 
 def _scalar(conn, sql, params):

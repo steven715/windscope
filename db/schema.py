@@ -156,6 +156,15 @@ CREATE TABLE IF NOT EXISTS daily_stock_metrics (
     broker_type TEXT,
     PRIMARY KEY (date, stock_id, broker_name)
 );
+
+CREATE TABLE IF NOT EXISTS intraday_fx (
+    date TEXT NOT NULL,
+    currency_pair TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    close REAL,
+    collected_at TEXT,
+    PRIMARY KEY (date, currency_pair, ts)
+);
 """
 
 
