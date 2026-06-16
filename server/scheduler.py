@@ -15,6 +15,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from config import settings
 from db.connection import get_connection
+from utils.notify import notify
 
 logger = logging.getLogger(__name__)
 
@@ -122,10 +123,36 @@ JOB_DEFS: dict[str, dict] = {
 }
 
 
+def _format_job_notify(job_id: str, result) -> str:
+    """組出該 job 完成後要發的 TG 訊息內容。"""
+    if not isinstance(result, dict):
+        return "完成"
+    status = result.get("status", "unknown")
+    date = result.get("date", "")
+
+    if job_id == "before_open" and result.get("summary"):
+        return result["summary"]  # 完整開盤前情報（含訊號）
+    if job_id == "verify_close" and result.get("verification"):
+        v = result["verification"]
+        hit = "✓ 命中" if v["hit_day"] else "✗ 失誤"
+        gap = "✓" if v["hit_open"] else "✗"
+        return (f"{date} 收盤驗證\n預測 {v['predicted_direction']}（信心 {v['confidence']}）"
+                f" vs 實際 {v['day_change_class']} {v['day_change_pct']:+.2f}% → {hit}\n"
+                f"開盤跳空 {v['open_gap_pct']:+.2f}% {gap}")
+
+    steps = result.get("results", {})
+    oks = sum(1 for ok in steps.values() if ok)
+    msg = f"{date} status={status}（{oks}/{len(steps)} 步驟成功）"
+    if result.get("errors"):
+        msg += "\n失敗：" + "；".join(result["errors"][:3])
+    return msg
+
+
 def _make_runner(job_id: str):
-    """包一層執行器：跑 job 並把結果記到 _last_runs。"""
+    """包一層執行器：跑 job、記結果、發 TG 通知。"""
     def runner(db_path: str | None) -> None:
         started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        result = None
         try:
             result = JOB_DEFS[job_id]["func"](db_path)
             status = result.get("status", "unknown") if isinstance(result, dict) else "done"
@@ -133,6 +160,13 @@ def _make_runner(job_id: str):
             logger.error("job %s crashed: %s", job_id, e)
             status = f"error: {str(e)[:80]}"
         _last_runs[job_id] = {"time": started, "status": status}
+
+        # 發 TG（notify 永不 raise）
+        name = JOB_DEFS[job_id]["name"]
+        if result is not None:
+            notify(f"📡 {name}", _format_job_notify(job_id, result))
+        else:
+            notify(f"📡 {name}", f"執行發生例外：{status}")
     return runner
 
 

@@ -232,6 +232,22 @@ class TestScheduler:
                 "after_close"}.issubset(jobs)
         assert "live_refresh" in jobs
 
+    def test_format_job_notify_verify(self):
+        from server.scheduler import _format_job_notify
+        result = {"date": "2026-06-16", "status": "completed", "verification": {
+            "predicted_direction": "bullish", "confidence": 1,
+            "day_change_class": "up", "day_change_pct": 0.91,
+            "hit_day": 1, "hit_open": 0, "open_gap_pct": 0.23}}
+        msg = _format_job_notify("verify_close", result)
+        assert "命中" in msg and "+0.91%" in msg
+
+    def test_format_job_notify_generic(self):
+        from server.scheduler import _format_job_notify
+        result = {"date": "2026-06-16", "status": "partial",
+                  "results": {"a": True, "b": False}}
+        msg = _format_job_notify("after_close", result)
+        assert "1/2" in msg
+
     def test_get_jobs_info_none_scheduler_lists_config(self, tmp_path):
         """scheduler 未啟用時仍列出四個 job 的設定（無 next_run）。"""
         from server.scheduler import get_jobs_info
