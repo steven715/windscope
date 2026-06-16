@@ -33,6 +33,10 @@ _CLASS_LABELS = {"up": "漲", "down": "跌", "flat": "平"}
 # 亞幣方向中文 + 卡片配色（升值對台股偏多→綠/up；貶值→紅/down）
 _FX_DIR_ZH = {"bullish": ("升", "up"), "bearish": ("貶", "down"),
               "neutral": ("平", "flat")}
+# 分點類型中文標籤
+_BROKER_TYPE_LABELS = {
+    "swing": "波段／主力", "day_trade": "隔日沖", "hedge": "避險（外資券商）",
+}
 
 _TABLE_LABELS = {
     "raw_fx": "匯率（原始）",
@@ -383,6 +387,16 @@ def watchlist_page(request: Request):
             "SELECT date, stock_id, broker_name, category, reasons "
             "FROM stock_signals ORDER BY date DESC LIMIT 100"
         ).fetchall()
+        broker_rows = conn.execute(
+            "SELECT broker_name, broker_type, notes FROM broker_tags "
+            "ORDER BY broker_type, broker_name"
+        ).fetchall()
+
+    brokers = [
+        {"name": b[0], "type": b[1],
+         "type_label": _BROKER_TYPE_LABELS.get(b[1], b[1]), "notes": b[2]}
+        for b in broker_rows
+    ]
 
     signals_by_stock: dict[str, list] = {}
     for date, stock_id, broker, category, reasons in signal_rows:
@@ -406,7 +420,7 @@ def watchlist_page(request: Request):
     return templates.TemplateResponse(request, "watchlist.html", {
         "active": "watchlist", "stocks": stocks,
         "signals_by_stock": signals_by_stock,
-        "index_days": index_days,
+        "index_days": index_days, "brokers": brokers,
     })
 
 

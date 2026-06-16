@@ -1,4 +1,4 @@
 [
   {"stock_id": "2330", "stock_name": "台積電", "added_date": "2026-04-08", "reason": "權值股常態追蹤"},
-  {"stock_id": "2409", "stock_name": "友達", "added_date": "2026-04-08", "reason": "外資反手大買"}
+  {"stock_id": "0050", "stock_name": "元大台灣50", "added_date": "2026-06-16", "reason": "大盤連動 ETF，對照市場訊號"}
 ]

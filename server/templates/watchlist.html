@@ -25,6 +25,29 @@
 </div>
 
 <div class="panel">
+  <b>主力分點觀察清單</b>
+  <span class="dim">掃分點時重點盯這幾家；資料進來後系統會自動套規則並亮燈</span>
+  {% if brokers %}
+  <table style="margin-top:8px">
+    <tr><th>分點</th><th>類型</th><th>特性 / 操作備註</th></tr>
+    {% for b in brokers %}
+    <tr>
+      <td><b>{{ b.name }}</b></td>
+      <td><span class="tag">{{ b.type_label }}</span></td>
+      <td class="dim">{{ b.notes }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <div class="dim" style="margin-top:6px">
+    註：隔日沖分點買超「不追」、同分點對敲假量「不碰」、低檔連買「放觀察」——
+    系統已內建這些規則，缺的是分點資料來源。
+  </div>
+  {% else %}
+  <div class="dim" style="margin-top:6px">尚無分點標籤</div>
+  {% endif %}
+</div>
+
+<div class="panel">
   <form class="filter" method="post" action="/watchlist/add" style="margin-bottom:0">
     <input name="stock_id" placeholder="代號（如 2454）" required pattern="[0-9A-Za-z]{4,6}" style="width:120px">
     <input name="stock_name" placeholder="名稱（如 聯發科）" required style="width:140px">
