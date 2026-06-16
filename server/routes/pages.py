@@ -217,6 +217,89 @@ def live_page(request: Request):
     })
 
 
+@router.get("/chip-import", response_class=HTMLResponse)
+def chip_import_page(request: Request, msg: str | None = None):
+    """分點籌碼手動匯入頁：看著看盤軟體截圖，把關鍵分點的買賣超填進表單。"""
+    db_path = request.app.state.db_path
+    with get_connection(db_path) as conn:
+        stocks = conn.execute(
+            "SELECT stock_id, stock_name FROM watchlist ORDER BY stock_id"
+        ).fetchall()
+        brokers = conn.execute(
+            "SELECT broker_name FROM broker_tags ORDER BY broker_name"
+        ).fetchall()
+    from datetime import date as _date
+    return templates.TemplateResponse(request, "chip_import.html", {
+        "active": "chip_import", "stocks": stocks,
+        "brokers": [b[0] for b in brokers],
+        "today": _date.today().isoformat(), "msg": msg,
+    })
+
+
+@router.post("/chip-import")
+def chip_import_submit(
+    request: Request,
+    date: str = Form(...),
+    stock_id: str = Form(...),
+    close_price: str = Form(""),
+    broker_name: list[str] = Form(default=[]),
+    buy: list[str] = Form(default=[]),
+    sell: list[str] = Form(default=[]),
+):
+    """寫入手動填的分點資料 → raw_chip，並重算當日籌碼指標與個股訊號。"""
+    from datetime import datetime
+
+    from collectors.chip import ChipCollector
+    from integration.chip_metrics import compute_chip_metrics
+    from integration.signal_engine import compute_stock_signals
+
+    db_path = request.app.state.db_path
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT stock_name FROM watchlist WHERE stock_id = ?", (stock_id,)
+        ).fetchone()
+    stock_name = row[0] if row else stock_id
+
+    items = []
+    for name, b, s in zip(broker_name, buy, sell):
+        name = (name or "").strip()
+        if not name:
+            continue
+        bv = int(b) if (b or "").strip().lstrip("-").isdigit() else 0
+        sv = int(s) if (s or "").strip().lstrip("-").isdigit() else 0
+        if bv == 0 and sv == 0:
+            continue
+        items.append({"broker_name": name, "buy_volume": bv,
+                      "sell_volume": sv, "net_volume": bv - sv})
+
+    if not items:
+        return RedirectResponse(
+            url=f"/chip-import?msg={quote('沒有有效資料列')}", status_code=303)
+
+    ChipCollector(db_path=db_path).save_broker_trading(date, stock_id, stock_name, items)
+
+    cp = close_price.strip()
+    with get_connection(db_path) as conn:
+        if cp:
+            try:
+                conn.execute(
+                    "INSERT INTO raw_chip (date, stock_id, stock_name, broker_name, "
+                    "close_price, collected_at) VALUES (?, ?, ?, '__PRICE_ONLY__', ?, ?) "
+                    "ON CONFLICT(date, stock_id, broker_name) DO UPDATE SET "
+                    "close_price = excluded.close_price",
+                    (date, stock_id, stock_name, float(cp),
+                     datetime.now().isoformat()),
+                )
+                conn.commit()
+            except ValueError:
+                pass
+        compute_chip_metrics(date, conn)
+        compute_stock_signals(date, conn)
+
+    msg = f"已匯入 {stock_name}（{stock_id}）{date} 的 {len(items)} 筆分點，已重算個股訊號"
+    return RedirectResponse(url=f"/chip-import?msg={quote(msg)}", status_code=303)
+
+
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     """今日情報：最新訊號 + 指標卡片 + 命中率 + 最近驗證。"""

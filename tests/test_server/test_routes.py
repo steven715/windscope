@@ -407,6 +407,50 @@ class TestPagination:
         assert "第 2 /" in resp.text
 
 
+class TestChipImport:
+    @staticmethod
+    def _client(tmp_path):
+        db_path = str(tmp_path / "chip.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.execute("INSERT INTO watchlist (stock_id, stock_name, added_date, reason) "
+                     "VALUES ('2330', '台積電', '2026-04-08', 't')")
+        conn.commit()
+        conn.close()
+        return db_path, TestClient(create_app(db_path=db_path, enable_scheduler=False))
+
+    def test_get_page(self, tmp_path):
+        _, client = self._client(tmp_path)
+        resp = client.get("/chip-import")
+        assert resp.status_code == 200
+        assert "分點籌碼匯入" in resp.text
+
+    def test_post_writes_raw_chip(self, tmp_path):
+        db_path, client = self._client(tmp_path)
+        resp = client.post("/chip-import", data={
+            "date": "2026-06-16", "stock_id": "2330", "close_price": "1000",
+            "broker_name": ["兆豐-嘉義", "", ""],
+            "buy": ["5000", "", ""], "sell": ["1000", "", ""],
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT buy_volume, sell_volume, net_volume FROM raw_chip "
+            "WHERE date='2026-06-16' AND stock_id='2330' AND broker_name='兆豐-嘉義'"
+        ).fetchone()
+        conn.close()
+        assert row == (5000, 1000, 4000)
+
+    def test_post_empty_rows(self, tmp_path):
+        _, client = self._client(tmp_path)
+        resp = client.post("/chip-import", data={
+            "date": "2026-06-16", "stock_id": "2330", "close_price": "",
+            "broker_name": ["", ""], "buy": ["", ""], "sell": ["", ""],
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        assert "沒有有效資料列" in resp.text
+
+
 class TestMobilePWA:
     def test_viewport_meta_present(self, client):
         """頁面含 viewport meta（手機正確縮放的關鍵）。"""

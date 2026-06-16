@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}分點匯入{% endblock %}
+{% block content %}
+<h2>分點籌碼匯入</h2>
+
+{% if msg %}<div class="msg-banner">✅ {{ msg }}</div>{% endif %}
+
+<div class="panel">
+  <div class="dim" style="margin-bottom:10px">
+    看著看盤軟體（XQ／三竹／籌碼K線）的分點明細，把關鍵分點的買賣超「張數」填進來。
+    送出後系統會寫入並自動重算個股訊號（連買/連賣天數、低檔吸籌…）。
+    收盤價可留空（若系統當天已收個股收盤，會自動帶入）。
+  </div>
+  <form method="post" action="/chip-import">
+    <div class="filter" style="margin-bottom:12px">
+      <label>日期 <input type="date" name="date" value="{{ today }}" required></label>
+      <label>股票
+        <select name="stock_id" required>
+          {% for s in stocks %}<option value="{{ s[0] }}">{{ s[1] }}（{{ s[0] }}）</option>{% endfor %}
+        </select>
+      </label>
+      <label>收盤價(選填) <input type="number" step="0.01" name="close_price" style="width:100px"></label>
+    </div>
+
+    <table>
+      <thead><tr><th>分點</th><th>買超(張)</th><th>賣超(張)</th></tr></thead>
+      <tbody>
+      {% for i in range(6) %}
+      <tr>
+        <td><input name="broker_name" list="broker-list" placeholder="如 兆豐-嘉義" style="width:180px"></td>
+        <td><input name="buy" type="number" min="0" placeholder="0" style="width:110px"></td>
+        <td><input name="sell" type="number" min="0" placeholder="0" style="width:110px"></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <datalist id="broker-list">
+      {% for b in brokers %}<option value="{{ b }}">{% endfor %}
+    </datalist>
+
+    <div style="margin-top:12px"><button type="submit">匯入並重算</button></div>
+  </form>
+  <div class="dim" style="margin-top:10px">
+    只填關鍵那幾家就好（原文：兆豐-嘉義／凱基-台北／永豐金-萬盛…）。淨額＝買超−賣超，系統自動算。
+    階段二「上傳截圖自動填表」之後會加在這頁上方。
+  </div>
+</div>
+{% endblock %}
