@@ -53,3 +53,28 @@ def test_after_night_partial_failure(memory_db, monkeypatch):
     assert result["status"] == "partial"
     assert result["results"]["sp500_close"] is False
     assert result["results"]["taifex_night"] is True
+
+
+def test_after_night_saturday_targets_next_monday(memory_db, monkeypatch):
+    """週六觸發（前日週五有夜盤）→ 夜盤歸屬下週一，補上週一早盤的期貨缺口。"""
+    from jobs import after_night
+
+    monkeypatch.setattr(after_night, "run_step", lambda name, fn: (True, None))
+
+    with patch("jobs.after_night.get_connection") as mock_conn:
+        mock_conn.return_value.__enter__ = lambda s: memory_db
+        mock_conn.return_value.__exit__ = lambda s, *a: None
+
+        result = after_night.run_after_night("2026-06-13")  # 週六
+
+    assert result["status"] == "completed"
+    assert result["date"] == "2026-06-15"  # 歸屬下週一
+
+
+def test_after_night_sunday_skips_no_session():
+    """週日觸發（前日週六無夜盤）→ skipped。"""
+    from jobs.after_night import run_after_night
+
+    result = run_after_night("2026-06-14", db_path=":memory:")  # 週日
+    assert result["status"] == "skipped"
+    assert result["results"] == {}

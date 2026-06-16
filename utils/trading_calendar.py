@@ -25,6 +25,16 @@ def iter_trading_days(start_date: str, end_date: str) -> list[str]:
     return result
 
 
+def get_next_trading_day(date: str) -> str:
+    """回傳 date 之後的下一個交易日（YYYY-MM-DD）。跳過週末。"""
+    dt = datetime.strptime(date, "%Y-%m-%d")
+    for _ in range(10):
+        dt += timedelta(days=1)
+        if dt.weekday() < 5:
+            return dt.strftime("%Y-%m-%d")
+    return date  # 理論上不會走到
+
+
 def get_previous_trading_day(
     date: str, conn: sqlite3.Connection | None = None
 ) -> str | None:
