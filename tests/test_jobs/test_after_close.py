@@ -65,5 +65,33 @@ def test_after_close_partial_failure(memory_db, monkeypatch):
     assert result["results"]["chip"] is False
     assert result["results"]["twse_spot_close"] is True
     assert len(result["errors"]) == 2
-    # 確認所有 9 個步驟都有被呼叫
-    assert call_count["n"] == 9
+    # 確認所有 11 個步驟都有被呼叫（含 CNY/KRW 收盤基準）
+    assert call_count["n"] == 11
+
+
+def test_collect_fx_close_foreign_saves_close_16():
+    """CNY/KRW 收盤基準正確存為 close_16（供隔日亞幣同步）。"""
+    from jobs.after_close import _collect_fx_close_foreign
+
+    with patch("collectors.fx.FXCollector") as MockFX:
+        inst = MockFX.return_value
+        inst.collect_foreign_fx.return_value = {"currency_pair": "USD/CNY", "rate": 7.25}
+
+        ok = _collect_fx_close_foreign("2026-06-16", None, "USD/CNY")
+
+    assert ok is True
+    inst.save_fx.assert_called_once_with("2026-06-16", "USD/CNY", 7.25, "close_16")
+
+
+def test_collect_fx_close_foreign_none_returns_false():
+    """Yahoo 抓不到 → 回 False，不存。"""
+    from jobs.after_close import _collect_fx_close_foreign
+
+    with patch("collectors.fx.FXCollector") as MockFX:
+        inst = MockFX.return_value
+        inst.collect_foreign_fx.return_value = None
+
+        ok = _collect_fx_close_foreign("2026-06-16", None, "USD/CNY")
+
+    assert ok is False
+    inst.save_fx.assert_not_called()

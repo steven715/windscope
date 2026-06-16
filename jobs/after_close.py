@@ -75,6 +75,19 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
+        # 7b/7c. FX: USD/CNY、USD/KRW 收盤基準（供隔日亞幣同步計算）
+        ok, err = run_step("fx_close_cny",
+                           lambda: _collect_fx_close_foreign(date, conn, "USD/CNY"))
+        results["fx_close_cny"] = ok
+        if err:
+            errors.append(err)
+
+        ok, err = run_step("fx_close_krw",
+                           lambda: _collect_fx_close_foreign(date, conn, "USD/KRW"))
+        results["fx_close_krw"] = ok
+        if err:
+            errors.append(err)
+
         # 8. Chip: 分點進出（FinMind，未設 FINMIND_TOKEN 時跳過）
         ok, err = run_step("chip", lambda: _collect_chip(date, conn))
         results["chip"] = ok
@@ -173,6 +186,18 @@ def _collect_fx_close(date: str, conn: sqlite3.Connection) -> bool:
 
     c = FXCollector()
     data = c.collect_twd(date, "close_16")
+    if data is None:
+        return False
+    c.save_fx(date, data["currency_pair"], data["rate"], "close_16")
+    return True
+
+
+def _collect_fx_close_foreign(date: str, conn: sqlite3.Connection, pair: str) -> bool:
+    """收集 USD/CNY 或 USD/KRW 收盤基準（Yahoo），存為 close_16 供隔日亞幣同步用。"""
+    from collectors.fx import FXCollector
+
+    c = FXCollector()
+    data = c.collect_foreign_fx(pair)
     if data is None:
         return False
     c.save_fx(date, data["currency_pair"], data["rate"], "close_16")
