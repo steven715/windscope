@@ -6,6 +6,43 @@
 {% if msg %}<div class="msg-banner">✅ {{ msg }}</div>{% endif %}
 
 <div class="panel">
+  <b>上傳截圖自動填表（階段二）</b>
+  <div class="dim" style="margin:6px 0">
+    上傳看盤軟體的分點明細截圖，AI 辨識後預填下方表單，<b>你核對/修正後再送出</b>。
+    未設定 API key 時這區停用，下方手動表單照常可用。
+  </div>
+  <input type="file" id="ocr-file" accept="image/*" style="font-size:13px">
+  <button type="button" id="ocr-btn">辨識並填表</button>
+  <span id="ocr-status" class="dim"></span>
+</div>
+<script>
+document.getElementById("ocr-btn").addEventListener("click", function () {
+  var f = document.getElementById("ocr-file").files[0];
+  var st = document.getElementById("ocr-status");
+  if (!f) { st.textContent = "請先選一張截圖"; return; }
+  st.textContent = "辨識中…（可能要幾秒）";
+  var fd = new FormData(); fd.append("image", f);
+  fetch("/chip-import/ocr", {method: "POST", body: fd,
+                             headers: {"ngrok-skip-browser-warning": "1"}})
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.error) { st.textContent = "⚠️ " + d.error; return; }
+      var rows = d.rows || [];
+      var names = document.getElementsByName("broker_name");
+      var buys = document.getElementsByName("buy");
+      var sells = document.getElementsByName("sell");
+      for (var i = 0; i < rows.length && i < names.length; i++) {
+        names[i].value = rows[i].broker_name || "";
+        buys[i].value = rows[i].buy || "";
+        sells[i].value = rows[i].sell || "";
+      }
+      st.textContent = "✅ 已填入 " + rows.length + " 列，請核對後送出";
+    })
+    .catch(function () { st.textContent = "辨識失敗，請改用手動填寫"; });
+});
+</script>
+
+<div class="panel">
   <div class="dim" style="margin-bottom:10px">
     看著看盤軟體（XQ／三竹／籌碼K線）的分點明細，把關鍵分點的買賣超「張數」填進來。
     送出後系統會寫入並自動重算個股訊號（連買/連賣天數、低檔吸籌…）。

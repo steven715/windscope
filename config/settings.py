@@ -63,6 +63,11 @@ VERIFY_FLAT_BAND_PCT = 0.3          # |漲跌幅| <= 0.3% 視為「平」
 FINMIND_API_URL = "https://api.finmindtrade.com/api/v4/data"
 FINMIND_TOKEN = os.environ.get("FINMIND_TOKEN", "")
 
+# === 分點截圖 OCR（階段二，視覺 LLM）===
+# 未設定 ANTHROPIC_API_KEY 時，/chip-import 的截圖上傳功能停用，手動表單照常可用。
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+OCR_MODEL = os.environ.get("OCR_MODEL", "claude-sonnet-4-6")
+
 # === Notify ===
 # provider: "log"（預設，寫進 log）或 "telegram"（需設定 token 與 chat_id）
 NOTIFY_PROVIDER = os.environ.get("PREMARKET_NOTIFY", "log")

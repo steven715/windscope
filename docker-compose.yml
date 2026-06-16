@@ -12,6 +12,9 @@ services:
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
       # 分點自動收集需 FinMind Sponsor token，.env 留空則停用（改用 import-chip CSV）
       FINMIND_TOKEN: ${FINMIND_TOKEN:-}
+      # 分點截圖 OCR（階段二）需 Anthropic API key，留空則停用（手動表單照常可用）
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OCR_MODEL: ${OCR_MODEL:-claude-sonnet-4-6}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

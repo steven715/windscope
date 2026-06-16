@@ -5,8 +5,13 @@ import logging
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.templating import Jinja2Templates
 
 from config import settings
@@ -298,6 +303,21 @@ def chip_import_submit(
 
     msg = f"已匯入 {stock_name}（{stock_id}）{date} 的 {len(items)} 筆分點，已重算個股訊號"
     return RedirectResponse(url=f"/chip-import?msg={quote(msg)}", status_code=303)
+
+
+@router.post("/chip-import/ocr")
+async def chip_import_ocr(image: UploadFile = File(...)):
+    """截圖 OCR（階段二）：辨識分點明細截圖，回 JSON 供前端預填表單。"""
+    from integration.chip_ocr import extract_chip_from_image, is_ocr_enabled
+
+    if not is_ocr_enabled():
+        return JSONResponse({"enabled": False,
+                             "error": "截圖辨識未啟用（需設定 ANTHROPIC_API_KEY）"})
+    data = await image.read()
+    rows = extract_chip_from_image(data, image.content_type or "image/png")
+    if rows is None:
+        return JSONResponse({"enabled": True, "error": "辨識失敗，請改用手動填寫"})
+    return JSONResponse({"enabled": True, "rows": rows})
 
 
 @router.get("/", response_class=HTMLResponse)

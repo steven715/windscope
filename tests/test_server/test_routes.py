@@ -450,6 +450,15 @@ class TestChipImport:
         assert resp.status_code == 200
         assert "沒有有效資料列" in resp.text
 
+    def test_ocr_disabled_without_key(self, tmp_path):
+        """未設 API key → OCR endpoint 回 enabled:False，不報錯。"""
+        _, client = self._client(tmp_path)
+        resp = client.post("/chip-import/ocr",
+                           files={"image": ("x.png", b"fake", "image/png")})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["enabled"] is False
+
 
 class TestMobilePWA:
     def test_viewport_meta_present(self, client):
