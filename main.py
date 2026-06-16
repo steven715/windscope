@@ -456,6 +456,28 @@ def cmd_serve(args: argparse.Namespace) -> None:
     uvicorn.run(app, host=settings.SERVER_HOST, port=port)
 
 
+def cmd_recompute(args: argparse.Namespace) -> None:
+    """純重算衍生指標與訊號（從 raw 導出，不收集外部資料）。"""
+    from integration.recompute import recompute_date
+    from utils.trading_calendar import iter_trading_days
+
+    if args.from_date and args.to_date:
+        dates = iter_trading_days(args.from_date, args.to_date)
+    else:
+        dates = [args.date]
+
+    with get_connection() as conn:
+        for d in dates:
+            result = recompute_date(d, conn)
+            sig = result["signal"]
+            sig_str = (f"{sig['direction']} (信心 {sig['confidence']})"
+                       if sig else "無訊號")
+            print(f"{d}: fx={result['fx_metrics']} "
+                  f"futures={result['futures_metrics']} "
+                  f"chip={result['chip_metrics']} "
+                  f"stock_signals={result['stock_signals']} → {sig_str}")
+
+
 def cmd_backfill(args: argparse.Namespace) -> None:
     """回補歷史資料。"""
     from jobs.backfill import run_backfill
@@ -658,6 +680,21 @@ def main() -> None:
         help="Stock ID (required for 'stock' query)",
     )
 
+    # recompute（純導出：從 raw 重算衍生指標與訊號）
+    recompute_parser = subparsers.add_parser(
+        "recompute",
+        help="Re-derive metrics & signals from raw data (pure, no collection)",
+    )
+    recompute_parser.add_argument(
+        "--date", default=None, help="Single date (YYYY-MM-DD, default: today)",
+    )
+    recompute_parser.add_argument(
+        "--from", dest="from_date", default=None, help="Range start (YYYY-MM-DD)",
+    )
+    recompute_parser.add_argument(
+        "--to", dest="to_date", default=None, help="Range end (YYYY-MM-DD)",
+    )
+
     # serve
     serve_parser = subparsers.add_parser(
         "serve", help="Start the web server with built-in scheduler"
@@ -695,6 +732,12 @@ def main() -> None:
 
             args.date = date.today().isoformat()
         cmd_run(args)
+    elif args.command == "recompute":
+        if args.date is None and not (args.from_date and args.to_date):
+            from datetime import date
+
+            args.date = date.today().isoformat()
+        cmd_recompute(args)
     elif args.command == "backfill":
         cmd_backfill(args)
     elif args.command == "watchlist":
