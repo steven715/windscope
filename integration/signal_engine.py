@@ -169,6 +169,11 @@ def compute_foreign_stock_signals(date: str, conn: sqlite3.Connection) -> list[d
     訊號於 08:50 產出時今日 T86 尚未收（18:30 才收），故用「今日之前」最新（前一交易日）
     的外資資料。對 watchlist 每檔算外資連買/連賣天數與累計張數。
     """
+    # 先清掉當日舊的外資訊號（只 INSERT 會殘留已不成立的訊號，如外資由連買轉賣）
+    conn.execute(
+        "DELETE FROM stock_signals WHERE date = ? AND broker_name = '外資'", (date,)
+    )
+
     watch = conn.execute(
         "SELECT stock_id FROM watchlist ORDER BY stock_id"
     ).fetchall()

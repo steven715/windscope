@@ -55,6 +55,24 @@ def test_below_threshold_no_signal():
     assert compute_foreign_stock_signals("2026-06-16", conn) == []
 
 
+def test_stale_signal_removed():
+    """外資訊號不再成立時，重算會清掉舊的殘留列（先 DELETE 再 INSERT）。"""
+    conn = sqlite3.connect(":memory:")
+    create_all_tables(conn)
+    conn.execute("INSERT INTO watchlist (stock_id, stock_name, added_date, reason) "
+                 "VALUES ('2330', '台積電', '2026-04-08', 't')")
+    # 殘留的舊外資訊號（前一次計算留下的）
+    conn.execute("INSERT INTO stock_signals (date, stock_id, broker_name, category, reasons) "
+                 "VALUES ('2026-06-17', '2330', '外資', '外資連買', '舊的')")
+    conn.commit()  # 沒有 __FOREIGN__ 資料 → 本次不該有訊號
+
+    res = compute_foreign_stock_signals("2026-06-17", conn)
+    assert res == []
+    cnt = conn.execute("SELECT COUNT(*) FROM stock_signals "
+                       "WHERE date='2026-06-17' AND broker_name='外資'").fetchone()[0]
+    assert cnt == 0
+
+
 def test_today_data_excluded():
     """只用『今日之前』的外資資料（今日 T86 未收）。"""
     conn = sqlite3.connect(":memory:")
