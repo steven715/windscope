@@ -124,7 +124,7 @@ class TestCollectForeignFX:
 
     def test_unknown_currency_pair(self, fx_collector):
         """不支援的幣對回傳 None。"""
-        data = fx_collector.collect_foreign_fx("USD/JPY")
+        data = fx_collector.collect_foreign_fx("USD/EUR")
         assert data is None
 
     def test_parse_yahoo_empty_result(self, fx_collector):

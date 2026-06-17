@@ -88,6 +88,12 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
+        ok, err = run_step("fx_close_jpy",
+                           lambda: _collect_fx_close_foreign(date, conn, "USD/JPY"))
+        results["fx_close_jpy"] = ok
+        if err:
+            errors.append(err)
+
         # 8. Chip: 分點進出（FinMind，未設 FINMIND_TOKEN 時跳過）
         ok, err = run_step("chip", lambda: _collect_chip(date, conn))
         results["chip"] = ok

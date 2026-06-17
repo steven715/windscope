@@ -75,10 +75,11 @@ class FXCollector(BaseCollector):
         return None
 
     def collect_foreign_fx(self, currency_pair: str) -> dict | None:
-        """取得 USD/CNY 或 USD/KRW（Yahoo Finance）。回傳 {"currency_pair": str, "rate": float} 或 None。"""
+        """取得 USD/CNY、USD/KRW、USD/JPY（Yahoo Finance）。回傳 {"currency_pair", "rate"} 或 None。"""
         symbol_map = {
             "USD/CNY": "USDCNY=X",
             "USD/KRW": "USDKRW=X",
+            "USD/JPY": "USDJPY=X",
         }
         symbol = symbol_map.get(currency_pair)
         if not symbol:

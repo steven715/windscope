@@ -38,8 +38,8 @@ def test_build_explain_rows():
     rows = build_explain("2026-06-16", conn)
     by_dim = {r["dim"]: r for r in rows}
 
-    # 七個維度都在，且都有原數據 + 判讀 + 為什麼
-    assert len(rows) == 7
+    # 八個維度都在，且都有原數據 + 判讀 + 為什麼
+    assert len(rows) == 8
     for r in rows:
         assert r["raw"] and r["verdict"] and r["why"]
 
@@ -72,6 +72,20 @@ def test_fx_rhythm_surge_flagged():
 
     rhythm = next(r for r in build_explain("2026-06-16", conn) if r["dim"] == "匯率節奏")
     assert "急拉" in rhythm["verdict"]
+
+
+def test_jpy_riskoff_flagged():
+    """日圓急升(USD/JPY 大跌)→ 標避險 risk-off。"""
+    conn = sqlite3.connect(":memory:")
+    create_all_tables(conn)
+    conn.execute("INSERT INTO daily_metrics (date, fx_direction) VALUES ('2026-06-17', 'neutral')")
+    conn.execute("INSERT INTO raw_futures (date, spot_close) VALUES ('2026-06-16', 45000)")  # 讓 prev_day=6/16
+    conn.execute("INSERT INTO raw_fx (date, currency_pair, close_16) VALUES ('2026-06-16', 'USD/JPY', 150.0)")
+    conn.execute("INSERT INTO raw_fx (date, currency_pair, quote_0845) VALUES ('2026-06-17', 'USD/JPY', 148.5)")
+    conn.commit()
+
+    jpy = next(r for r in build_explain("2026-06-17", conn) if r["dim"] == "日圓避險情緒")
+    assert "避險" in jpy["verdict"] and "risk-off" in jpy["verdict"]
 
 
 def test_anomaly_divergence_flagged():

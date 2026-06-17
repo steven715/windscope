@@ -142,7 +142,31 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
     rows.append(_row("美股對照（看異常）", raw, verdict, css,
                      "重點不是看漲跌、是看有沒有異常：美股大漲但台指夜盤沒怎麼動→台股相對弱勢，不建議追高。"))
 
+    # 7. 日圓避險情緒（獨立的反向風險溫度計，不進亞幣同步/訊號）
+    rows.append(_jpy_risk_gauge(date, conn, prev))
+
     return rows
+
+
+def _jpy_risk_gauge(date: str, conn: sqlite3.Connection, prev_day: str | None) -> dict:
+    """日圓避險溫度計：USD/JPY 今日報價 vs 前一交易日收盤。日圓急升=risk-off=偏空警示。"""
+    why = ("日圓是避險/套利貨幣，跟台/韓/人民幣相反：日圓急升＝套利平倉、避險情緒(risk-off)"
+           "→ 對股市偏空。這是反向的風險溫度計，不算進亞幣同步、也不直接調訊號。")
+    now = _scalar(conn, "SELECT quote_0845 FROM raw_fx WHERE date=? AND currency_pair='USD/JPY'", (date,))
+    prev = _scalar(conn, "SELECT close_16 FROM raw_fx WHERE date=? AND currency_pair='USD/JPY'", (prev_day,)) if prev_day else None
+
+    if now is None or prev is None:
+        return _row("日圓避險情緒", "資料累積中（需 USD/JPY 報價與前日收盤）", "—", "flat", why)
+
+    delta = round(now - prev, 3)  # USD/JPY 下跌(負)=日圓升值
+    raw = f"USD/JPY {now:.2f}（前日 {prev:.2f}）Δ{delta:+.2f}"
+    if delta <= -settings.JPY_RISKOFF_DELTA:
+        verdict, css = "日圓急升 → 避險(risk-off)，對股市偏空警示", "down"
+    elif delta >= settings.JPY_RISKOFF_DELTA:
+        verdict, css = "日圓走弱 → 風險偏好(risk-on)，市場較平靜", "up"
+    else:
+        verdict, css = "日圓平穩 → 無明顯避險訊號", "flat"
+    return _row("日圓避險情緒", raw, verdict, css, why)
 
 
 def _fx_rhythm(date: str, conn: sqlite3.Connection, fx_delta_twd: float | None) -> dict:

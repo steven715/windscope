@@ -65,8 +65,8 @@ def test_after_close_partial_failure(memory_db, monkeypatch):
     assert result["results"]["chip"] is False
     assert result["results"]["twse_spot_close"] is True
     assert len(result["errors"]) == 2
-    # 確認所有 11 個步驟都有被呼叫（含 CNY/KRW 收盤基準）
-    assert call_count["n"] == 11
+    # 確認所有 12 個步驟都有被呼叫（含 CNY/KRW/JPY 收盤基準）
+    assert call_count["n"] == 12
 
 
 def test_collect_fx_close_foreign_saves_close_16():

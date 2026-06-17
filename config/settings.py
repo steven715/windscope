@@ -19,6 +19,9 @@ FX_THRESHOLD_KRW = 5.0
 FX_GAP_THRESHOLD = 0.05
 FX_INTRADAY_SURGE = 0.03
 FX_INTRADAY_BARS = 12
+# 避險情緒溫度計（USD/JPY，獨立維度，不進亞幣同步/訊號）：
+# 日圓是避險/套利貨幣，急升(USD/JPY 下跌 ≥ 此值) → risk-off、對股市偏空警示。
+JPY_RISKOFF_DELTA = 1.0
 
 # === Futures ===
 FUTURES_VOLUME_LOOKBACK = 5

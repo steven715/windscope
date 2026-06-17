@@ -54,6 +54,12 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
+        # 3c. FX: USD/JPY 即時報價（避險情緒溫度計，獨立維度）
+        ok, err = run_step("fx_jpy_0845", lambda: _collect_fx_jpy(date, conn))
+        results["fx_jpy_0845"] = ok
+        if err:
+            errors.append(err)
+
         # 4. Integration: compute_fx_metrics
         ok, err = run_step("integration_fx", lambda: _compute_fx(date, conn))
         results["integration_fx"] = ok
@@ -136,6 +142,18 @@ def _collect_fx_krw(date: str, conn: sqlite3.Connection) -> bool:
 
     c = FXCollector()
     data = c.collect_foreign_fx("USD/KRW")
+    if data is None:
+        return False
+    c.save_fx(date, data["currency_pair"], data["rate"], "quote_0845")
+    return True
+
+
+def _collect_fx_jpy(date: str, conn: sqlite3.Connection) -> bool:
+    """收集 USD/JPY 即時報價（避險情緒溫度計）。"""
+    from collectors.fx import FXCollector
+
+    c = FXCollector()
+    data = c.collect_foreign_fx("USD/JPY")
     if data is None:
         return False
     c.save_fx(date, data["currency_pair"], data["rate"], "quote_0845")
