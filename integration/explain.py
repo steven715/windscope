@@ -1,12 +1,16 @@
-"""盤前解讀層：把每個指標的「原數據 + 判讀 + 為什麼(原文依據)」組成一張表，
-供學習用的 Web 面板顯示。純函數，只讀 raw_* 與 daily_metrics，不寫 DB。
+"""盤前解讀層：把每個指標的「原數據 + 判讀 + 為什麼」組成一張表，供學習用面板顯示。
+純函數，只讀 raw_* 與 daily_metrics，不寫 DB。
 
-「為什麼」文字來自發想原文〈開盤前三件事〉，見 docs/logic_article.md。
+分層原則（見使用者要求）：
+- 原數據 = 事實；判讀 = 系統立場（綁 settings 門檻 + rule_version，本檔內定）。
+- 「為什麼」= 詮釋/評註，**外部化在 config/explain_notes.json**、標來源、可放自己的觀點，
+  與判斷邏輯完全分離。改觀點只改 JSON，不動程式、不影響任何訊號。
 """
 
 import json
 import logging
 import sqlite3
+from pathlib import Path
 
 from config import settings
 from utils.trading_calendar import get_previous_trading_day
@@ -14,10 +18,31 @@ from utils.trading_calendar import get_previous_trading_day
 logger = logging.getLogger(__name__)
 
 _ASIA_ZH = {"bullish": "升", "bearish": "貶", "neutral": "平", None: "—"}
+_NOTES_PATH = Path(__file__).resolve().parent.parent / "config" / "explain_notes.json"
 
 
-def _row(dim, raw, verdict, css, why):
-    return {"dim": dim, "raw": raw, "verdict": verdict, "css": css, "why": why}
+def _load_notes() -> dict:
+    """讀取『為什麼』觀點檔。每次呼叫重讀，方便編輯後不需重啟即生效。"""
+    try:
+        return json.loads(_NOTES_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning("explain_notes 讀取失敗: %s", e)
+        return {}
+
+
+def _note(notes: dict, dim: str) -> tuple[str, str]:
+    """回傳 (觀點文字, 來源)。my_note 非空時優先、來源標『你』。"""
+    e = notes.get(dim, {})
+    my = (e.get("my_note") or "").strip()
+    if my:
+        return my, "你"
+    return e.get("note", ""), e.get("source", "")
+
+
+def _row(dim, raw, verdict, css, notes):
+    why, why_source = _note(notes, dim)
+    return {"dim": dim, "raw": raw, "verdict": verdict, "css": css,
+            "why": why, "why_source": why_source}
 
 
 def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
@@ -34,6 +59,7 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
     (fx_delta_twd, fx_direction, asia_json, asia_sync,
      spread, spread_adj, vol_ratio, oi_net, oi_delta) = m
 
+    notes = _load_notes()
     prev = get_previous_trading_day(date, conn)
     rows = []
 
@@ -49,12 +75,10 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
         "bearish": ("貶值（外資匯出，今天別衝）", "down"),
         "neutral": ("平盤（回到個股籌碼判斷）", "flat"),
     }.get(fx_direction, ("資料不足", "flat"))
-    rows.append(_row("匯率（台幣）", raw, verdict, css,
-                     "跟前一天16:00收盤比，升貶超過0.1元才算明顯。台幣是外資的腳印——"
-                     "先看匯率才不會被新聞帶風向。"))
+    rows.append(_row("匯率（台幣）", raw, verdict, css, notes))
 
     # 1b. 匯率節奏（跳空 + 緩步/急拉，用盤前 5 分序列）
-    rows.append(_fx_rhythm(date, conn, fx_delta_twd))
+    rows.append(_fx_rhythm(date, conn, fx_delta_twd, notes))
 
     # 2. 亞幣同步
     detail = json.loads(asia_json) if asia_json else {}
@@ -69,9 +93,7 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
         verdict, css = "分歧（只有部分亞幣動，買盤恐不持續）", "flat"
     else:
         verdict, css = "資料不足（亞幣收盤基準累積中）", "flat"
-    rows.append(_row("亞幣同步", raw, verdict, css,
-                     "三個一起升＝國際資金真的流入；只有台幣升＝壽險/出口商拋匯、買盤不持續；"
-                     "台貶人貶但韓元升＝外資在賣台買韓，要小心。"))
+    rows.append(_row("亞幣同步", raw, verdict, css, notes))
 
     # 3. 期貨價差
     night = _scalar(conn, "SELECT night_close FROM raw_futures WHERE date=?", (date,))
@@ -90,9 +112,7 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
         verdict, css = "逆價差>100（開低機率高）", "down"
     else:
         verdict, css = "價差<100（中性）", "flat"
-    rows.append(_row("期貨價差", raw, verdict, css,
-                     "正價差>100→開高、逆價差>100→開低。但6–8月除息旺季本來就逆價差100–300點，"
-                     "是正常現象，要扣掉除息點數再判斷。"))
+    rows.append(_row("期貨價差", raw, verdict, css, notes))
 
     # 4. 夜盤量比
     if vol_ratio is not None:
@@ -105,8 +125,7 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
             verdict, css = "量能正常", "flat"
     else:
         raw, verdict, css = "資料不足", "資料不足", "flat"
-    rows.append(_row("夜盤量比", raw, verdict, css,
-                     "爆量(>1.5倍)且價差擴大＝大戶佈局、勝率高；量縮＝市場在等、開盤先看5分鐘再動作。"))
+    rows.append(_row("夜盤量比", raw, verdict, css, notes))
 
     # 5. 外資未平倉
     if oi_net is not None:
@@ -121,8 +140,7 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
             verdict, css = "部位中性", "flat"
     else:
         raw, verdict, css = "尚未收集（收盤後更新）", "—", "flat"
-    rows.append(_row("外資未平倉", raw, verdict, css,
-                     "外資期貨空單超過3萬口→方向偏空。這是外資的期貨部位，用前一交易日收盤的數字。"))
+    rows.append(_row("外資未平倉", raw, verdict, css, notes))
 
     # 6. 美股對照（看異常）
     sp_now = _scalar(conn, "SELECT sp500_close FROM raw_futures WHERE date=?", (date,))
@@ -139,24 +157,22 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
             verdict, css = "與美股反向（留意）", "flat"
     else:
         raw, verdict, css = "資料累積中（需美股與夜盤同時有資料）", "—", "flat"
-    rows.append(_row("美股對照（看異常）", raw, verdict, css,
-                     "重點不是看漲跌、是看有沒有異常：美股大漲但台指夜盤沒怎麼動→台股相對弱勢，不建議追高。"))
+    rows.append(_row("美股對照（看異常）", raw, verdict, css, notes))
 
     # 7. 日圓避險情緒（獨立的反向風險溫度計，不進亞幣同步/訊號）
-    rows.append(_jpy_risk_gauge(date, conn, prev))
+    rows.append(_jpy_risk_gauge(date, conn, prev, notes))
 
     return rows
 
 
-def _jpy_risk_gauge(date: str, conn: sqlite3.Connection, prev_day: str | None) -> dict:
+def _jpy_risk_gauge(date: str, conn: sqlite3.Connection, prev_day: str | None,
+                    notes: dict) -> dict:
     """日圓避險溫度計：USD/JPY 今日報價 vs 前一交易日收盤。日圓急升=risk-off=偏空警示。"""
-    why = ("日圓是避險/套利貨幣，跟台/韓/人民幣相反：日圓急升＝套利平倉、避險情緒(risk-off)"
-           "→ 對股市偏空。這是反向的風險溫度計，不算進亞幣同步、也不直接調訊號。")
     now = _scalar(conn, "SELECT quote_0845 FROM raw_fx WHERE date=? AND currency_pair='USD/JPY'", (date,))
     prev = _scalar(conn, "SELECT close_16 FROM raw_fx WHERE date=? AND currency_pair='USD/JPY'", (prev_day,)) if prev_day else None
 
     if now is None or prev is None:
-        return _row("日圓避險情緒", "資料累積中（需 USD/JPY 報價與前日收盤）", "—", "flat", why)
+        return _row("日圓避險情緒", "資料累積中（需 USD/JPY 報價與前日收盤）", "—", "flat", notes)
 
     delta = round(now - prev, 3)  # USD/JPY 下跌(負)=日圓升值
     raw = f"USD/JPY {now:.2f}（前日 {prev:.2f}）Δ{delta:+.2f}"
@@ -166,15 +182,12 @@ def _jpy_risk_gauge(date: str, conn: sqlite3.Connection, prev_day: str | None) -
         verdict, css = "日圓走弱 → 風險偏好(risk-on)，市場較平靜", "up"
     else:
         verdict, css = "日圓平穩 → 無明顯避險訊號", "flat"
-    return _row("日圓避險情緒", raw, verdict, css, why)
+    return _row("日圓避險情緒", raw, verdict, css, notes)
 
 
-def _fx_rhythm(date: str, conn: sqlite3.Connection, fx_delta_twd: float | None) -> dict:
+def _fx_rhythm(date: str, conn: sqlite3.Connection, fx_delta_twd: float | None,
+               notes: dict) -> dict:
     """升貶節奏：跳空（08:45 vs 前日16:00）+ 緩步/急拉（盤前 5 分序列）。"""
-    why = ("緩步連3-5根小紅＝外資分批匯入、常連買；5分內急拉一根（>3分）＝可能央行或單一"
-           "鉅額、隔天易回貶別追；跳空（比前日16:00高/低5分以上）＝外資半夜已動、開高機率高"
-           "但小心開高走低。")
-
     # 跳空（台幣升＝USD/TWD delta 為負）
     gap = None
     if fx_delta_twd is not None and abs(fx_delta_twd) >= settings.FX_GAP_THRESHOLD:
@@ -190,7 +203,7 @@ def _fx_rhythm(date: str, conn: sqlite3.Connection, fx_delta_twd: float | None) 
         raw = "盤前序列無" + ("" if gap is None else f"（{gap}）")
         verdict = gap or "資料累積中"
         css = "flat" if gap is None else ("up" if gap == "跳空升" else "down")
-        return _row("匯率節奏", raw, verdict, css, why)
+        return _row("匯率節奏", raw, verdict, css, notes)
 
     steps = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
     max_step = max(abs(s) for s in steps)
@@ -209,7 +222,7 @@ def _fx_rhythm(date: str, conn: sqlite3.Connection, fx_delta_twd: float | None) 
     else:
         verdict = "盤前無明顯節奏"
         css = "flat"
-    return _row("匯率節奏", raw, verdict, css, why)
+    return _row("匯率節奏", raw, verdict, css, notes)
 
 
 def _scalar(conn, sql, params):

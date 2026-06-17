@@ -4,7 +4,16 @@ import json
 import sqlite3
 
 from db.schema import create_all_tables
-from integration.explain import build_explain
+from integration.explain import _note, build_explain
+
+
+def test_note_prefers_my_note_with_source():
+    """my_note 非空時優先且署名『你』；否則用原文、署名來源。"""
+    notes = {"X": {"source": "原文", "note": "原文觀點", "my_note": "我的看法"}}
+    assert _note(notes, "X") == ("我的看法", "你")
+    notes2 = {"X": {"source": "原文", "note": "原文觀點", "my_note": ""}}
+    assert _note(notes2, "X") == ("原文觀點", "原文")
+    assert _note({}, "缺") == ("", "")
 
 
 def _setup(conn):
@@ -45,6 +54,8 @@ def test_build_explain_rows():
 
     assert "平盤" in by_dim["匯率（台幣）"]["verdict"]
     assert "緩步" in by_dim["匯率節奏"]["verdict"]  # 台幣緩步升
+    # 每列都帶觀點來源（從 config/explain_notes.json 載入）
+    assert by_dim["匯率（台幣）"]["why_source"] == "原文"
     assert "正價差" in by_dim["期貨價差"]["verdict"]
     assert "夜盤46246" in by_dim["期貨價差"]["raw"]
     assert "淨空" in by_dim["外資未平倉"]["verdict"]

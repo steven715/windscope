@@ -18,3 +18,5 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      # 掛 config 讓盤前解讀觀點(explain_notes.json)在主機編輯即時生效，不必重 build
+      - ./config:/app/config
