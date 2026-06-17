@@ -3,6 +3,7 @@
 import logging
 import sqlite3
 
+from config import settings
 from db.connection import get_connection
 from db.schema import create_all_tables
 from jobs.helpers import determine_status, run_step
@@ -94,11 +95,15 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
-        # 8. Chip: 分點進出（FinMind，未設 FINMIND_TOKEN 時跳過）
-        ok, err = run_step("chip", lambda: _collect_chip(date, conn))
-        results["chip"] = ok
-        if err:
-            errors.append(err)
+        # 8. Chip: 分點進出（FinMind）。未設 FINMIND_TOKEN 時整步跳過、不計為失敗
+        #    （分點自動源需付費 token；可改用 /chip-import 手動匯入）。
+        if settings.FINMIND_TOKEN:
+            ok, err = run_step("chip", lambda: _collect_chip(date, conn))
+            results["chip"] = ok
+            if err:
+                errors.append(err)
+        else:
+            logger.info("after_close: 未設 FINMIND_TOKEN，分點自動收集略過（可用 /chip-import 手動匯入）")
 
         # 9. Integration: compute_chip_metrics
         ok, err = run_step("integration_chip", lambda: _compute_chip(date, conn))

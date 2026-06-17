@@ -53,6 +53,7 @@ def test_after_close_partial_failure(memory_db, monkeypatch):
 
     monkeypatch.setattr(after_close, "run_step", mock_step)
     monkeypatch.setattr(after_close, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(after_close.settings, "FINMIND_TOKEN", "test-token")  # 讓 chip 步驟執行
 
     with patch("jobs.after_close.get_connection") as mock_conn:
         mock_conn.return_value.__enter__ = lambda s: memory_db
@@ -65,8 +66,26 @@ def test_after_close_partial_failure(memory_db, monkeypatch):
     assert result["results"]["chip"] is False
     assert result["results"]["twse_spot_close"] is True
     assert len(result["errors"]) == 2
-    # 確認所有 12 個步驟都有被呼叫（含 CNY/KRW/JPY 收盤基準）
+    # 設了 token → 12 個步驟都有被呼叫（含 CNY/KRW/JPY 收盤基準 + chip）
     assert call_count["n"] == 12
+
+
+def test_after_close_skips_chip_without_token(memory_db, monkeypatch):
+    """未設 FINMIND_TOKEN → 分點步驟整步略過、不計失敗，可達 completed。"""
+    from jobs import after_close
+
+    monkeypatch.setattr(after_close, "run_step", lambda name, fn: (True, None))
+    monkeypatch.setattr(after_close, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(after_close.settings, "FINMIND_TOKEN", "")
+
+    with patch("jobs.after_close.get_connection") as mock_conn:
+        mock_conn.return_value.__enter__ = lambda s: memory_db
+        mock_conn.return_value.__exit__ = lambda s, *a: None
+
+        result = after_close.run_after_close("2026-04-08")
+
+    assert "chip" not in result["results"]   # 分點步驟被略過
+    assert result["status"] == "completed"   # 不再因分點而 partial
 
 
 def test_collect_fx_close_foreign_saves_close_16():
