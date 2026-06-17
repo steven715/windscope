@@ -114,9 +114,18 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
         verdict, css = "價差<100（中性）", "flat"
     rows.append(_row("期貨價差", raw, verdict, css, notes))
 
-    # 4. 夜盤量比
+    # 4. 夜盤量比（原數據顯示今夜實際口數 + 近 N 日均量，比單一倍數有感）
     if vol_ratio is not None:
-        raw = f"{vol_ratio:.2f}x（vs 近5日均量）"
+        n = settings.FUTURES_VOLUME_LOOKBACK
+        night_vol = _scalar(conn, "SELECT night_volume FROM raw_futures WHERE date=?", (date,))
+        recent = conn.execute(
+            "SELECT night_volume FROM raw_futures WHERE date < ? AND night_volume IS NOT NULL "
+            "ORDER BY date DESC LIMIT ?", (date, n)).fetchall()
+        avg = sum(r[0] for r in recent) / len(recent) if recent else None
+        if night_vol is not None and avg:
+            raw = f"今夜 {night_vol:,} 口 ｜ 近{n}日均 {avg:,.0f} 口 → {vol_ratio:.2f}倍"
+        else:
+            raw = f"{vol_ratio:.2f}x（vs 近{n}日均量）"
         if vol_ratio >= settings.VOLUME_RATIO_HIGH:
             verdict, css = "爆量（大戶提前佈局，順著做）", "up"
         elif vol_ratio <= settings.VOLUME_RATIO_LOW:

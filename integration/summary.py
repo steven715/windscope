@@ -85,11 +85,18 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
 
     # 期貨：今日夜盤收盤 + 前一交易日現貨收盤（基準）
     today_fut = conn.execute(
-        "SELECT night_close, ex_dividend_points FROM raw_futures WHERE date = ?",
+        "SELECT night_close, ex_dividend_points, night_volume FROM raw_futures WHERE date = ?",
         (date,),
     ).fetchone()
     night_close = today_fut[0] if today_fut else None
     ex_div = today_fut[1] if today_fut else None
+    night_volume = today_fut[2] if today_fut else None
+    # 近 N 日夜盤均量（讓量比有實際數字可對照）
+    _vol_rows = conn.execute(
+        "SELECT night_volume FROM raw_futures WHERE date < ? AND night_volume IS NOT NULL "
+        "ORDER BY date DESC LIMIT 5", (date,),
+    ).fetchall()
+    night_vol_avg = (sum(r[0] for r in _vol_rows) / len(_vol_rows)) if _vol_rows else None
     spot_close = None
     if prev_day:
         ps = conn.execute(
@@ -162,7 +169,11 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
         lines.append("價差  資料不可用")
 
     if fut_ratio is not None:
-        lines.append(f"夜盤量比 {fut_ratio:.2f}x")
+        if night_volume is not None and night_vol_avg:
+            lines.append(f"夜盤量比 {fut_ratio:.2f}x"
+                         f"（今夜 {night_volume:,} 口 vs 近5日均 {night_vol_avg:,.0f} 口）")
+        else:
+            lines.append(f"夜盤量比 {fut_ratio:.2f}x")
     else:
         lines.append("夜盤量比  資料不可用")
 
