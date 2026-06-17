@@ -4,6 +4,8 @@ import json
 import logging
 import sqlite3
 
+from utils.trading_calendar import get_previous_trading_day
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,26 +61,41 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
     (fx_twd, fx_cny, fx_krw, fx_dir, fx_sync, fx_detail_json,
      fut_spread, fut_adj, fut_ratio, oi_net, oi_delta) = row
 
-    # 讀取 raw_fx 取得實際匯率值
+    # 顯示基準與指標一致：今日報價 vs「前一交易日」收盤（今日收盤 18:30 才有）。
+    prev_day = get_previous_trading_day(date, conn)
+
+    # 匯率：今日 08:45 報價 + 前一交易日 16:00 收盤（基準）
     fx_rates = {}
     for pair in ["USD/TWD", "USD/CNY", "USD/KRW"]:
-        r = conn.execute(
-            "SELECT close_16, quote_0845 FROM raw_fx "
-            "WHERE date = ? AND currency_pair = ?",
+        today_r = conn.execute(
+            "SELECT quote_0845 FROM raw_fx WHERE date = ? AND currency_pair = ?",
             (date, pair),
         ).fetchone()
-        if r:
-            fx_rates[pair] = {"close_16": r[0], "quote_0845": r[1]}
+        prev_close = None
+        if prev_day:
+            pr = conn.execute(
+                "SELECT close_16 FROM raw_fx WHERE date = ? AND currency_pair = ?",
+                (prev_day, pair),
+            ).fetchone()
+            prev_close = pr[0] if pr else None
+        fx_rates[pair] = {
+            "close_16": prev_close,
+            "quote_0845": today_r[0] if today_r else None,
+        }
 
-    # 讀取 raw_futures 取得實際值
-    fut_row = conn.execute(
-        "SELECT night_close, spot_close, ex_dividend_points "
-        "FROM raw_futures WHERE date = ?",
+    # 期貨：今日夜盤收盤 + 前一交易日現貨收盤（基準）
+    today_fut = conn.execute(
+        "SELECT night_close, ex_dividend_points FROM raw_futures WHERE date = ?",
         (date,),
     ).fetchone()
-    night_close = fut_row[0] if fut_row else None
-    spot_close = fut_row[1] if fut_row else None
-    ex_div = fut_row[2] if fut_row else None
+    night_close = today_fut[0] if today_fut else None
+    ex_div = today_fut[1] if today_fut else None
+    spot_close = None
+    if prev_day:
+        ps = conn.execute(
+            "SELECT spot_close FROM raw_futures WHERE date = ?", (prev_day,)
+        ).fetchone()
+        spot_close = ps[0] if ps else None
 
     lines = []
     lines.append("══════════════════════════════════")
@@ -129,8 +146,8 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
     # === 期貨 ===
     lines.append("【期貨】")
     if night_close is not None:
-        lines.append(f"夜盤收盤  {night_close:.0f}  現貨收盤  "
-                     f"{spot_close:.0f}" if spot_close else f"夜盤收盤  {night_close:.0f}  現貨收盤  資料不可用")
+        spot_str = f"{spot_close:.0f}" if spot_close is not None else "資料不可用"
+        lines.append(f"夜盤收盤  {night_close:.0f}  前日現貨  {spot_str}")
     else:
         lines.append("夜盤收盤  資料不可用")
 
@@ -172,37 +189,17 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
         for stock_id, stock_name in watchlist:
             lines.append(f"{stock_name}({stock_id})")
 
-            metrics = conn.execute(
-                "SELECT broker_name, net_amount, consecutive_days, "
-                "       price_zone, broker_type "
-                "FROM daily_stock_metrics "
-                "WHERE date = ? AND stock_id = ? "
-                "ORDER BY ABS(net_amount) DESC",
+            # 個股觀察訊號（含外資流向、分點）——這才是判斷結果
+            sigs = conn.execute(
+                "SELECT broker_name, category, reasons FROM stock_signals "
+                "WHERE date = ? AND stock_id = ? ORDER BY broker_name",
                 (date, stock_id),
             ).fetchall()
-
-            if not metrics:
-                lines.append("  無今日資料")
+            if sigs:
+                for broker, category, reason in sigs:
+                    lines.append(f"  [{category}] {reason}（{broker}）")
             else:
-                for broker, net_amt, consec, zone, btype in metrics:
-                    type_label = f" [{btype}]" if btype else ""
-                    amt_str = _format_amount(net_amt)
-                    if net_amt is not None and net_amt >= 0:
-                        action = "買超"
-                    else:
-                        action = "賣超"
-
-                    consec_str = ""
-                    if consec is not None and consec != 0:
-                        direction = "買" if consec > 0 else "賣"
-                        consec_str = f" 連{direction}{abs(consec)}天"
-
-                    zone_str = f" 股價位置:{zone}" if zone else ""
-
-                    lines.append(
-                        f"  {broker}{type_label} {action} {amt_str}"
-                        f"{consec_str}{zone_str}"
-                    )
+                lines.append("  無觀察訊號")
 
     lines.append("")
     lines.append("══════════════════════════════════")
