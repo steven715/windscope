@@ -113,9 +113,24 @@
     .main { padding: 14px; }
     h2 { font-size: 17px; }
     .panel { overflow-x: auto; }
-    /* 資料表格（sortable）改成水平捲動：欄位不換行、不被壓縮，撐寬由 .panel 捲動 */
+    /* 資料瀏覽（sortable）：欄多，維持水平捲動 */
     table.sortable { width: auto; min-width: 100%; }
     table.sortable th, table.sortable td { white-space: nowrap; }
+    /* 一般表格（stack）：每列變一張卡、每格「標籤：值」直排，免左右滑 */
+    table.stack, table.stack tbody { display: block; width: 100%; }
+    table.stack thead { display: none; }
+    table.stack tr {
+      display: block; border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; margin-bottom: 10px;
+    }
+    table.stack td {
+      display: block; border: none; padding: 3px 0; white-space: normal;
+      font-size: 13px;
+    }
+    table.stack td[data-label]::before {
+      content: attr(data-label) "："; color: var(--dim); font-size: 12px;
+    }
+    .panel.stackwrap { overflow-x: visible; }
     .card { min-width: 130px; }
     .cards { gap: 8px; }
     .banner { flex-wrap: wrap; }

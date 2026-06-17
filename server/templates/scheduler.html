@@ -15,21 +15,20 @@
 {% endif %}
 
 <div class="panel" style="overflow-x:auto">
-  <table>
+  <table class="stack">
     <thead>
     <tr><th>Job</th><th>說明</th><th>排程時間</th><th>下次執行</th><th>上次執行</th><th>操作</th></tr>
     </thead>
     <tbody>
     {% for j in jobs %}
     <tr>
-      <td><span class="tag">{{ j.id }}</span></td>
-      <td style="max-width:420px">
-        <div>{{ j.name }}</div>
+      <td><span class="tag">{{ j.id }}</span> <b>{{ j.name }}</b></td>
+      <td data-label="說明" style="max-width:520px">
         {% if j.desc %}
-        <div class="dim" style="font-size:12px; line-height:1.5; margin-top:4px">{{ j.desc }}</div>
+        <span class="dim" style="font-size:12px; line-height:1.5">{{ j.desc }}</span>
         {% endif %}
       </td>
-      <td>
+      <td data-label="排程時間">
         <form method="post" action="/scheduler/time" style="display:flex; gap:8px; align-items:center; margin:0">
           <input type="hidden" name="job_id" value="{{ j.id }}">
           <input type="time" name="time_hhmm" value="{{ j.time_hhmm }}" required
@@ -40,8 +39,8 @@
         <div class="dim" style="font-size:11px">預設 {{ j.default_time }}（已覆寫）</div>
         {% endif %}
       </td>
-      <td>{{ j.next_run or "—" }}</td>
-      <td>
+      <td data-label="下次執行">{{ j.next_run or "—" }}</td>
+      <td data-label="上次執行">
         {% if j.last_run %}
         <div>{{ j.last_run.time }}</div>
         <div class="{{ 'up' if j.last_run.status == 'completed' else ('flat' if j.last_run.status in ('partial', 'skipped') else 'down') }}"
@@ -50,7 +49,7 @@
         <span class="dim">（本次啟動後尚未執行）</span>
         {% endif %}
       </td>
-      <td>
+      <td data-label="操作">
         <form method="post" action="/scheduler/run" style="margin:0"
               onsubmit="return confirm('立即執行「{{ j.name }}」？會以今天日期跑一次完整流程。')">
           <input type="hidden" name="job_id" value="{{ j.id }}">
