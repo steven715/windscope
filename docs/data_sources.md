@@ -118,6 +118,20 @@
 
 ---
 
+### 1.6 休市日曆（國定假日）
+
+| 項目 | 內容 |
+|------|------|
+| 用途 | 取得整年台股休市日，供交易日曆判斷；休市日跳過訊號判斷與驗證，匯率等休市無關維度照常統計 |
+| URL | `https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule` |
+| 方法 | GET |
+| 回傳格式 | JSON 陣列，每筆 `{Name, Date, Weekday, Description}` |
+| 更新時間 | 每年初公告整年；本系統 server 啟動時抓一次，之後每月 1 日 06:00 再抓（`refresh_holidays` 排程，非每日情報 job） |
+| 狀態 | ✅ VERIFIED（2026-06-19 真實回應驗證，fixture: `holiday_schedule_2026.json`，27 筆） |
+| 備註 | `Date` 為**民國年 YYYMMDD**（如 `1150619` = 2026-06-19），解析時 `int(date[:3]) + 1911`。**注意：表中混有「交易日通知」**——名稱含「開始交易」或「最後交易」者（如「國曆新年開始交易日」「農曆春節前最後交易日」）是開市日不是休市日，parser 必須排除；其餘（含補假、「市場無交易僅辦理結算交割作業」）皆為休市日。27 筆扣除 3 筆交易日通知 → 24 筆休市日。存入 `market_holidays` 表（PK=date），快取於 `utils/trading_calendar`。|
+
+---
+
 ## 二、期交所（TAIFEX）
 
 ### 2.1 期貨每日行情（含夜盤）

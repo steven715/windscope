@@ -249,6 +249,18 @@ def create_scheduler(db_path: str | None = None) -> BackgroundScheduler:
         next_run_time=datetime.now(),
     )
 
+    # 休市日曆刷新：基礎設施，非每日情報 job。啟動時抓一次（next_run_time），
+    # 之後每月 1 日 06:00 再抓。TWSE 一次給整年假日表，一年/一月查一次即足夠。
+    from jobs.refresh_holidays import run_refresh_holidays
+
+    scheduler.add_job(
+        lambda: run_refresh_holidays(db_path),
+        CronTrigger(day=1, hour=6, minute=0),
+        id="refresh_holidays", name="休市日曆刷新（每月）",
+        max_instances=1, coalesce=True, replace_existing=True,
+        next_run_time=datetime.now(),
+    )
+
     logger.info("Scheduler created with %d jobs", len(scheduler.get_jobs()))
     return scheduler
 

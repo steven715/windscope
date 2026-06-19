@@ -165,6 +165,13 @@ CREATE TABLE IF NOT EXISTS intraday_fx (
     collected_at TEXT,
     PRIMARY KEY (date, currency_pair, ts)
 );
+
+CREATE TABLE IF NOT EXISTS market_holidays (
+    date TEXT PRIMARY KEY,
+    name TEXT,
+    source TEXT,
+    fetched_at TEXT
+);
 """
 
 

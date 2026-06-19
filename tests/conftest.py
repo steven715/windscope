@@ -12,3 +12,15 @@ def memory_db():
     create_all_tables(conn)
     yield conn
     conn.close()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_holiday_cache(monkeypatch):
+    """測試間隔離休市日快取：預設無休市日（僅週末），避免 lazy load 讀到真實 DB。
+
+    需要測休市日的測試自行設定 trading_calendar._holiday_cache。
+    """
+    from utils import trading_calendar
+
+    monkeypatch.setattr(trading_calendar, "_holiday_cache", set())
+    yield

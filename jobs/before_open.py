@@ -2,6 +2,7 @@
 
 import logging
 import sqlite3
+from datetime import datetime
 
 from db.connection import get_connection
 from jobs.helpers import determine_status, run_step
@@ -14,16 +15,27 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
     """
     開盤前 job。收集即時匯率，計算匯率指標，產出當日完整摘要。
 
-    回傳格式同 after_close，額外包含 summary 文字。
+    台股休市日（國定假日）仍照常收集匯率並更新統計（休市無關的維度），
+    但跳過訊號判斷與摘要的訊號區塊——休市無交易，不該產生可被驗證的訊號。
+
+    回傳格式同 after_close，額外包含 summary 文字與 market_open 旗標。
     """
     logger.info("run_before_open: starting for %s", date)
 
-    if not is_trading_day(date):
-        logger.info("run_before_open: %s is not a trading day, skipping", date)
-        return {
-            "date": date, "status": "skipped",
-            "results": {}, "errors": [], "summary": None,
-        }
+    trading = is_trading_day(date)
+    if not trading:
+        # 週末：全球市場皆休，整步略過（沿用舊行為）。
+        # 平日休市（國定假日）：匯率等休市無關維度照收統計，僅跳過訊號判斷。
+        if datetime.strptime(date, "%Y-%m-%d").weekday() >= 5:
+            logger.info("run_before_open: %s 為週末，skipping", date)
+            return {
+                "date": date, "status": "skipped",
+                "results": {}, "errors": [], "summary": None,
+                "market_open": False,
+            }
+        logger.info(
+            "run_before_open: %s 為台股休市日，僅收集匯率統計，跳過訊號判斷", date
+        )
 
     results = {}
     errors = []
@@ -66,17 +78,18 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
-        # 5. Layer 3: 市場訊號 + 個股觀察訊號
+        # 5. Layer 3: 市場訊號 + 個股觀察訊號（休市日跳過，不寫 signals 表）
         signal = None
-        ok, err = run_step("signal", lambda: _compute_signals(date, conn))
-        if ok:
-            from integration.signal_engine import compute_market_signal
-            signal = compute_market_signal(date, conn)
-        results["signal"] = ok
-        if err:
-            errors.append(err)
+        if trading:
+            ok, err = run_step("signal", lambda: _compute_signals(date, conn))
+            if ok:
+                from integration.signal_engine import compute_market_signal
+                signal = compute_market_signal(date, conn)
+            results["signal"] = ok
+            if err:
+                errors.append(err)
 
-        # 6. 產出 daily summary 文字摘要（含訊號區塊）
+        # 6. 產出 daily summary 文字摘要（交易日附訊號區塊；休市日只更新匯率統計）
         ok, err = run_step("summary", lambda: _generate_summary(date, conn))
         if ok:
             from integration.summary import generate_daily_summary
@@ -84,16 +97,18 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
             if summary_text and signal:
                 from integration.signal_engine import format_signal_text
                 summary_text = summary_text + "\n" + format_signal_text(signal)
+            if summary_text and not trading:
+                summary_text = f"📅 {date} 台股休市，僅更新匯率統計\n" + summary_text
         results["summary"] = ok
         if err:
             errors.append(err)
 
     status = determine_status(results)
-    logger.info("run_before_open: %s status=%s", date, status)
+    logger.info("run_before_open: %s status=%s (market_open=%s)", date, status, trading)
     return {
         "date": date, "status": status,
         "results": results, "errors": errors,
-        "summary": summary_text,
+        "summary": summary_text, "market_open": trading,
     }
 
 

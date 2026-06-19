@@ -5,7 +5,15 @@ import sqlite3
 import pytest
 
 from db.schema import create_all_tables
-from utils.trading_calendar import get_previous_trading_day, get_recent_trading_days
+from utils import trading_calendar
+from utils.trading_calendar import (
+    get_next_trading_day,
+    get_previous_trading_day,
+    get_recent_trading_days,
+    is_market_holiday,
+    is_trading_day,
+    refresh_holiday_cache,
+)
 
 
 @pytest.fixture
@@ -53,6 +61,60 @@ class TestGetPreviousTradingDay:
         result = get_previous_trading_day("2026-04-09", conn)
         assert result == "2026-04-08"
         conn.close()
+
+
+class TestHolidayAwareness:
+    """休市日感知：is_trading_day / is_market_holiday / get_next_trading_day。
+
+    autouse fixture 預設清空快取，這裡顯式塞入端午節 2026-06-19 作為休市日。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _set_holiday(self, monkeypatch):
+        monkeypatch.setattr(trading_calendar, "_holiday_cache", {"2026-06-19"})
+
+    def test_is_market_holiday(self):
+        assert is_market_holiday("2026-06-19") is True
+        assert is_market_holiday("2026-06-18") is False
+
+    def test_trading_day_false_on_holiday(self):
+        # 2026-06-19 是星期五但為端午節休市
+        assert is_trading_day("2026-06-19") is False
+
+    def test_trading_day_true_on_normal_weekday(self):
+        assert is_trading_day("2026-06-18") is True
+
+    def test_trading_day_false_on_weekend(self):
+        assert is_trading_day("2026-06-20") is False  # 星期六
+
+    def test_next_trading_day_skips_holiday(self):
+        # 2026-06-18(四) 之後跳過 06-19(端午) → 06-22(週一)
+        assert get_next_trading_day("2026-06-18") == "2026-06-22"
+
+
+def test_refresh_holiday_cache_reads_db(tmp_path):
+    """refresh_holiday_cache 從 market_holidays 載入並讓 is_trading_day 生效。"""
+    db = str(tmp_path / "test.db")
+    conn = sqlite3.connect(db)
+    create_all_tables(conn)
+    conn.execute(
+        "INSERT INTO market_holidays (date, name) VALUES ('2026-06-19', '端午節')"
+    )
+    conn.commit()
+    conn.close()
+
+    n = refresh_holiday_cache(db)
+    assert n == 1
+    assert is_market_holiday("2026-06-19") is True
+    assert is_trading_day("2026-06-19") is False
+
+
+def test_load_holidays_missing_table_returns_empty(tmp_path):
+    """DB 無 market_holidays 表時退回空集合（僅排除週末），不報錯。"""
+    db = str(tmp_path / "empty.db")
+    sqlite3.connect(db).close()  # 建空 DB，無任何表
+    assert refresh_holiday_cache(db) == 0
+    assert is_trading_day("2026-06-19") is True  # 週五，無休市資料 → 視為交易日
 
 
 class TestGetRecentTradingDays:

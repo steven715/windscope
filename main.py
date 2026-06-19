@@ -479,6 +479,15 @@ def cmd_recompute(args: argparse.Namespace) -> None:
                   f"foreign={result.get('foreign_signals', 0)} → {sig_str}")
 
 
+def cmd_refresh_holidays(args: argparse.Namespace) -> None:
+    """抓 TWSE 休市日曆寫入 DB（server 啟動時與每月會自動執行，此為手動觸發）。"""
+    from jobs.refresh_holidays import run_refresh_holidays
+
+    result = run_refresh_holidays()
+    print(f"休市日曆刷新：抓到 {result['fetched']} 筆，快取共 {result['cached']} 筆"
+          f"（status={result['status']}）")
+
+
 def cmd_backfill(args: argparse.Namespace) -> None:
     """回補歷史資料。"""
     from jobs.backfill import run_backfill
@@ -586,6 +595,10 @@ def main() -> None:
 
     # init-db
     subparsers.add_parser("init-db", help="Initialize database and import config")
+    subparsers.add_parser(
+        "refresh-holidays",
+        help="Fetch TWSE market holiday calendar into DB (manual; auto on serve)",
+    )
 
     # collect
     collect_parser = subparsers.add_parser("collect", help="Collect market data")
@@ -713,6 +726,8 @@ def main() -> None:
 
     if args.command == "init-db":
         cmd_init_db(args)
+    elif args.command == "refresh-holidays":
+        cmd_refresh_holidays(args)
     elif args.command == "collect":
         if args.date is None:
             from datetime import date
