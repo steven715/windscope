@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from pathlib import Path
 from urllib.parse import quote
 
@@ -21,9 +22,13 @@ from integration.verification import (
     get_verification_stats,
 )
 from server.routes.api import (
+    _JOB_RUN_STATUSES,
     _QUERYABLE_TABLES,
     _count_by_date_range,
+    _count_job_runs,
+    _delete_job_runs,
     _query_by_date_range,
+    _query_job_runs,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,6 +38,7 @@ router = APIRouter()
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DIRECTION_LABELS = {"bullish": "↑ 偏多", "bearish": "↓ 偏空", "neutral": "— 中性"}
 _CLASS_LABELS = {"up": "漲", "down": "跌", "flat": "平"}
 # 亞幣方向中文 + 卡片配色（升值對台股偏多→綠/up；貶值→紅/down）
@@ -594,3 +600,112 @@ def scheduler_time_route(request: Request, job_id: str = Form(...),
     else:
         msg = "更新失敗：時間格式需為 HH:MM（24 小時制）"
     return RedirectResponse(url=f"/scheduler?msg={quote(msg)}", status_code=303)
+
+
+@router.post("/scheduler/name")
+def scheduler_name_route(request: Request, job_id: str = Form(...),
+                         display_name: str = Form(...)):
+    """設定 job 的顯示名稱（job_id 不變），完成後導回排程頁。"""
+    from server.scheduler import set_job_display_name
+
+    ok = set_job_display_name(job_id, display_name,
+                              scheduler=request.app.state.scheduler,
+                              db_path=request.app.state.db_path)
+    if ok:
+        msg = f"「{job_id}」顯示名稱已改為 {display_name.strip()}"
+    else:
+        msg = "更新失敗：名稱需 1–60 字、不可空白，且僅每日 job 可改"
+    return RedirectResponse(url=f"/scheduler?msg={quote(msg)}", status_code=303)
+
+
+@router.post("/scheduler/notify")
+def scheduler_notify_route(request: Request, job_id: str = Form(...),
+                           notify_enabled: str | None = Form(None)):
+    """設定 job 是否發 TG 通知。checkbox 未勾時瀏覽器不送該欄 → 視為關閉。"""
+    from server.scheduler import set_job_notify
+
+    enabled = notify_enabled is not None
+    ok = set_job_notify(job_id, enabled,
+                        scheduler=request.app.state.scheduler,
+                        db_path=request.app.state.db_path)
+    if ok:
+        msg = f"「{job_id}」TG 通知已{'開啟' if enabled else '關閉'}"
+    else:
+        msg = "更新失敗：僅每日 job 可設定通知"
+    return RedirectResponse(url=f"/scheduler?msg={quote(msg)}", status_code=303)
+
+
+@router.get("/scheduler/runs", response_class=HTMLResponse)
+def scheduler_runs_page(request: Request, job_id: str | None = None,
+                        status: str | None = None, date_from: str | None = None,
+                        date_to: str | None = None, page: int = 1,
+                        msg: str | None = None):
+    """排程執行紀錄：持久化的每次 job 執行結果，可篩 job/狀態/日期，分頁。"""
+    from server.scheduler import JOB_DEFS
+
+    db_path = request.app.state.db_path
+    # 篩選白名單化：非法 job_id / status / 日期格式一律視為不篩，避免無意義查詢
+    if job_id and job_id not in JOB_DEFS:
+        job_id = None
+    if status and status not in _JOB_RUN_STATUSES:
+        status = None
+    if date_from and not _DATE_RE.match(date_from):
+        date_from = None
+    if date_to and not _DATE_RE.match(date_to):
+        date_to = None
+
+    page_size = settings.DATA_PAGE_SIZE
+    with get_connection(db_path) as conn:
+        total = _count_job_runs(conn, job_id, status, date_from, date_to)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = max(1, min(page, total_pages))
+        offset = (page - 1) * page_size
+        rows = _query_job_runs(conn, job_id, status, date_from, date_to,
+                               limit=page_size, offset=offset)
+
+    # job 下拉選項：會被記錄的 job（排除 skip_logging 的盤中刷新）
+    job_options = [(jid, d["name"]) for jid, d in JOB_DEFS.items()
+                   if not d.get("skip_logging")]
+    return templates.TemplateResponse(request, "job_runs.html", {
+        "active": "scheduler_runs",
+        "rows": rows, "job_options": job_options,
+        "statuses": ["completed", "partial", "skipped", "failed", "error"],
+        "sel_job": job_id or "", "sel_status": status or "",
+        "date_from": date_from or "", "date_to": date_to or "",
+        "page": page, "total_pages": total_pages, "total": total,
+        "row_start": offset + 1 if rows else 0, "row_end": offset + len(rows),
+        "msg": msg,
+    })
+
+
+@router.post("/scheduler/runs/delete")
+def scheduler_runs_delete_route(
+    request: Request, mode: str = Form(...), run_id: int | None = Form(None),
+    job_id: str | None = Form(None), status: str | None = Form(None),
+    date_from: str | None = Form(None), date_to: str | None = Form(None),
+):
+    """刪除執行紀錄：mode one（單筆）/ filter（依篩選）/ all（清空）。完成導回列表。
+
+    篩選參數白名單化；filter 模式無任何條件時拒絕（避免誤刪全表，須改用 all）。
+    """
+    from server.scheduler import JOB_DEFS
+
+    if job_id and job_id not in JOB_DEFS:
+        job_id = None
+    if status and status not in _JOB_RUN_STATUSES:
+        status = None
+    if date_from and not _DATE_RE.match(date_from):
+        date_from = None
+    if date_to and not _DATE_RE.match(date_to):
+        date_to = None
+
+    with get_connection(request.app.state.db_path) as conn:
+        n = _delete_job_runs(conn, mode, run_id, job_id, status, date_from, date_to)
+
+    msg = "刪除失敗：請先設定篩選條件，或改用「清空全部」" if n < 0 else f"已刪除 {n} 筆執行紀錄"
+
+    # 保留原本的篩選回到同一視圖（單筆刪除時 job_id/status/日期僅用於導回）
+    params = {"job_id": job_id, "status": status,
+              "date_from": date_from, "date_to": date_to, "msg": msg}
+    qs = "&".join(f"{k}={quote(str(v))}" for k, v in params.items() if v)
+    return RedirectResponse(url=f"/scheduler/runs?{qs}", status_code=303)

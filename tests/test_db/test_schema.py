@@ -96,6 +96,26 @@ class TestCreateAllTables:
         assert len(tables) >= 8
         conn.close()
 
+    def test_migration_adds_quote_pm_to_existing_raw_fx(self):
+        """既有(舊 schema)raw_fx 無 quote_pm → create_all_tables 應 ALTER 補上。"""
+        conn = sqlite3.connect(":memory:")
+        # 模擬舊版 raw_fx（無 quote_pm 欄）
+        conn.execute(
+            "CREATE TABLE raw_fx (date TEXT NOT NULL, currency_pair TEXT NOT NULL, "
+            "close_16 REAL, quote_0845 REAL, ny_close REAL, collected_at TEXT, "
+            "PRIMARY KEY (date, currency_pair))"
+        )
+        cols_before = {r[1] for r in conn.execute("PRAGMA table_info(raw_fx)")}
+        assert "quote_pm" not in cols_before
+
+        create_all_tables(conn)  # 應觸發 _migrate_columns
+
+        cols_after = {r[1] for r in conn.execute("PRAGMA table_info(raw_fx)")}
+        assert "quote_pm" in cols_after
+        # 再跑一次不應重複 ALTER 或報錯
+        create_all_tables(conn)
+        conn.close()
+
 
 class TestImportBrokerTags:
     def test_import_broker_tags(self, memory_db, tmp_path):

@@ -88,29 +88,30 @@ def test_after_close_skips_chip_without_token(memory_db, monkeypatch):
     assert result["status"] == "completed"   # 不再因分點而 partial
 
 
-def test_collect_fx_close_foreign_saves_close_16():
-    """CNY/KRW 收盤基準正確存為 close_16（供隔日亞幣同步）。"""
-    from jobs.after_close import _collect_fx_close_foreign
+def test_after_close_fx_steps_use_close_16(memory_db, monkeypatch):
+    """收盤後 4 個 FX 步驟改走 collect_and_save_pair，且 slot 為 close_16。"""
+    from jobs import after_close
 
-    with patch("collectors.fx.FXCollector") as MockFX:
-        inst = MockFX.return_value
-        inst.collect_foreign_fx.return_value = {"currency_pair": "USD/CNY", "rate": 7.25}
+    monkeypatch.setattr(after_close, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(after_close.settings, "FINMIND_TOKEN", "")
 
-        ok = _collect_fx_close_foreign("2026-06-16", None, "USD/CNY")
+    calls = []
+    monkeypatch.setattr(
+        "collectors.fx.FXCollector.collect_and_save_pair",
+        lambda self, date, pair, slot: calls.append((pair, slot)) or True)
+    # 其餘 collector 都 stub 成功，避免真實 HTTP
+    monkeypatch.setattr(after_close, "_collect_twse_spot_close", lambda d, c: True)
+    monkeypatch.setattr(after_close, "_collect_twse_institutional", lambda d, c: True)
+    monkeypatch.setattr(after_close, "_collect_twse_foreign_stock", lambda d, c: True)
+    monkeypatch.setattr(after_close, "_collect_twse_stock_close", lambda d, c: True)
+    monkeypatch.setattr(after_close, "_collect_twse_ex_dividend", lambda d, c: True)
+    monkeypatch.setattr(after_close, "_collect_taifex_oi", lambda d, c: True)
+    monkeypatch.setattr(after_close, "_compute_chip", lambda d, c: True)
 
-    assert ok is True
-    inst.save_fx.assert_called_once_with("2026-06-16", "USD/CNY", 7.25, "close_16")
+    with patch("jobs.after_close.get_connection") as mock_conn:
+        mock_conn.return_value.__enter__ = lambda s: memory_db
+        mock_conn.return_value.__exit__ = lambda s, *a: None
+        after_close.run_after_close("2026-06-16")
 
-
-def test_collect_fx_close_foreign_none_returns_false():
-    """Yahoo 抓不到 → 回 False，不存。"""
-    from jobs.after_close import _collect_fx_close_foreign
-
-    with patch("collectors.fx.FXCollector") as MockFX:
-        inst = MockFX.return_value
-        inst.collect_foreign_fx.return_value = None
-
-        ok = _collect_fx_close_foreign("2026-06-16", None, "USD/CNY")
-
-    assert ok is False
-    inst.save_fx.assert_not_called()
+    assert calls == [("USD/TWD", "close_16"), ("USD/CNY", "close_16"),
+                     ("USD/KRW", "close_16"), ("USD/JPY", "close_16")]

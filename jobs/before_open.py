@@ -41,34 +41,23 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
     errors = []
     summary_text = None
 
+    from collectors.fx import FXCollector
+
     with get_connection(db_path) as conn:
-        # 1. FX: USD/TWD 08:45 即時報價
-        ok, err = run_step("fx_twd_0845", lambda: _collect_fx_quote(date, "USD/TWD", conn))
-        results["fx_twd_0845"] = ok
-        if err:
-            errors.append(err)
+        fx = FXCollector(db_path=db_path)
 
-        # 2. FX: USD/CNY 即時報價
-        ok, err = run_step("fx_cny_0845", lambda: _collect_fx_cny(date, conn))
-        results["fx_cny_0845"] = ok
-        if err:
-            errors.append(err)
-
-        # 3. FX: USD/KRW 即時報價
-        ok, err = run_step("fx_krw_0845", lambda: _collect_fx_krw(date, conn))
-        results["fx_krw_0845"] = ok
-        if err:
-            errors.append(err)
+        # 1~3, 3c. FX 即時報價（quote_0845）：來源路由收斂於 collect_and_save_pair。
+        for step, pair in (("fx_twd_0845", "USD/TWD"), ("fx_cny_0845", "USD/CNY"),
+                           ("fx_krw_0845", "USD/KRW"), ("fx_jpy_0845", "USD/JPY")):
+            ok, err = run_step(
+                step, lambda p=pair: fx.collect_and_save_pair(date, p, "quote_0845"))
+            results[step] = ok
+            if err:
+                errors.append(err)
 
         # 3b. FX: 盤前 5 分序列（升貶節奏用，Yahoo 離岸報價）
         ok, err = run_step("fx_intraday", lambda: _collect_fx_intraday(date, conn))
         results["fx_intraday"] = ok
-        if err:
-            errors.append(err)
-
-        # 3c. FX: USD/JPY 即時報價（避險情緒溫度計，獨立維度）
-        ok, err = run_step("fx_jpy_0845", lambda: _collect_fx_jpy(date, conn))
-        results["fx_jpy_0845"] = ok
         if err:
             errors.append(err)
 
@@ -115,18 +104,6 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
 # ── 內部步驟函式 ─────────────────────────────────────────────────
 
 
-def _collect_fx_quote(date: str, pair: str, conn: sqlite3.Connection) -> bool:
-    """收集 USD/TWD 08:45 即時報價。"""
-    from collectors.fx import FXCollector
-
-    c = FXCollector()
-    data = c.collect_twd(date, "quote_0845")
-    if data is None:
-        return False
-    c.save_fx(date, data["currency_pair"], data["rate"], "quote_0845")
-    return True
-
-
 def _collect_fx_intraday(date: str, conn: sqlite3.Connection) -> bool:
     """收集 USD/TWD 盤前 5 分序列（升貶節奏用）。"""
     from collectors.fx import FXCollector
@@ -136,42 +113,6 @@ def _collect_fx_intraday(date: str, conn: sqlite3.Connection) -> bool:
     if not bars:
         return False
     c.save_intraday_fx(date, "USD/TWD", bars)
-    return True
-
-
-def _collect_fx_cny(date: str, conn: sqlite3.Connection) -> bool:
-    """收集 USD/CNY 即時報價。"""
-    from collectors.fx import FXCollector
-
-    c = FXCollector()
-    data = c.collect_foreign_fx("USD/CNY")
-    if data is None:
-        return False
-    c.save_fx(date, data["currency_pair"], data["rate"], "quote_0845")
-    return True
-
-
-def _collect_fx_krw(date: str, conn: sqlite3.Connection) -> bool:
-    """收集 USD/KRW 即時報價。"""
-    from collectors.fx import FXCollector
-
-    c = FXCollector()
-    data = c.collect_foreign_fx("USD/KRW")
-    if data is None:
-        return False
-    c.save_fx(date, data["currency_pair"], data["rate"], "quote_0845")
-    return True
-
-
-def _collect_fx_jpy(date: str, conn: sqlite3.Connection) -> bool:
-    """收集 USD/JPY 即時報價（避險情緒溫度計）。"""
-    from collectors.fx import FXCollector
-
-    c = FXCollector()
-    data = c.collect_foreign_fx("USD/JPY")
-    if data is None:
-        return False
-    c.save_fx(date, data["currency_pair"], data["rate"], "quote_0845")
     return True
 
 

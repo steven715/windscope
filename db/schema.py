@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS raw_fx (
     currency_pair TEXT NOT NULL,
     close_16 REAL,
     quote_0845 REAL,
+    quote_pm REAL,
     ny_close REAL,
     collected_at TEXT,
     PRIMARY KEY (date, currency_pair)
@@ -172,12 +173,53 @@ CREATE TABLE IF NOT EXISTS market_holidays (
     source TEXT,
     fetched_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS job_config (
+    job_id TEXT PRIMARY KEY,
+    display_name TEXT,
+    notify_enabled INTEGER,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS job_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT NOT NULL,
+    job_name TEXT,
+    trigger_type TEXT NOT NULL,
+    run_date TEXT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    duration_ms INTEGER,
+    status TEXT NOT NULL,
+    summary TEXT,
+    error TEXT,
+    result_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_job_runs_started ON job_runs(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs(job_id, started_at DESC);
 """
 
 
+# 既有表加欄位用的輕量 migration：(table, column, coltype)。
+# CREATE TABLE IF NOT EXISTS 不會替既有表補欄位，故用 PRAGMA 檢查後 ALTER。
+_COLUMN_MIGRATIONS = [
+    ("raw_fx", "quote_pm", "REAL"),
+]
+
+
+def _migrate_columns(conn: sqlite3.Connection) -> None:
+    """為既有表補上新欄位（SQLite 無 ADD COLUMN IF NOT EXISTS，故先查 PRAGMA）。"""
+    for table, column, coltype in _COLUMN_MIGRATIONS:
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
+            logger.info("migrated %s: added column %s", table, column)
+
+
 def create_all_tables(conn: sqlite3.Connection) -> None:
-    """建立所有 Phase 1 的表。可重複執行（CREATE TABLE IF NOT EXISTS）。"""
+    """建立所有表並套用欄位 migration。可重複執行（冪等）。"""
     conn.executescript(_SCHEMA_SQL)
+    _migrate_columns(conn)
     logger.info("All tables created (or already exist)")
 
 

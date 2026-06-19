@@ -70,30 +70,18 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
-        # 7. FX: USD/TWD 16:00 收盤價
-        ok, err = run_step("fx_close", lambda: _collect_fx_close(date, conn))
-        results["fx_close"] = ok
-        if err:
-            errors.append(err)
+        # 7. FX 收盤(close_16)：USD/TWD 16:00 收盤＋CNY/KRW/JPY 收盤基準（供隔日亞幣
+        #    同步）。來源路由（台銀/Yahoo）收斂於 collect_and_save_pair。
+        from collectors.fx import FXCollector
 
-        # 7b/7c. FX: USD/CNY、USD/KRW 收盤基準（供隔日亞幣同步計算）
-        ok, err = run_step("fx_close_cny",
-                           lambda: _collect_fx_close_foreign(date, conn, "USD/CNY"))
-        results["fx_close_cny"] = ok
-        if err:
-            errors.append(err)
-
-        ok, err = run_step("fx_close_krw",
-                           lambda: _collect_fx_close_foreign(date, conn, "USD/KRW"))
-        results["fx_close_krw"] = ok
-        if err:
-            errors.append(err)
-
-        ok, err = run_step("fx_close_jpy",
-                           lambda: _collect_fx_close_foreign(date, conn, "USD/JPY"))
-        results["fx_close_jpy"] = ok
-        if err:
-            errors.append(err)
+        fx = FXCollector(db_path=db_path)
+        for step, pair in (("fx_close", "USD/TWD"), ("fx_close_cny", "USD/CNY"),
+                           ("fx_close_krw", "USD/KRW"), ("fx_close_jpy", "USD/JPY")):
+            ok, err = run_step(
+                step, lambda p=pair: fx.collect_and_save_pair(date, p, "close_16"))
+            results[step] = ok
+            if err:
+                errors.append(err)
 
         # 8. Chip: 分點進出（FinMind）。未設 FINMIND_TOKEN 時整步跳過、不計為失敗
         #    （分點自動源需付費 token；可改用 /chip-import 手動匯入）。
@@ -188,30 +176,6 @@ def _collect_taifex_oi(date: str, conn: sqlite3.Connection) -> bool:
     if data is None:
         return False
     c.save_oi_foreign(date, data)
-    return True
-
-
-def _collect_fx_close(date: str, conn: sqlite3.Connection) -> bool:
-    """收集 USD/TWD 16:00 收盤價。"""
-    from collectors.fx import FXCollector
-
-    c = FXCollector()
-    data = c.collect_twd(date, "close_16")
-    if data is None:
-        return False
-    c.save_fx(date, data["currency_pair"], data["rate"], "close_16")
-    return True
-
-
-def _collect_fx_close_foreign(date: str, conn: sqlite3.Connection, pair: str) -> bool:
-    """收集 USD/CNY 或 USD/KRW 收盤基準（Yahoo），存為 close_16 供隔日亞幣同步用。"""
-    from collectors.fx import FXCollector
-
-    c = FXCollector()
-    data = c.collect_foreign_fx(pair)
-    if data is None:
-        return False
-    c.save_fx(date, data["currency_pair"], data["rate"], "close_16")
     return True
 
 

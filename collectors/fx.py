@@ -16,9 +16,31 @@ SP500_SYMBOL = "^GSPC"  # 實測驗證 2026-06-12，回應格式與匯率 chart 
 
 
 class FXCollector(BaseCollector):
-    """匯率 collector：USD/TWD（台銀）、USD/CNY、USD/KRW（Yahoo Finance）。"""
+    """匯率 collector：USD/TWD（台銀）、USD/CNY/KRW/JPY（Yahoo Finance）。"""
+
+    # 走 Yahoo 的外幣對；USD/TWD 走台銀。collect_pair 依此自動路由。
+    _FOREIGN_PAIRS = ("USD/CNY", "USD/KRW", "USD/JPY")
 
     # ── collect 方法 ──────────────────────────────────────────────
+
+    def collect_pair(self, date: str, pair: str) -> dict | None:
+        """依幣別自動路由來源收一檔匯率：USD/TWD→台銀、CNY/KRW/JPY→Yahoo。
+
+        回 {"currency_pair", "rate"} 或 None。把散落各 job 的來源判斷收斂於此。
+        """
+        if pair == "USD/TWD":
+            return self.collect_twd(date)
+        if pair in self._FOREIGN_PAIRS:
+            return self.collect_foreign_fx(pair)
+        logger.error("collect_pair: unknown pair %s", pair)
+        return None
+
+    def collect_and_save_pair(self, date: str, pair: str, time_slot: str) -> bool:
+        """收一檔匯率並存入指定 time_slot 欄位。成功 True；無資料或 slot 非法 False。"""
+        data = self.collect_pair(date, pair)
+        if data is None:
+            return False
+        return self.save_fx(date, data["currency_pair"], data["rate"], time_slot)
 
     def collect(self, date: str) -> dict | None:
         """收集 USD/TWD（預設 collect 介面）。"""
@@ -199,12 +221,12 @@ class FXCollector(BaseCollector):
         self.save_fx(date, data["currency_pair"], data["rate"], "close_16")
 
     def save_fx(self, date: str, currency_pair: str, rate: float,
-                time_slot: str) -> None:
-        """存入 raw_fx，只更新指定的 time_slot 欄位。"""
+                time_slot: str) -> bool:
+        """存入 raw_fx，只更新指定的 time_slot 欄位。slot 非法回 False、不寫入。"""
         now = datetime.now().isoformat()
-        if time_slot not in ("close_16", "quote_0845", "ny_close"):
+        if time_slot not in ("close_16", "quote_0845", "quote_pm", "ny_close"):
             logger.error("Invalid time_slot: %s", time_slot)
-            return
+            return False
 
         with get_connection(self.db_path) as conn:
             conn.execute(
@@ -215,6 +237,7 @@ class FXCollector(BaseCollector):
                      collected_at = excluded.collected_at""",
                 (date, currency_pair, rate, now),
             )
+        return True
 
     # ── run ──────────────────────────────────────────────────────
 

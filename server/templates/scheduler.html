@@ -17,12 +17,24 @@
 <div class="panel" style="overflow-x:auto">
   <table class="stack">
     <thead>
-    <tr><th>Job</th><th>說明</th><th>排程時間</th><th>下次執行</th><th>上次執行</th><th>操作</th></tr>
+    <tr><th>Job</th><th>說明</th><th>排程時間</th><th>通知</th><th>下次執行</th><th>上次執行</th><th>操作</th></tr>
     </thead>
     <tbody>
     {% for j in jobs %}
     <tr>
-      <td><span class="tag">{{ j.id }}</span> <b>{{ j.name }}</b></td>
+      <td>
+        <span class="tag">{{ j.id }}</span>
+        <form method="post" action="/scheduler/name"
+              style="display:flex; gap:6px; align-items:center; margin:4px 0 0">
+          <input type="text" name="display_name" value="{{ j.name }}" maxlength="60" required
+                 style="width:160px; min-width:120px; padding:4px 8px">
+          <input type="hidden" name="job_id" value="{{ j.id }}">
+          <button type="submit" title="儲存顯示名稱（job_id 不變）">改名</button>
+        </form>
+        {% if j.name != j.default_name %}
+        <div class="dim" style="font-size:11px">預設「{{ j.default_name }}」</div>
+        {% endif %}
+      </td>
       <td data-label="說明" style="max-width:520px">
         {% if j.desc %}
         <span class="dim" style="font-size:12px; line-height:1.5">{{ j.desc }}</span>
@@ -37,6 +49,20 @@
         </form>
         {% if j.time_hhmm != j.default_time %}
         <div class="dim" style="font-size:11px">預設 {{ j.default_time }}（已覆寫）</div>
+        {% endif %}
+      </td>
+      <td data-label="通知">
+        <form method="post" action="/scheduler/notify"
+              style="display:flex; gap:6px; align-items:center; margin:0">
+          <input type="hidden" name="job_id" value="{{ j.id }}">
+          <label style="display:flex; gap:5px; align-items:center; font-size:12px">
+            <input type="checkbox" name="notify_enabled" {{ "checked" if j.notify_enabled }}
+                   style="width:auto">TG
+          </label>
+          <button type="submit" title="儲存通知設定">儲存</button>
+        </form>
+        {% if j.notify_enabled != j.notify_default %}
+        <div class="dim" style="font-size:11px">預設{{ "開" if j.notify_default else "關" }}</div>
         {% endif %}
       </td>
       <td data-label="下次執行">{{ j.next_run or "—" }}</td>

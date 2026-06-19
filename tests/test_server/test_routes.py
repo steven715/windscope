@@ -259,7 +259,8 @@ class TestScheduler:
 
         jobs = get_jobs_info(None, db_path=db_path)
         assert [j["id"] for j in jobs] == [
-            "after_night", "before_open", "verify_close", "after_close"]
+            "after_night", "before_open", "verify_close", "after_close",
+            "afternoon_fx"]
         assert all(j["next_run"] is None for j in jobs)
         assert jobs[1]["time_hhmm"] == "08:50"  # settings 預設
 
@@ -336,6 +337,436 @@ class TestScheduler:
             scheduler.shutdown(wait=False)
 
         assert run_job_now(scheduler, "no_such_job", db_path=db_path) is False
+
+    def test_build_trigger_kinds(self):
+        """_build_trigger 依 kind 產出 daily/interval/monthly 對應的 trigger。"""
+        from apscheduler.triggers.cron import CronTrigger
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        from server.scheduler import _build_trigger
+
+        t, k = _build_trigger({"kind": "daily", "days": "mon-fri", "default": "08:50"})
+        assert isinstance(t, CronTrigger) and k == {}
+
+        t, k = _build_trigger(
+            {"kind": "interval", "seconds": 12, "run_at_start": True})
+        assert isinstance(t, IntervalTrigger) and "next_run_time" in k
+
+        t, k = _build_trigger({"kind": "monthly", "day": 1, "hour": 6, "minute": 0})
+        assert isinstance(t, CronTrigger)
+
+    def test_runner_notifies_exactly_once_for_announced_job(self, monkeypatch):
+        """重構修掉 double-notify：announce=True 的 job 每次只發一封通知。"""
+        import server.scheduler as sched
+
+        calls = []
+        monkeypatch.setattr(sched, "notify",
+                            lambda title, msg: calls.append((title, msg)))
+        monkeypatch.setitem(
+            sched.JOB_DEFS["before_open"], "func",
+            lambda db: {"date": "2026-06-19", "status": "completed", "summary": "S"})
+
+        sched._make_runner("before_open")(":memory:")
+        assert len(calls) == 1
+        assert calls[0][1] == "S"  # before_open 通知內容為情報摘要
+
+    def test_runner_silent_for_infra_job(self, monkeypatch):
+        """基礎設施 job（announce=False）執行後不發通知。"""
+        import server.scheduler as sched
+
+        calls = []
+        monkeypatch.setattr(sched, "notify", lambda title, msg: calls.append(1))
+        monkeypatch.setitem(
+            sched.JOB_DEFS["refresh_holidays"], "func",
+            lambda db: {"status": "completed", "fetched": 1, "cached": 1})
+
+        sched._make_runner("refresh_holidays")(":memory:")
+        assert calls == []
+
+
+class TestJobRuns:
+    """執行紀錄持久化（Slice 1）：_record_run 寫入、skip_logging 排除、查詢頁。"""
+
+    def _db(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.close()
+        return db_path
+
+    def test_runner_persists_run(self, tmp_path, monkeypatch):
+        """一般 job 執行後在 job_runs 留下一筆，含狀態/觸發/歸屬日。"""
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        monkeypatch.setattr(sched, "notify", lambda *a: None)
+        monkeypatch.setitem(
+            sched.JOB_DEFS["after_close"], "func",
+            lambda db: {"date": "2026-06-19", "status": "completed",
+                        "results": {"a": True, "b": True}})
+
+        sched._make_runner("after_close")(db_path)
+
+        conn = sqlite3.connect(db_path)
+        rows = conn.execute(
+            "SELECT job_id, trigger_type, run_date, status, duration_ms "
+            "FROM job_runs").fetchall()
+        conn.close()
+        assert len(rows) == 1
+        assert rows[0][0] == "after_close"
+        assert rows[0][1] == "scheduled"
+        assert rows[0][2] == "2026-06-19"
+        assert rows[0][3] == "completed"
+        assert rows[0][4] is not None  # duration recorded
+
+    def test_manual_trigger_recorded(self, tmp_path, monkeypatch):
+        """trigger_type='manual' 透過 _make_runner 帶入並寫入。"""
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        monkeypatch.setattr(sched, "notify", lambda *a: None)
+        monkeypatch.setitem(
+            sched.JOB_DEFS["after_close"], "func",
+            lambda db: {"date": "2026-06-19", "status": "partial", "results": {}})
+
+        sched._make_runner("after_close", trigger_type="manual")(db_path)
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute("SELECT trigger_type FROM job_runs").fetchone()
+        conn.close()
+        assert row[0] == "manual"
+
+    def test_skip_logging_excludes_live_refresh(self, tmp_path, monkeypatch):
+        """skip_logging 的盤中刷新不寫 job_runs（避免高頻灌爆）。"""
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        monkeypatch.setitem(sched.JOB_DEFS["live_refresh"], "func", lambda db: None)
+
+        sched._make_runner("live_refresh")(db_path)
+
+        conn = sqlite3.connect(db_path)
+        count = conn.execute("SELECT COUNT(*) FROM job_runs").fetchone()[0]
+        conn.close()
+        assert count == 0
+
+    def test_error_run_recorded_as_error(self, tmp_path, monkeypatch):
+        """job 例外時 status 正規化為 'error'、error 欄存訊息，且不 raise。"""
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        monkeypatch.setattr(sched, "notify", lambda *a: None)
+
+        def boom(db):
+            raise RuntimeError("模擬炸裂")
+
+        monkeypatch.setitem(sched.JOB_DEFS["after_close"], "func", boom)
+
+        sched._make_runner("after_close")(db_path)  # 不應拋出
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute("SELECT status, error FROM job_runs").fetchone()
+        conn.close()
+        assert row[0] == "error"
+        assert "模擬炸裂" in row[1]
+
+    def test_persist_failure_never_crashes_runner(self, monkeypatch):
+        """job_runs 表不存在（裸 :memory:）時寫入失敗只記 log，不影響執行。"""
+        import server.scheduler as sched
+
+        calls = []
+        monkeypatch.setattr(sched, "notify", lambda *a: calls.append(1))
+        monkeypatch.setitem(
+            sched.JOB_DEFS["after_close"], "func",
+            lambda db: {"date": "2026-06-19", "status": "completed", "results": {}})
+
+        # :memory: 每次連線都是新空庫，無 job_runs 表 → 寫入失敗但被吞掉
+        sched._make_runner("after_close")(":memory:")
+        assert calls == [1]  # 通知照常發出
+
+    def test_notify_formatter_failure_persists_run_and_no_crash(self, tmp_path,
+                                                                monkeypatch):
+        """通知格式化炸裂時：runner 不掛、紀錄照寫（summary 留空）。"""
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        sent = []
+        monkeypatch.setattr(sched, "notify", lambda *a: sent.append(1))
+
+        def bad_notify(result):
+            raise KeyError("hit_day")  # 模擬 result 結構異常
+
+        monkeypatch.setitem(sched.JOB_DEFS["after_close"], "notify", bad_notify)
+        monkeypatch.setitem(
+            sched.JOB_DEFS["after_close"], "func",
+            lambda db: {"date": "2026-06-19", "status": "completed", "results": {}})
+
+        sched._make_runner("after_close")(db_path)  # 不應拋出
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute("SELECT status, summary FROM job_runs").fetchone()
+        conn.close()
+        assert row is not None and row[0] == "completed"  # 紀錄仍寫入
+        assert row[1] is None  # 壞掉的 summary 留空
+        assert sent == []  # 通知格式化失敗 → 該次不發，但不影響流程
+
+    def test_runs_page_empty(self, client):
+        resp = client.get("/scheduler/runs")
+        assert resp.status_code == 200
+        assert "查無執行紀錄" in resp.text
+
+    def test_runs_page_drops_invalid_date_filter(self, tmp_path):
+        """非法日期格式視為不篩，不會誤回空集合。"""
+        db_path = self._db(tmp_path)
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO job_runs (job_id, trigger_type, run_date, started_at, "
+            "status, summary) VALUES ('before_open', 'scheduled', '2026-06-18', "
+            "'2026-06-18 08:50:00', 'completed', 'MARK_X')")
+        conn.commit()
+        conn.close()
+        client = TestClient(create_app(db_path=db_path, enable_scheduler=False))
+
+        resp = client.get("/scheduler/runs", params={"date_from": "banana"})
+        assert resp.status_code == 200
+        assert "MARK_X" in resp.text  # 非法日期被丟棄，仍查得到
+
+    def test_runs_page_lists_and_filters(self, tmp_path):
+        db_path = self._db(tmp_path)
+        # 用獨特 summary marker 斷言（job 名稱會出現在篩選下拉選單，無法當判別依據）
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO job_runs (job_id, trigger_type, run_date, started_at, "
+            "status, summary) VALUES ('before_open', 'scheduled', '2026-06-18', "
+            "'2026-06-18 08:50:00', 'completed', 'MARK_MORNING')")
+        conn.execute(
+            "INSERT INTO job_runs (job_id, trigger_type, run_date, started_at, "
+            "status, summary) VALUES ('after_close', 'manual', '2026-06-18', "
+            "'2026-06-18 18:30:00', 'failed', 'MARK_EVENING')")
+        conn.commit()
+        conn.close()
+        client = TestClient(create_app(db_path=db_path, enable_scheduler=False))
+
+        resp = client.get("/scheduler/runs")
+        assert resp.status_code == 200
+        assert "MARK_MORNING" in resp.text and "MARK_EVENING" in resp.text
+
+        # 篩 job_id
+        resp = client.get("/scheduler/runs", params={"job_id": "before_open"})
+        assert "MARK_MORNING" in resp.text and "MARK_EVENING" not in resp.text
+
+        # 篩 status
+        resp = client.get("/scheduler/runs", params={"status": "failed"})
+        assert "MARK_EVENING" in resp.text and "MARK_MORNING" not in resp.text
+
+    def _seed_runs(self, db_path):
+        conn = sqlite3.connect(db_path)
+        conn.executemany(
+            "INSERT INTO job_runs (job_id, trigger_type, run_date, started_at, "
+            "status) VALUES (?, ?, ?, ?, ?)",
+            [("before_open", "scheduled", "2026-06-17", "2026-06-17 08:50:00", "completed"),
+             ("before_open", "scheduled", "2026-06-18", "2026-06-18 08:50:00", "completed"),
+             ("after_close", "manual", "2026-06-18", "2026-06-18 18:30:00", "failed")],
+        )
+        conn.commit()
+        ids = [r[0] for r in conn.execute("SELECT id FROM job_runs ORDER BY id").fetchall()]
+        conn.close()
+        return ids
+
+    def _count(self, db_path):
+        conn = sqlite3.connect(db_path)
+        n = conn.execute("SELECT COUNT(*) FROM job_runs").fetchone()[0]
+        conn.close()
+        return n
+
+    def test_delete_one(self, tmp_path):
+        db_path = self._db(tmp_path)
+        ids = self._seed_runs(db_path)
+        client = TestClient(create_app(db_path=db_path, enable_scheduler=False))
+
+        resp = client.post("/scheduler/runs/delete",
+                           data={"mode": "one", "run_id": ids[0]},
+                           follow_redirects=False)
+        assert resp.status_code == 303
+        assert self._count(db_path) == 2
+
+    def test_delete_filter_bounded(self, tmp_path):
+        db_path = self._db(tmp_path)
+        self._seed_runs(db_path)
+        client = TestClient(create_app(db_path=db_path, enable_scheduler=False))
+
+        # 只刪 before_open → 留下 after_close 1 筆
+        resp = client.post("/scheduler/runs/delete",
+                           data={"mode": "filter", "job_id": "before_open"},
+                           follow_redirects=False)
+        assert resp.status_code == 303
+        assert self._count(db_path) == 1
+
+    def test_delete_filter_refuses_unbounded(self, tmp_path):
+        """filter 模式無任何條件 → 拒絕，不刪任何東西。"""
+        db_path = self._db(tmp_path)
+        self._seed_runs(db_path)
+        client = TestClient(create_app(db_path=db_path, enable_scheduler=False))
+
+        resp = client.post("/scheduler/runs/delete", data={"mode": "filter"},
+                           follow_redirects=False)
+        assert resp.status_code == 303
+        assert "%E5%88%AA%E9%99%A4%E5%A4%B1%E6%95%97" in resp.headers["location"]  # 刪除失敗
+        assert self._count(db_path) == 3  # 一筆都沒刪
+
+    def test_delete_all(self, tmp_path):
+        db_path = self._db(tmp_path)
+        self._seed_runs(db_path)
+        client = TestClient(create_app(db_path=db_path, enable_scheduler=False))
+
+        resp = client.post("/scheduler/runs/delete", data={"mode": "all"},
+                           follow_redirects=False)
+        assert resp.status_code == 303
+        assert self._count(db_path) == 0
+
+    def test_delete_one_missing_id_refused(self, tmp_path):
+        db_path = self._db(tmp_path)
+        self._seed_runs(db_path)
+        client = TestClient(create_app(db_path=db_path, enable_scheduler=False))
+
+        resp = client.post("/scheduler/runs/delete", data={"mode": "one"},
+                           follow_redirects=False)
+        assert resp.status_code == 303
+        assert self._count(db_path) == 3  # 無 id → 不刪
+
+    def test_api_job_runs_filter(self, tmp_path):
+        db_path = self._db(tmp_path)
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO job_runs (job_id, trigger_type, run_date, started_at, "
+            "status) VALUES ('before_open', 'scheduled', '2026-06-18', "
+            "'2026-06-18 08:50:00', 'completed')")
+        conn.commit()
+        conn.close()
+        client = TestClient(create_app(db_path=db_path, enable_scheduler=False))
+
+        resp = client.get("/api/job-runs")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 1
+        assert body["rows"][0]["job_id"] == "before_open"
+
+
+class TestJobConfig:
+    """自訂名稱 + 通知開關（Slice 2）：job_config 覆寫，job_id 永遠不變。"""
+
+    def _db(self, tmp_path):
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.close()
+        return db_path
+
+    def test_get_jobs_info_defaults_without_overrides(self, tmp_path):
+        """無覆寫時 name=預設、notify_enabled=announce 預設。"""
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        jobs = {j["id"]: j for j in sched.get_jobs_info(None, db_path=db_path)}
+        bo = jobs["before_open"]
+        assert bo["name"] == bo["default_name"]
+        assert bo["notify_enabled"] is True  # before_open announce 預設開
+
+    def test_overrides_reflected_in_jobs_info(self, tmp_path):
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        assert sched.set_job_display_name("after_close", "盤後收尾", db_path=db_path)
+        assert sched.set_job_notify("after_close", False, db_path=db_path)
+
+        jobs = {j["id"]: j for j in sched.get_jobs_info(None, db_path=db_path)}
+        ac = jobs["after_close"]
+        assert ac["name"] == "盤後收尾"
+        assert ac["default_name"] != "盤後收尾"   # 預設仍保留供標示
+        assert ac["notify_enabled"] is False
+        # 改名只動 display_name、不影響 notify（獨立 upsert）；反之亦然
+        assert sched.set_job_display_name("after_close", "盤後X", db_path=db_path)
+        jobs = {j["id"]: j for j in sched.get_jobs_info(None, db_path=db_path)}
+        assert jobs["after_close"]["notify_enabled"] is False
+
+    def test_set_rejects_invalid(self, tmp_path):
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        assert sched.set_job_display_name("before_open", "  ", db_path=db_path) is False
+        assert sched.set_job_display_name("before_open", "x" * 61, db_path=db_path) is False
+        # 非 schedulable 基礎設施 job 不可設定（防盤中刷新被打開狂發通知）
+        assert sched.set_job_display_name("live_refresh", "x", db_path=db_path) is False
+        assert sched.set_job_notify("live_refresh", True, db_path=db_path) is False
+        assert sched.set_job_notify("nope", True, db_path=db_path) is False
+
+    def test_live_refresh_never_reads_job_config(self, monkeypatch):
+        """盤中刷新（每 12 秒）絕不讀 job_config——鎖死熱路徑零 DB I/O。"""
+        import server.scheduler as sched
+
+        reads = []
+        monkeypatch.setattr(sched, "_job_override",
+                            lambda jid, db: reads.append(jid) or {})
+        monkeypatch.setitem(sched.JOB_DEFS["live_refresh"], "func", lambda db: None)
+
+        sched._make_runner("live_refresh")(":memory:")
+        assert reads == []  # 非 schedulable → runner 不查 job_config
+
+    def test_runner_respects_notify_override_off(self, tmp_path, monkeypatch):
+        """使用者關閉通知後，排程執行不發 TG。"""
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        assert sched.set_job_notify("after_close", False, db_path=db_path)
+        calls = []
+        monkeypatch.setattr(sched, "notify", lambda *a: calls.append(1))
+        monkeypatch.setitem(
+            sched.JOB_DEFS["after_close"], "func",
+            lambda db: {"date": "2026-06-19", "status": "completed", "results": {}})
+
+        sched._make_runner("after_close")(db_path)
+        assert calls == []
+
+    def test_runner_logs_effective_display_name(self, tmp_path, monkeypatch):
+        """執行紀錄的 job_name 記使用者改過的顯示名（非靜態預設）。"""
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        assert sched.set_job_display_name("after_close", "我的盤後", db_path=db_path)
+        monkeypatch.setattr(sched, "notify", lambda *a: None)
+        monkeypatch.setitem(
+            sched.JOB_DEFS["after_close"], "func",
+            lambda db: {"date": "2026-06-19", "status": "completed", "results": {}})
+
+        sched._make_runner("after_close")(db_path)
+
+        conn = sqlite3.connect(db_path)
+        name = conn.execute("SELECT job_name FROM job_runs").fetchone()[0]
+        conn.close()
+        assert name == "我的盤後"
+
+    def test_name_route_persists_and_shows(self, client):
+        resp = client.post("/scheduler/name",
+                           data={"job_id": "before_open", "display_name": "晨間情報"},
+                           follow_redirects=False)
+        assert resp.status_code == 303
+        page = client.get("/scheduler")
+        assert "晨間情報" in page.text
+
+    def test_notify_route_off_when_checkbox_absent(self, client):
+        # checkbox 未勾 → 瀏覽器不送 notify_enabled → 視為關閉
+        resp = client.post("/scheduler/notify", data={"job_id": "before_open"},
+                           follow_redirects=False)
+        assert resp.status_code == 303
+        page = client.get("/scheduler")
+        assert "預設開" in page.text  # before_open 預設開、現被關 → 顯示「預設開」提示
+
+    def test_routes_reject_infra_job(self, client):
+        # 基礎設施 job 透過路由也不可改（set_* 回 False → 失敗訊息）
+        resp = client.post("/scheduler/notify", data={"job_id": "live_refresh"},
+                           follow_redirects=False)
+        assert resp.status_code == 303
+        assert "更新失敗" in resp.headers["location"] or "%E5%A4%B1%E6%95%97" in resp.headers["location"]
 
 
 class TestSchedulerRoutes:

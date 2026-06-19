@@ -29,6 +29,59 @@ def _load_json_fixture(filename: str) -> dict:
     return json.loads((FIXTURE_DIR / filename).read_text(encoding="utf-8"))
 
 
+# ── collect_pair 來源路由（收斂點）─────────────────────────────
+
+
+class TestCollectPairRouting:
+    def test_twd_routes_to_bot(self, fx_collector):
+        """USD/TWD 走台銀 collect_twd、不碰 Yahoo。"""
+        with patch.object(fx_collector, "collect_twd",
+                          return_value={"currency_pair": "USD/TWD", "rate": 31.5}) as twd, \
+             patch.object(fx_collector, "collect_foreign_fx") as foreign:
+            data = fx_collector.collect_pair("2026-06-20", "USD/TWD")
+        assert data["rate"] == 31.5
+        twd.assert_called_once()
+        foreign.assert_not_called()
+
+    def test_foreign_routes_to_yahoo(self, fx_collector):
+        """外幣對走 Yahoo collect_foreign_fx、不碰台銀。"""
+        with patch.object(fx_collector, "collect_foreign_fx",
+                          return_value={"currency_pair": "USD/JPY", "rate": 161.0}) as foreign, \
+             patch.object(fx_collector, "collect_twd") as twd:
+            data = fx_collector.collect_pair("2026-06-20", "USD/JPY")
+        assert data["rate"] == 161.0
+        foreign.assert_called_once_with("USD/JPY")
+        twd.assert_not_called()
+
+    def test_unknown_pair_returns_none(self, fx_collector):
+        assert fx_collector.collect_pair("2026-06-20", "USD/EUR") is None
+
+    def test_collect_and_save_pair_writes_slot(self, fx_collector):
+        """collect_and_save_pair 把收到的匯率寫進指定 slot（quote_pm）。"""
+        with patch.object(fx_collector, "collect_pair",
+                          return_value={"currency_pair": "USD/TWD", "rate": 31.42}):
+            ok = fx_collector.collect_and_save_pair("2026-06-20", "USD/TWD", "quote_pm")
+        assert ok is True
+        conn = sqlite3.connect(fx_collector.db_path)
+        row = conn.execute(
+            "SELECT quote_pm FROM raw_fx WHERE date='2026-06-20' "
+            "AND currency_pair='USD/TWD'").fetchone()
+        conn.close()
+        assert row[0] == 31.42
+
+    def test_collect_and_save_pair_none_returns_false(self, fx_collector):
+        with patch.object(fx_collector, "collect_pair", return_value=None):
+            assert fx_collector.collect_and_save_pair(
+                "2026-06-20", "USD/TWD", "quote_pm") is False
+
+    def test_collect_and_save_pair_invalid_slot_returns_false(self, fx_collector):
+        """slot 非法時 save_fx 不寫入並回 False，collect_and_save_pair 一併回 False。"""
+        with patch.object(fx_collector, "collect_pair",
+                          return_value={"currency_pair": "USD/TWD", "rate": 31.0}):
+            assert fx_collector.collect_and_save_pair(
+                "2026-06-20", "USD/TWD", "bogus_slot") is False
+
+
 # ── USD/TWD（台銀 CSV）──────────────────────────────────────────
 
 
