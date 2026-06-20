@@ -1,27 +1,29 @@
-"""午盤匯率 job：午後再抓一次匯率（quote_pm 槽），供盤中觀察。
+"""匯率收盤收集 job：16:00 收 FX 收盤（close_16 槽）。
 
-休市無關維度：平日（含國定假日）照收國際匯率統計；週末整步略過。
-不產生訊號、不影響早盤升貶基準——compute_fx_metrics 仍錨定 quote_0845 vs 前日 close_16，
-quote_pm 為附加觀察欄，現有下游查詢一律不受影響。
+收 USD/TWD（台銀）＋ CNY/KRW/JPY（Yahoo）的 16:00 收盤，寫入 close_16——這是隔日
+compute_fx_metrics 升貶基準用的「前一日收盤」（今日 quote_0845 vs 前日 close_16）。
+僅交易日收（close_16 是交易日收盤）；非交易日整步略過。
+
+（原為午盤 quote_pm 觀察 job，盤中匯率無意義已移除；job_id 沿用 afternoon_fx。）
 """
 
 import logging
-from datetime import datetime
 
 from jobs.helpers import determine_status, run_step
+from utils.trading_calendar import is_trading_day
 
 logger = logging.getLogger(__name__)
 
-# 午盤收集的幣別；USD/TWD 走台銀、其餘走 Yahoo（由 FXCollector.collect_pair 路由）
-AFTERNOON_FX_PAIRS = ["USD/TWD", "USD/CNY", "USD/KRW", "USD/JPY"]
+# 收盤匯率幣別；USD/TWD 走台銀、其餘走 Yahoo（由 FXCollector.collect_pair 路由）
+CLOSE_FX_PAIRS = ["USD/TWD", "USD/CNY", "USD/KRW", "USD/JPY"]
 
 
 def run_afternoon_fx(date: str, db_path: str | None = None) -> dict:
-    """午盤匯率 job：收 quote_pm 槽。週末整步略過，平日（含休市）照收。"""
+    """匯率收盤收集 job：收 close_16 槽。非交易日整步略過。"""
     logger.info("run_afternoon_fx: starting for %s", date)
 
-    if datetime.strptime(date, "%Y-%m-%d").weekday() >= 5:
-        logger.info("run_afternoon_fx: %s 為週末，skipping", date)
+    if not is_trading_day(date):
+        logger.info("run_afternoon_fx: %s 非交易日，skipping", date)
         return {"date": date, "status": "skipped", "results": {}, "errors": []}
 
     from collectors.fx import FXCollector
@@ -29,10 +31,10 @@ def run_afternoon_fx(date: str, db_path: str | None = None) -> dict:
     c = FXCollector(db_path=db_path)
     results = {}
     errors = []
-    for pair in AFTERNOON_FX_PAIRS:
-        step = "fx_pm_" + pair.split("/")[1].lower()
+    for pair in CLOSE_FX_PAIRS:
+        step = "fx_close_" + pair.split("/")[1].lower()
         ok, err = run_step(step,
-                           lambda p=pair: c.collect_and_save_pair(date, p, "quote_pm"))
+                           lambda p=pair: c.collect_and_save_pair(date, p, "close_16"))
         results[step] = ok
         if err:
             errors.append(err)

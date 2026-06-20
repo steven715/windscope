@@ -96,24 +96,39 @@ class TestCreateAllTables:
         assert len(tables) >= 8
         conn.close()
 
-    def test_migration_adds_quote_pm_to_existing_raw_fx(self):
-        """既有(舊 schema)raw_fx 無 quote_pm → create_all_tables 應 ALTER 補上。"""
+    def test_migration_drops_quote_pm_from_existing_raw_fx(self):
+        """既有 raw_fx 含廢棄欄 quote_pm → create_all_tables 應 DROP 掉（冪等）。"""
         conn = sqlite3.connect(":memory:")
-        # 模擬舊版 raw_fx（無 quote_pm 欄）
+        # 模擬含 quote_pm 的舊版 raw_fx
         conn.execute(
             "CREATE TABLE raw_fx (date TEXT NOT NULL, currency_pair TEXT NOT NULL, "
-            "close_16 REAL, quote_0845 REAL, ny_close REAL, collected_at TEXT, "
-            "PRIMARY KEY (date, currency_pair))"
+            "close_16 REAL, quote_0845 REAL, quote_pm REAL, ny_close REAL, "
+            "collected_at TEXT, PRIMARY KEY (date, currency_pair))"
         )
         cols_before = {r[1] for r in conn.execute("PRAGMA table_info(raw_fx)")}
-        assert "quote_pm" not in cols_before
+        assert "quote_pm" in cols_before
 
-        create_all_tables(conn)  # 應觸發 _migrate_columns
+        create_all_tables(conn)  # 應觸發 _migrate_drop_columns
 
         cols_after = {r[1] for r in conn.execute("PRAGMA table_info(raw_fx)")}
-        assert "quote_pm" in cols_after
-        # 再跑一次不應重複 ALTER 或報錯
+        assert "quote_pm" not in cols_after
+        # 再跑一次不應重複 DROP 或報錯
         create_all_tables(conn)
+        conn.close()
+
+    def test_migration_adds_job_config_enabled(self):
+        """既有(舊 schema)job_config 無 enabled → create_all_tables 應 ALTER 補上。"""
+        conn = sqlite3.connect(":memory:")
+        conn.execute(
+            "CREATE TABLE job_config (job_id TEXT PRIMARY KEY, display_name TEXT, "
+            "display_desc TEXT, notify_enabled INTEGER, updated_at TEXT)"
+        )
+        assert "enabled" not in {r[1] for r in conn.execute("PRAGMA table_info(job_config)")}
+
+        create_all_tables(conn)
+
+        assert "enabled" in {r[1] for r in conn.execute("PRAGMA table_info(job_config)")}
+        create_all_tables(conn)  # 冪等
         conn.close()
 
     def test_migration_adds_display_desc_to_existing_job_config(self):

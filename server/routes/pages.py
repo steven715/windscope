@@ -617,8 +617,8 @@ async def scheduler_save_route(request: Request):
     只動到的欄位才呼叫對應 setter；回報實際更新數與錯誤後導回排程頁。
     """
     from server.scheduler import (
-        get_jobs_info, set_job_desc, set_job_display_name, set_job_notify,
-        set_schedule_time,
+        get_jobs_info, set_job_desc, set_job_display_name, set_job_enabled,
+        set_job_notify, set_schedule_time,
     )
 
     form = await request.form()
@@ -646,6 +646,15 @@ async def scheduler_save_route(request: Request):
                 changed += 1
             else:
                 errors.append(f"{j['name']}：說明需 ≤300 字")
+
+        # 啟用/停用：所有 job（含基礎設施）皆可切。hidden0+checkbox1 取最後值。
+        evals = form.getlist(f"enabled__{jid}")
+        ev = evals[-1] if evals else None
+        if ev is not None and (ev == "1") != j["enabled"]:
+            if set_job_enabled(jid, ev == "1", scheduler=scheduler, db_path=db_path):
+                changed += 1
+            else:
+                errors.append(f"{j['name']}：啟用設定失敗")
 
         # 排程時間／通知：僅每日（editable）job；基礎設施 job 不渲染這些欄位、此處也跳過
         if not j.get("editable"):

@@ -244,6 +244,43 @@ class TestScheduler:
         assert {"after_night", "before_open", "verify_close",
                 "after_close"}.issubset(jobs)
         assert "live_refresh" in jobs
+        # 籌碼分點收集出廠停用 → 不加入排程
+        assert "chip_collect" not in jobs
+
+    def test_disabled_job_excluded_then_added_on_enable(self, tmp_path):
+        """停用的 job 不在排程；set_job_enabled(True) 後即時加入 live scheduler。"""
+        import server.scheduler as sched
+
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.close()
+
+        scheduler = sched.create_scheduler(db_path=db_path)
+        assert scheduler.get_job("chip_collect") is None       # 出廠停用
+        assert sched.set_job_enabled("chip_collect", True,
+                                     scheduler=scheduler, db_path=db_path)
+        assert scheduler.get_job("chip_collect") is not None    # 啟用後即時加入
+        # get_jobs_info 反映啟用狀態
+        jobs = {j["id"]: j for j in sched.get_jobs_info(scheduler, db_path=db_path)}
+        assert jobs["chip_collect"]["enabled"] is True
+
+    def test_set_job_enabled_disables_and_removes(self, tmp_path):
+        """啟用中的 job 被停用 → 從 live scheduler 移除、get_jobs_info 顯示 enabled False。"""
+        import server.scheduler as sched
+
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.close()
+
+        scheduler = sched.create_scheduler(db_path=db_path)
+        assert scheduler.get_job("after_close") is not None
+        assert sched.set_job_enabled("after_close", False,
+                                     scheduler=scheduler, db_path=db_path)
+        assert scheduler.get_job("after_close") is None
+        jobs = {j["id"]: j for j in sched.get_jobs_info(scheduler, db_path=db_path)}
+        assert jobs["after_close"]["enabled"] is False
 
     def test_format_job_notify_verify(self):
         from server.scheduler import _format_job_notify
@@ -271,10 +308,10 @@ class TestScheduler:
         conn.close()
 
         jobs = get_jobs_info(None, db_path=db_path)
-        # 每日情報 job + 基礎設施 job（盤中刷新、休市日曆刷新）皆列出，順序＝JOB_DEFS
+        # 每日情報 job + 籌碼分點收集 + 基礎設施 job 皆列出，順序＝JOB_DEFS
         assert [j["id"] for j in jobs] == [
             "after_night", "before_open", "verify_close", "after_close",
-            "afternoon_fx", "live_refresh", "refresh_holidays"]
+            "afternoon_fx", "chip_collect", "live_refresh", "refresh_holidays"]
         assert all(j["next_run"] is None for j in jobs)
         assert jobs[1]["time_hhmm"] == "08:50"  # settings 預設
 
@@ -903,6 +940,19 @@ class TestJobConfig:
         assert "我的自訂說明" in resp.text
         assert 'value="20:15"' in resp.text
         assert "已儲存 4 項" in resp.text
+
+    def test_save_route_enables_chip_collect(self, client):
+        # 籌碼分點收集出廠停用 → 透過 enabled toggle(hidden0+checkbox1)打開
+        resp = client.post("/scheduler/save",
+                           data={"enabled__chip_collect": ["0", "1"]},
+                           follow_redirects=True)
+        assert resp.status_code == 200
+        assert "已儲存 1 項變更" in resp.text
+
+    def test_scheduler_page_renders_enable_toggle(self, client):
+        resp = client.get("/scheduler")
+        assert 'name="enabled__chip_collect"' in resp.text   # 啟用開關
+        assert "已停用" in resp.text                          # chip_collect 出廠停用
 
     def test_save_route_infra_name_editable_notify_ignored(self, client):
         # 基礎設施 job：名稱可改、通知不可改（硬塞 notify 也被忽略）→ 只算 1 項變更

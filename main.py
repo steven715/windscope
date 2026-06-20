@@ -409,6 +409,14 @@ def cmd_run(args: argparse.Namespace) -> None:
         from jobs.verify_close import run_verify_close
 
         result = run_verify_close(date)
+    elif job_name == "afternoon-fx":
+        from jobs.afternoon_fx import run_afternoon_fx
+
+        result = run_afternoon_fx(date)
+    elif job_name == "chip-collect":
+        from jobs.chip_collect import run_chip_collect
+
+        result = run_chip_collect(date)
     else:
         print(f"Unknown job: {job_name}")
         sys.exit(1)
@@ -632,11 +640,13 @@ def main() -> None:
 
     # run (job)
     run_parser = subparsers.add_parser(
-        "run", help="Run a complete job (after-close, after-night, before-open, verify-close)"
+        "run", help="Run a complete job (after-close, after-night, before-open, "
+                    "verify-close, afternoon-fx, chip-collect)"
     )
     run_parser.add_argument(
         "job_name",
-        choices=["after-close", "after-night", "before-open", "verify-close"],
+        choices=["after-close", "after-night", "before-open", "verify-close",
+                 "afternoon-fx", "chip-collect"],
         help="Job to run",
     )
     run_parser.add_argument(

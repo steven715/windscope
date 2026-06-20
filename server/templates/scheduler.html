@@ -27,7 +27,7 @@
 <div class="panel" style="overflow-x:auto">
   <table class="stack">
     <thead>
-    <tr><th>名稱</th><th>說明</th><th>排程時間</th><th>通知</th><th>下次執行</th><th>上次執行</th><th>操作</th></tr>
+    <tr><th>名稱</th><th>說明</th><th>排程時間</th><th>通知</th><th>下次執行</th><th>上次執行</th><th>操作</th><th>啟用</th></tr>
     </thead>
     <tbody>
     {% for j in jobs %}
@@ -75,7 +75,9 @@
         <span class="dim">—</span>
         {% endif %}
       </td>
-      <td data-label="下次執行">{{ j.next_run or "—" }}</td>
+      <td data-label="下次執行">
+        {% if not j.enabled %}<span class="dim">已停用</span>{% else %}{{ j.next_run or "—" }}{% endif %}
+      </td>
       <td data-label="上次執行">
         {% if j.last_run %}
         <div>{{ j.last_run.time }}</div>
@@ -92,6 +94,15 @@
           <button type="submit" class="btn-run" {{ "disabled" if not scheduler_enabled }}
                   {% if not scheduler_enabled %}title="排程器未啟用時無法手動執行"{% endif %}>▶ 執行</button>
         </form>
+      </td>
+      <td data-label="啟用">
+        <!-- 每個排程一顆啟用開關。hidden 伴隨欄保證未勾時也送出 0 → 後端取最後一個值 -->
+        <label class="switch" title="啟用此排程（停用＝不自動執行，仍可手動執行）">
+          <input type="hidden" name="enabled__{{ j.id }}" value="0" form="sched-form">
+          <input type="checkbox" name="enabled__{{ j.id }}" value="1" form="sched-form"
+                 {{ "checked" if j.enabled }}>
+          <span class="slider"></span>
+        </label>
       </td>
     </tr>
     {% endfor %}

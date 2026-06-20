@@ -91,6 +91,14 @@ def _run_afternoon_fx(db_path: str | None) -> dict:
     return result
 
 
+def _run_chip_collect(db_path: str | None) -> dict:
+    from jobs.chip_collect import run_chip_collect
+
+    result = run_chip_collect(_today(), db_path=db_path)
+    logger.info("scheduled chip_collect: %s", result["status"])
+    return result
+
+
 def _run_live_refresh(db_path: str | None) -> dict | None:
     """盤中即時行情背景刷新：抓 MIS 存記憶體快取。非刷新時段內部自動 no-op。
 
@@ -190,8 +198,8 @@ JOB_DEFS: dict[str, dict] = {
     },
     "after_close": {
         "name": "收盤後收集 (週一~五)",
-        "desc": "三大法人／外資個股／個股收盤／除息／外資未平倉／USD與CNY/KRW/JPY收盤／分點"
-                "→ 算籌碼指標(隔日基準)。",
+        "desc": "加權指數收盤／三大法人／外資個股／除息預估／外資期貨未平倉。"
+                "（個股收盤＋分點＋籌碼指標已拆到籌碼分點收集；匯率收盤拆到 16:00 收集）",
         "func": _run_after_close,
         "trigger": {"kind": "daily", "days": "mon-fri",
                     "default": settings.SCHEDULE_AFTER_CLOSE},
@@ -200,9 +208,9 @@ JOB_DEFS: dict[str, dict] = {
         "announce": True,
     },
     "afternoon_fx": {
-        "name": "午盤匯率收集 (週一~五)",
-        "desc": "午後再抓一次 USD/TWD 與 CNY/KRW/JPY 匯率(quote_pm 槽)，供盤中觀察。"
-                "不產生訊號、不影響早盤升貶基準。預設不發通知，可於上方開關開啟。",
+        "name": "匯率收盤收集 (週一~五)",
+        "desc": "16:00 收 USD/TWD(台銀)＋CNY/KRW/JPY(Yahoo) 收盤(close_16)，作為隔日升貶"
+                "基準（今日早盤 quote_0845 vs 前日 close_16）。僅交易日收，預設不發通知。",
         "func": _run_afternoon_fx,
         "trigger": {"kind": "daily", "days": "mon-fri",
                     "default": settings.SCHEDULE_AFTERNOON_FX},
@@ -210,7 +218,20 @@ JOB_DEFS: dict[str, dict] = {
         "schedulable": True,
         "announce": False,
     },
-    # ── 基礎設施 job：不在排程頁顯示、不發通知 ──
+    "chip_collect": {
+        "name": "籌碼分點收集 (週一~五)",
+        "desc": "個股收盤價 → 分點進出(FinMind，未設 token 則略過，可用 /chip-import 手動匯入)"
+                " → 算籌碼衍生指標(隔日個股觀察訊號基準)。預設停用，串好分點來源後再啟用。",
+        "func": _run_chip_collect,
+        "trigger": {"kind": "daily", "days": "mon-fri",
+                    "default": settings.SCHEDULE_CHIP_COLLECT},
+        "notify": _notify_generic,
+        "schedulable": True,
+        "announce": False,
+        # 出廠即停用：排程器不自動跑，串好分點來源後於排程頁開啟（手動執行仍可測試）
+        "enabled_default": False,
+    },
+    # ── 基礎設施 job：排程頁顯示為唯讀（時間固定、不發通知；名稱/說明/啟用仍可改） ──
     "live_refresh": {
         "name": "盤中即時行情刷新",
         "desc": "定時抓台股加權指數即時行情（證交所 MIS 即時資訊系統 mis.twse.com.tw）"
@@ -291,30 +312,30 @@ def get_job_overrides(db_path: str | None = None) -> dict[str, dict]:
     try:
         with get_connection(db_path) as conn:
             rows = conn.execute(
-                "SELECT job_id, display_name, display_desc, notify_enabled "
+                "SELECT job_id, display_name, display_desc, notify_enabled, enabled "
                 "FROM job_config"
             ).fetchall()
-        for jid, name, desc, notify_en in rows:
+        for jid, name, desc, notify_en, enabled in rows:
             out[jid] = {"display_name": name, "display_desc": desc,
-                        "notify_enabled": notify_en}
+                        "notify_enabled": notify_en, "enabled": enabled}
     except Exception as e:
         logger.warning("get_job_overrides fallback to empty: %s", e)
     return out
 
 
 def _job_override(job_id: str, db_path: str | None) -> dict:
-    """讀單一 job 的覆寫設定 {display_name, display_desc, notify_enabled}。無列回 {}。"""
+    """讀單一 job 的覆寫設定 {display_name, display_desc, notify_enabled, enabled}。無列回 {}。"""
     try:
         with get_connection(db_path) as conn:
             row = conn.execute(
-                "SELECT display_name, display_desc, notify_enabled "
+                "SELECT display_name, display_desc, notify_enabled, enabled "
                 "FROM job_config WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
         if row is None:
             return {}
         return {"display_name": row[0], "display_desc": row[1],
-                "notify_enabled": row[2]}
+                "notify_enabled": row[2], "enabled": row[3]}
     except Exception as e:
         logger.warning("job_config read failed for %s: %s", job_id, e)
         return {}
@@ -406,6 +427,51 @@ def set_job_notify(job_id: str, enabled: bool,
             (job_id, 1 if enabled else 0, now),
         )
     logger.info("job notify updated: %s -> %s", job_id, enabled)
+    return True
+
+
+def _effective_enabled(job_id: str, overrides: dict, spec: dict) -> bool:
+    """這個 job 是否啟用：使用者覆寫優先，否則用 enabled_default（預設 True）。"""
+    en = overrides.get(job_id, {}).get("enabled")
+    return bool(en) if en is not None else spec.get("enabled_default", True)
+
+
+def set_job_enabled(job_id: str, enabled: bool,
+                    scheduler: BackgroundScheduler | None = None,
+                    db_path: str | None = None) -> bool:
+    """啟用/停用 job。停用＝從排程器移除（不自動跑，但手動「執行」仍可）；啟用＝重新加入。
+
+    任何已知 job（含基礎設施）皆可設。live scheduler 在時同步加/移除該 job。
+    """
+    spec = JOB_DEFS.get(job_id)
+    if spec is None:
+        logger.error("set_job_enabled rejected: job_id=%s", job_id)
+        return False
+
+    now = datetime.now().isoformat()
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "INSERT INTO job_config (job_id, enabled, updated_at) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(job_id) DO UPDATE SET "
+            " enabled = excluded.enabled, updated_at = excluded.updated_at",
+            (job_id, 1 if enabled else 0, now),
+        )
+
+    if scheduler is not None:
+        try:
+            if enabled and scheduler.get_job(job_id) is None:
+                times = get_schedule_times(db_path)
+                trigger, kwargs = _build_trigger(spec["trigger"], times.get(job_id))
+                scheduler.add_job(
+                    _make_runner(job_id), trigger, args=[db_path],
+                    id=job_id, name=spec["name"], **kwargs,
+                )
+            elif not enabled and scheduler.get_job(job_id) is not None:
+                scheduler.remove_job(job_id)
+        except Exception as e:
+            logger.warning("enable/disable job failed for %s: %s", job_id, e)
+    logger.info("job enabled updated: %s -> %s", job_id, enabled)
     return True
 
 
@@ -568,11 +634,18 @@ def run_job_now(scheduler: BackgroundScheduler | None, job_id: str,
 
 
 def create_scheduler(db_path: str | None = None) -> BackgroundScheduler:
-    """建立並設定所有 job 的 scheduler（未啟動）。每日 job 時間取 DB 覆寫值或預設。"""
+    """建立並設定所有 job 的 scheduler（未啟動）。每日 job 時間取 DB 覆寫值或預設。
+
+    停用（enabled=False）的 job 不加入排程→不自動跑；之後從排程頁啟用會即時 add_job。
+    """
     scheduler = BackgroundScheduler()
     times = get_schedule_times(db_path)
+    overrides = get_job_overrides(db_path)
 
     for job_id, d in JOB_DEFS.items():
+        if not _effective_enabled(job_id, overrides, d):
+            logger.info("job %s disabled, not scheduled", job_id)
+            continue
         trigger, kwargs = _build_trigger(d["trigger"], times.get(job_id))
         scheduler.add_job(
             _make_runner(job_id), trigger,
@@ -615,6 +688,7 @@ def get_jobs_info(scheduler: BackgroundScheduler | None,
         eff_desc = ov_desc if ov_desc else d.get("desc", "")
         notify_en = ov.get("notify_enabled")
         eff_notify = bool(notify_en) if notify_en is not None else d.get("announce", True)
+        eff_enabled = _effective_enabled(job_id, overrides, d)
 
         time_hhmm = times.get(job_id)  # 基礎設施 job 不在 times → None
         next_run = None
@@ -635,6 +709,7 @@ def get_jobs_info(scheduler: BackgroundScheduler | None,
             "schedule_label": _schedule_label(d["trigger"], time_hhmm),
             "notify_enabled": eff_notify,
             "notify_default": d.get("announce", True),
+            "enabled": eff_enabled,
             "next_run": next_run,
             "last_run": _last_runs.get(job_id),
         })

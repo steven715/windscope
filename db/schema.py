@@ -11,7 +11,6 @@ CREATE TABLE IF NOT EXISTS raw_fx (
     currency_pair TEXT NOT NULL,
     close_16 REAL,
     quote_0845 REAL,
-    quote_pm REAL,
     ny_close REAL,
     collected_at TEXT,
     PRIMARY KEY (date, currency_pair)
@@ -179,6 +178,7 @@ CREATE TABLE IF NOT EXISTS job_config (
     display_name TEXT,
     display_desc TEXT,
     notify_enabled INTEGER,
+    enabled INTEGER,
     updated_at TEXT
 );
 
@@ -204,8 +204,14 @@ CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs(job_id, started_at DESC)
 # 既有表加欄位用的輕量 migration：(table, column, coltype)。
 # CREATE TABLE IF NOT EXISTS 不會替既有表補欄位，故用 PRAGMA 檢查後 ALTER。
 _COLUMN_MIGRATIONS = [
-    ("raw_fx", "quote_pm", "REAL"),
     ("job_config", "display_desc", "TEXT"),
+    ("job_config", "enabled", "INTEGER"),
+]
+
+# 既有表移除欄位用的 migration：(table, column)。SQLite >=3.35 支援 DROP COLUMN，
+# 先查 PRAGMA 確認欄位還在才 drop（冪等）。quote_pm（午盤匯率觀察）已停用、移除。
+_DROP_COLUMNS = [
+    ("raw_fx", "quote_pm"),
 ]
 
 
@@ -218,10 +224,20 @@ def _migrate_columns(conn: sqlite3.Connection) -> None:
             logger.info("migrated %s: added column %s", table, column)
 
 
+def _migrate_drop_columns(conn: sqlite3.Connection) -> None:
+    """移除既有表的廢棄欄位（欄位還在才 drop，冪等）。"""
+    for table, column in _DROP_COLUMNS:
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column in existing:
+            conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+            logger.info("migrated %s: dropped column %s", table, column)
+
+
 def create_all_tables(conn: sqlite3.Connection) -> None:
     """建立所有表並套用欄位 migration。可重複執行（冪等）。"""
     conn.executescript(_SCHEMA_SQL)
     _migrate_columns(conn)
+    _migrate_drop_columns(conn)
     logger.info("All tables created (or already exist)")
 
 

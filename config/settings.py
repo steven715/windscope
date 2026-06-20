@@ -87,6 +87,8 @@ LIVE_REFRESH_SECONDS = 12
 DATA_PAGE_SIZE = 50
 SCHEDULE_AFTER_NIGHT = "05:30"
 SCHEDULE_BEFORE_OPEN = "08:50"
-SCHEDULE_AFTERNOON_FX = "13:00"   # 午盤再抓一次匯率(quote_pm)，盤中觀察用
+SCHEDULE_AFTERNOON_FX = "16:00"   # 收盤匯率：16:00 FX 收盤(close_16)，USD/TWD + CNY/KRW/JPY
 SCHEDULE_VERIFY_CLOSE = "14:30"   # 13:30 收盤後，證交所指數OHLC約需~1小時才發布，故排14:30
+# 18:30：三大法人(T86)/外資個股/除息/期貨未平倉等盤後資料分批發布，~傍晚才齊，故留安全邊際
 SCHEDULE_AFTER_CLOSE = "18:30"
+SCHEDULE_CHIP_COLLECT = "18:00"   # 籌碼分點收集(個股收盤+分點+算指標)；預設停用，串好來源再開

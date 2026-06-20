@@ -224,7 +224,7 @@ class FXCollector(BaseCollector):
                 time_slot: str) -> bool:
         """存入 raw_fx，只更新指定的 time_slot 欄位。slot 非法回 False、不寫入。"""
         now = datetime.now().isoformat()
-        if time_slot not in ("close_16", "quote_0845", "quote_pm", "ny_close"):
+        if time_slot not in ("close_16", "quote_0845", "ny_close"):
             logger.error("Invalid time_slot: %s", time_slot)
             return False
 

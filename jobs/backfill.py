@@ -6,6 +6,7 @@ import time
 from db.connection import get_connection
 from jobs.after_close import run_after_close
 from jobs.after_night import run_after_night
+from jobs.chip_collect import run_chip_collect
 from utils.trading_calendar import iter_trading_days
 
 logger = logging.getLogger(__name__)
@@ -17,11 +18,13 @@ def run_backfill(start_date: str, end_date: str,
     回補指定日期範圍的歷史資料。
 
     限制：
-    - 只回補 after_close 和 after_night 的資料（這些有歷史可查）
-    - 不回補 before_open 的即時匯率（08:45 報價無法回補歷史）
-    - 不回補 chip 分點資料（依賴 CSV 手動匯入）
+    - 回補 after_close（市場面）、after_night、chip_collect（個股收盤＋籌碼指標）
+      ——這些有歷史可查；chip_collect 連帶補回 __PRICE_ONLY__ 收盤價（MA20 基礎）。
+    - 不回補 before_open 的即時匯率（08:45 報價、台銀牌價只有即時值，無法回補歷史）
+    - chip 分點明細需 FinMind token 或 /chip-import CSV，未設則該步略過。
 
     日期從舊到新執行，因為 integration 計算依賴歷史資料。
+    chip_collect 以函式直呼，不受其「排程啟用/停用」開關影響（啟用只管自動排程）。
     """
     logger.info("run_backfill: %s ~ %s", start_date, end_date)
 
@@ -36,24 +39,22 @@ def run_backfill(start_date: str, end_date: str,
     for i, date in enumerate(trading_days, 1):
         logger.info("Backfill [%d/%d]: %s", i, total, date)
 
-        # 執行 after_close（不含 chip 分點）
+        # 收盤後市場面 + 夜盤後 + 籌碼分點（個股收盤＋分點＋算籌碼指標，自含 compute）
         ac_result = run_after_close(date, db_path)
-
-        # 執行 after_night
         an_result = run_after_night(date, db_path)
+        cc_result = run_chip_collect(date, db_path)
 
-        # 合併兩個 job 的結果
+        # 合併三個 job 的結果
         merged_results = {}
         merged_errors = []
-        merged_results.update(ac_result.get("results", {}))
-        merged_results.update(an_result.get("results", {}))
-        merged_errors.extend(ac_result.get("errors", []))
-        merged_errors.extend(an_result.get("errors", []))
+        for r in (ac_result, an_result, cc_result):
+            merged_results.update(r.get("results", {}))
+            merged_errors.extend(r.get("errors", []))
 
-        # 也跑 integration（FX 因缺 quote_0845 會產出 NULL delta，正常）
+        # 補算 fx / futures 衍生指標（chip 指標已由 chip_collect 內部計算）。
+        # FX 因缺 quote_0845 會產出 NULL delta，正常。
         try:
             with get_connection(db_path) as conn:
-                from integration.chip_metrics import compute_chip_metrics
                 from integration.futures_metrics import compute_futures_metrics
                 from integration.fx_metrics import compute_fx_metrics
 
@@ -66,11 +67,6 @@ def run_backfill(start_date: str, end_date: str,
                     compute_futures_metrics(date, conn)
                 except Exception as e:
                     logger.warning("Backfill futures integration for %s: %s", date, e)
-
-                try:
-                    compute_chip_metrics(date, conn)
-                except Exception as e:
-                    logger.warning("Backfill chip integration for %s: %s", date, e)
         except Exception as e:
             logger.error("Backfill integration failed for %s: %s", date, e)
 

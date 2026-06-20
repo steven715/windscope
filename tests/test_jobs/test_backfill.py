@@ -19,6 +19,8 @@ def test_backfill_date_range(monkeypatch):
 
     monkeypatch.setattr(backfill, "run_after_close", mock_after_close)
     monkeypatch.setattr(backfill, "run_after_night", mock_after_night)
+    monkeypatch.setattr(backfill, "run_chip_collect",
+                        lambda date, db_path=None: {"date": date, "status": "completed", "results": {"c": True}, "errors": []})
     # 跳過 sleep 和 integration
     monkeypatch.setattr("time.sleep", lambda s: None)
     monkeypatch.setattr(backfill, "get_connection", _mock_conn_cm)
@@ -36,6 +38,8 @@ def test_backfill_date_range(monkeypatch):
     an_dates = [d for t, d in call_dates if t == "an"]
     assert len(ac_dates) == 5
     assert len(an_dates) == 5
+    # 籌碼分點收集也納入回補（補回 __PRICE_ONLY__ MA20 基礎）→ 結果合併進每日 details
+    assert result["details"]["2026-04-06"]["results"].get("c") is True
 
 
 def test_backfill_skips_weekends(monkeypatch):
@@ -53,6 +57,8 @@ def test_backfill_skips_weekends(monkeypatch):
 
     monkeypatch.setattr(backfill, "run_after_close", mock_after_close)
     monkeypatch.setattr(backfill, "run_after_night", mock_after_night)
+    monkeypatch.setattr(backfill, "run_chip_collect",
+                        lambda date, db_path=None: {"date": date, "status": "completed", "results": {"c": True}, "errors": []})
     monkeypatch.setattr("time.sleep", lambda s: None)
     monkeypatch.setattr(backfill, "get_connection", _mock_conn_cm)
 
@@ -79,6 +85,8 @@ def test_backfill_old_to_new_order(monkeypatch):
 
     monkeypatch.setattr(backfill, "run_after_close", mock_after_close)
     monkeypatch.setattr(backfill, "run_after_night", mock_after_night)
+    monkeypatch.setattr(backfill, "run_chip_collect",
+                        lambda date, db_path=None: {"date": date, "status": "completed", "results": {"c": True}, "errors": []})
     monkeypatch.setattr("time.sleep", lambda s: None)
     monkeypatch.setattr(backfill, "get_connection", _mock_conn_cm)
 
@@ -101,8 +109,14 @@ def test_backfill_continues_on_failure(monkeypatch):
             return {"date": date, "status": "failed", "results": {"b": False}, "errors": ["boom"]}
         return {"date": date, "status": "completed", "results": {"b": True}, "errors": []}
 
+    def mock_chip_collect(date, db_path=None):
+        if date == "2026-04-07":
+            return {"date": date, "status": "failed", "results": {"c": False}, "errors": ["boom"]}
+        return {"date": date, "status": "completed", "results": {"c": True}, "errors": []}
+
     monkeypatch.setattr(backfill, "run_after_close", mock_after_close)
     monkeypatch.setattr(backfill, "run_after_night", mock_after_night)
+    monkeypatch.setattr(backfill, "run_chip_collect", mock_chip_collect)
     monkeypatch.setattr("time.sleep", lambda s: None)
     monkeypatch.setattr(backfill, "get_connection", _mock_conn_cm)
 

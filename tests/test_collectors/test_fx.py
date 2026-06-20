@@ -57,14 +57,14 @@ class TestCollectPairRouting:
         assert fx_collector.collect_pair("2026-06-20", "USD/EUR") is None
 
     def test_collect_and_save_pair_writes_slot(self, fx_collector):
-        """collect_and_save_pair 把收到的匯率寫進指定 slot（quote_pm）。"""
+        """collect_and_save_pair 把收到的匯率寫進指定 slot（close_16）。"""
         with patch.object(fx_collector, "collect_pair",
                           return_value={"currency_pair": "USD/TWD", "rate": 31.42}):
-            ok = fx_collector.collect_and_save_pair("2026-06-20", "USD/TWD", "quote_pm")
+            ok = fx_collector.collect_and_save_pair("2026-06-20", "USD/TWD", "close_16")
         assert ok is True
         conn = sqlite3.connect(fx_collector.db_path)
         row = conn.execute(
-            "SELECT quote_pm FROM raw_fx WHERE date='2026-06-20' "
+            "SELECT close_16 FROM raw_fx WHERE date='2026-06-20' "
             "AND currency_pair='USD/TWD'").fetchone()
         conn.close()
         assert row[0] == 31.42
@@ -72,7 +72,7 @@ class TestCollectPairRouting:
     def test_collect_and_save_pair_none_returns_false(self, fx_collector):
         with patch.object(fx_collector, "collect_pair", return_value=None):
             assert fx_collector.collect_and_save_pair(
-                "2026-06-20", "USD/TWD", "quote_pm") is False
+                "2026-06-20", "USD/TWD", "close_16") is False
 
     def test_collect_and_save_pair_invalid_slot_returns_false(self, fx_collector):
         """slot 非法時 save_fx 不寫入並回 False，collect_and_save_pair 一併回 False。"""
