@@ -54,6 +54,10 @@ def client_with_data(tmp_path):
         "('2026-06-12', '2330', '兆豐-嘉義', 'bottom_watch', '低檔連買 3 天', 'v1')"
     )
     conn.execute("INSERT INTO raw_index (date, open, close) VALUES ('2026-06-11', 42900, 43000)")
+    conn.execute(
+        "INSERT INTO market_holidays (date, name, source, fetched_at) "
+        "VALUES ('2026-06-19', '端午節', 'twse', '2026-06-01')"
+    )
     conn.commit()
     conn.close()
     app = create_app(db_path=db_path, enable_scheduler=False)
@@ -108,6 +112,15 @@ class TestPagesWithData:
         resp = client_with_data.get("/data?table=sqlite_master")
         assert resp.status_code == 200
         assert "daily_metrics" in resp.text
+
+    def test_data_page_holidays_viewable(self, client_with_data):
+        """休市日曆可在資料瀏覽頁查看（下拉選項 + 資料列 + 中文欄名）。"""
+        resp = client_with_data.get("/data")
+        assert "休市日曆（國定假日）" in resp.text  # 下拉選項
+        resp = client_with_data.get("/data?table=market_holidays")
+        assert resp.status_code == 200
+        assert "端午節" in resp.text       # 資料列
+        assert "假日名稱" in resp.text       # 欄位中文標籤
 
     def test_watchlist_page(self, client_with_data):
         resp = client_with_data.get("/watchlist")
@@ -249,7 +262,7 @@ class TestScheduler:
         assert "1/2" in msg
 
     def test_get_jobs_info_none_scheduler_lists_config(self, tmp_path):
-        """scheduler 未啟用時仍列出四個 job 的設定（無 next_run）。"""
+        """scheduler 未啟用時仍列出所有 job（含基礎設施）的設定（無 next_run）。"""
         from server.scheduler import get_jobs_info
 
         db_path = str(tmp_path / "test.db")
@@ -258,11 +271,33 @@ class TestScheduler:
         conn.close()
 
         jobs = get_jobs_info(None, db_path=db_path)
+        # 每日情報 job + 基礎設施 job（盤中刷新、休市日曆刷新）皆列出，順序＝JOB_DEFS
         assert [j["id"] for j in jobs] == [
             "after_night", "before_open", "verify_close", "after_close",
-            "afternoon_fx"]
+            "afternoon_fx", "live_refresh", "refresh_holidays"]
         assert all(j["next_run"] is None for j in jobs)
         assert jobs[1]["time_hhmm"] == "08:50"  # settings 預設
+
+    def test_get_jobs_info_infra_jobs_readonly(self, tmp_path):
+        """基礎設施 job：editable=False、無 time_hhmm、附人類可讀 schedule_label。"""
+        from server.scheduler import get_jobs_info
+
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.close()
+
+        jobs = {j["id"]: j for j in get_jobs_info(None, db_path=db_path)}
+        rh = jobs["refresh_holidays"]
+        assert rh["editable"] is False
+        assert rh["time_hhmm"] is None
+        assert "每月" in rh["schedule_label"]
+        lr = jobs["live_refresh"]
+        assert lr["editable"] is False
+        assert "秒" in lr["schedule_label"]
+        # 每日 job 仍可編輯
+        assert jobs["before_open"]["editable"] is True
+        assert jobs["before_open"]["schedule_label"] == "每日 08:50"
 
     def test_set_schedule_time_persists_and_reschedules(self, tmp_path):
         """改時間：寫入 DB、live scheduler 立即 reschedule、重建 scheduler 沿用。"""
@@ -559,6 +594,22 @@ class TestJobRuns:
         resp = client.get("/scheduler/runs", params={"status": "failed"})
         assert "MARK_EVENING" in resp.text and "MARK_MORNING" not in resp.text
 
+    def test_runs_page_status_shown_in_chinese(self, tmp_path):
+        """執行狀態以中文顯示（completed→完成、failed→失敗），下拉選項亦中文。"""
+        db_path = self._db(tmp_path)
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO job_runs (job_id, trigger_type, run_date, started_at, "
+            "status, summary) VALUES ('before_open', 'scheduled', '2026-06-18', "
+            "'2026-06-18 08:50:00', 'completed', 'MARK_ZH')")
+        conn.commit()
+        conn.close()
+        client = TestClient(create_app(db_path=db_path, enable_scheduler=False))
+
+        resp = client.get("/scheduler/runs")
+        assert "完成" in resp.text  # 表格狀態欄 + 下拉選項
+        assert "失敗" in resp.text  # 下拉選項仍列出所有狀態的中文
+
     def _seed_runs(self, db_path):
         conn = sqlite3.connect(db_path)
         conn.executemany(
@@ -695,8 +746,8 @@ class TestJobConfig:
         db_path = self._db(tmp_path)
         assert sched.set_job_display_name("before_open", "  ", db_path=db_path) is False
         assert sched.set_job_display_name("before_open", "x" * 61, db_path=db_path) is False
-        # 非 schedulable 基礎設施 job 不可設定（防盤中刷新被打開狂發通知）
-        assert sched.set_job_display_name("live_refresh", "x", db_path=db_path) is False
+        assert sched.set_job_display_name("nope", "x", db_path=db_path) is False  # 未知 id
+        # 通知仍僅每日 job 可設（防盤中刷新被打開狂發通知）
         assert sched.set_job_notify("live_refresh", True, db_path=db_path) is False
         assert sched.set_job_notify("nope", True, db_path=db_path) is False
 
@@ -711,6 +762,26 @@ class TestJobConfig:
 
         sched._make_runner("live_refresh")(":memory:")
         assert reads == []  # 非 schedulable → runner 不查 job_config
+
+    def test_live_refresh_skip_tick_not_recorded(self, monkeypatch):
+        """盤中刷新空轉（func 回 None）不更新上次執行；真的抓到（回 dict）才更新——
+        否則畫面每 12 秒顯示一次「完成」，與假日/非盤中其實在略過的實況不符。"""
+        import server.scheduler as sched
+
+        sched._last_runs.pop("live_refresh", None)
+        monkeypatch.setattr(sched, "notify", lambda *a: None)
+        try:
+            # 略過 tick → 不記
+            monkeypatch.setitem(sched.JOB_DEFS["live_refresh"], "func", lambda db: None)
+            sched._make_runner("live_refresh")(":memory:")
+            assert "live_refresh" not in sched._last_runs
+            # 真的抓到 → 記成 completed
+            monkeypatch.setitem(sched.JOB_DEFS["live_refresh"], "func",
+                                lambda db: {"status": "completed"})
+            sched._make_runner("live_refresh")(":memory:")
+            assert sched._last_runs["live_refresh"]["status"] == "completed"
+        finally:
+            sched._last_runs.pop("live_refresh", None)
 
     def test_runner_respects_notify_override_off(self, tmp_path, monkeypatch):
         """使用者關閉通知後，排程執行不發 TG。"""
@@ -745,28 +816,103 @@ class TestJobConfig:
         conn.close()
         assert name == "我的盤後"
 
-    def test_name_route_persists_and_shows(self, client):
-        resp = client.post("/scheduler/name",
-                           data={"job_id": "before_open", "display_name": "晨間情報"},
+    def test_set_job_desc_persists_and_reverts(self, tmp_path):
+        """自訂說明：存覆寫、清空還原預設；get_jobs_info 帶 desc/default_desc/旗標。"""
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        assert sched.set_job_desc("after_close", "自訂說明A", db_path=db_path)
+        ac = {j["id"]: j for j in sched.get_jobs_info(None, db_path=db_path)}["after_close"]
+        assert ac["desc"] == "自訂說明A"
+        assert ac["desc_overridden"] is True
+        assert ac["default_desc"] != "自訂說明A"
+        # 清空（純空白）→ 還原預設、旗標歸 False
+        assert sched.set_job_desc("after_close", "   ", db_path=db_path)
+        ac = {j["id"]: j for j in sched.get_jobs_info(None, db_path=db_path)}["after_close"]
+        assert ac["desc"] == ac["default_desc"]
+        assert ac["desc_overridden"] is False
+
+    def test_set_job_desc_rejects(self, tmp_path):
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        assert sched.set_job_desc("after_close", "x" * 301, db_path=db_path) is False
+        assert sched.set_job_desc("nope", "x", db_path=db_path) is False  # 未知 id
+
+    def test_set_name_desc_works_for_infra_jobs(self, tmp_path):
+        """基礎設施 job（盤中刷新／休市日曆刷新）可改名稱與說明，並反映於 get_jobs_info。"""
+        import server.scheduler as sched
+
+        db_path = self._db(tmp_path)
+        assert sched.set_job_display_name("live_refresh", "盤中刷新（自訂）", db_path=db_path)
+        assert sched.set_job_desc("refresh_holidays", "我的假日刷新說明", db_path=db_path)
+
+        jobs = {j["id"]: j for j in sched.get_jobs_info(None, db_path=db_path)}
+        assert jobs["live_refresh"]["name"] == "盤中刷新（自訂）"
+        assert jobs["refresh_holidays"]["desc"] == "我的假日刷新說明"
+        # 但通知仍不可設（防 12 秒高頻 job 被打開狂發）
+        assert sched.set_job_notify("live_refresh", True, db_path=db_path) is False
+
+    def test_default_descs_are_normalized(self):
+        """預設說明須已去頭尾空白且 ≤上限——否則 /scheduler/save 的「還原預設」
+        比對會誤判成變更、再被 set_job_desc 拒絕，跳出莫名錯誤。"""
+        import server.scheduler as sched
+
+        for jid, d in sched.JOB_DEFS.items():
+            desc = d.get("desc", "")
+            assert desc == desc.strip(), f"{jid} desc 有多餘空白"
+            assert len(desc) <= sched._MAX_DESC_LEN, f"{jid} desc 超過上限"
+
+    def test_save_route_updates_name(self, client):
+        resp = client.post("/scheduler/save",
+                           data={"name__before_open": "晨間情報"},
                            follow_redirects=False)
         assert resp.status_code == 303
         page = client.get("/scheduler")
         assert "晨間情報" in page.text
 
-    def test_notify_route_off_when_checkbox_absent(self, client):
-        # checkbox 未勾 → 瀏覽器不送 notify_enabled → 視為關閉
-        resp = client.post("/scheduler/notify", data={"job_id": "before_open"},
+    def test_save_route_notify_off(self, client):
+        # radio 送 "0" → 關閉。before_open 預設開、現被關 → 顯示「預設開」提示
+        resp = client.post("/scheduler/save",
+                           data={"notify__before_open": "0"},
                            follow_redirects=False)
         assert resp.status_code == 303
         page = client.get("/scheduler")
-        assert "預設開" in page.text  # before_open 預設開、現被關 → 顯示「預設開」提示
+        assert "預設開" in page.text
 
-    def test_routes_reject_infra_job(self, client):
-        # 基礎設施 job 透過路由也不可改（set_* 回 False → 失敗訊息）
-        resp = client.post("/scheduler/notify", data={"job_id": "live_refresh"},
-                           follow_redirects=False)
-        assert resp.status_code == 303
-        assert "更新失敗" in resp.headers["location"] or "%E5%A4%B1%E6%95%97" in resp.headers["location"]
+    def test_save_route_notify_toggle_roundtrip(self, client):
+        """toggle 開時送 hidden0+checkbox1（取最後一個 1）→ 開；只送 0 → 關。"""
+        # after_close 預設開 → 關掉
+        client.post("/scheduler/save", data={"notify__after_close": "0"})
+        page = client.get("/scheduler")
+        assert "預設開" in page.text  # 預設開、現被關 → 顯示提示
+        # 再用瀏覽器實際送法（hidden "0" + checkbox "1"）開回來 → 取最後一個值
+        client.post("/scheduler/save", data={"notify__after_close": ["0", "1"]})
+        page = client.get("/scheduler")
+        assert "預設開" not in page.text  # 回到預設開 → 不再顯示提示
+
+    def test_save_route_batch_updates(self, client):
+        resp = client.post("/scheduler/save", data={
+            "name__after_close": "盤後收尾",
+            "desc__after_close": "我的自訂說明",
+            "time__after_close": "20:15",
+            "notify__after_close": "0",
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        assert "盤後收尾" in resp.text
+        assert "我的自訂說明" in resp.text
+        assert 'value="20:15"' in resp.text
+        assert "已儲存 4 項" in resp.text
+
+    def test_save_route_infra_name_editable_notify_ignored(self, client):
+        # 基礎設施 job：名稱可改、通知不可改（硬塞 notify 也被忽略）→ 只算 1 項變更
+        resp = client.post("/scheduler/save",
+                           data={"name__live_refresh": "盤中刷新X",
+                                 "notify__live_refresh": "1"},
+                           follow_redirects=True)
+        assert resp.status_code == 200
+        assert "盤中刷新X" in resp.text       # 名稱已變更
+        assert "已儲存 1 項變更" in resp.text  # 只有名稱，通知被忽略
 
 
 class TestSchedulerRoutes:
@@ -777,19 +923,39 @@ class TestSchedulerRoutes:
         assert "after_close" in resp.text
         assert "排程器未啟用" in resp.text
 
-    def test_post_time_updates_and_shows_msg(self, client):
-        resp = client.post("/scheduler/time",
-                           data={"job_id": "after_close", "time_hhmm": "19:00"},
+    def test_save_time_updates_and_shows(self, client):
+        resp = client.post("/scheduler/save",
+                           data={"time__after_close": "19:00"},
                            follow_redirects=True)
         assert resp.status_code == 200
-        assert "已改為 19:00" in resp.text
+        assert "已儲存 1 項" in resp.text
         assert 'value="19:00"' in resp.text
 
-    def test_post_time_invalid_shows_error(self, client):
-        resp = client.post("/scheduler/time",
-                           data={"job_id": "after_close", "time_hhmm": "99:99"},
+    def test_save_invalid_time_reported(self, client):
+        resp = client.post("/scheduler/save",
+                           data={"time__after_close": "99:99"},
                            follow_redirects=True)
-        assert "更新失敗" in resp.text
+        assert "失敗" in resp.text
+
+    def test_scheduler_page_renders_revamped_controls(self, client):
+        """改版後頁面：批次保存表單、通知 toggle 開關、可編輯說明 textarea。"""
+        resp = client.get("/scheduler")
+        assert resp.status_code == 200
+        assert 'action="/scheduler/save"' in resp.text
+        # 通知＝單一 toggle（class="switch"）＋ hidden 伴隨欄，非兩顆 radio
+        assert 'class="switch"' in resp.text
+        assert 'type="radio"' not in resp.text
+        assert 'name="desc__after_close"' in resp.text
+        assert "<textarea" in resp.text
+        # job_id 徽章已移除：不再以 <span class="tag">after_close</span> 顯示純 id
+        assert '<span class="tag">after_close' not in resp.text
+        # 基礎設施排程也要出現：名稱／說明可編輯，但時間固定、通知欄不可調
+        assert "休市日曆刷新" in resp.text
+        assert "盤中即時行情刷新" in resp.text
+        assert 'name="name__refresh_holidays"' in resp.text   # 可改名
+        assert 'name="desc__refresh_holidays"' in resp.text   # 可改說明
+        assert 'name="time__refresh_holidays"' not in resp.text  # 時間固定
+        assert "系統排程（時間固定）" in resp.text
 
     def test_post_run_without_scheduler_fails_gracefully(self, client):
         resp = client.post("/scheduler/run", data={"job_id": "after_close"},

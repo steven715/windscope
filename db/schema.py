@@ -177,6 +177,7 @@ CREATE TABLE IF NOT EXISTS market_holidays (
 CREATE TABLE IF NOT EXISTS job_config (
     job_id TEXT PRIMARY KEY,
     display_name TEXT,
+    display_desc TEXT,
     notify_enabled INTEGER,
     updated_at TEXT
 );
@@ -204,6 +205,7 @@ CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs(job_id, started_at DESC)
 # CREATE TABLE IF NOT EXISTS 不會替既有表補欄位，故用 PRAGMA 檢查後 ALTER。
 _COLUMN_MIGRATIONS = [
     ("raw_fx", "quote_pm", "REAL"),
+    ("job_config", "display_desc", "TEXT"),
 ]
 
 

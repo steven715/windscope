@@ -32,3 +32,8 @@ def setup_logging(log_dir: str = "logs") -> None:
     file_handler.setLevel(logging.ERROR)
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
+
+    # 盤中即時刷新每 12 秒觸發一次，apscheduler 每次都記一條 INFO「Running job…/executed」，
+    # 一天上萬筆灌爆 log。把 executor 的逐次執行記錄壓到 WARNING（失敗仍會出現），
+    # job 本身的有意義結果由各 job 自己的 logger 記錄、不受影響。
+    logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)

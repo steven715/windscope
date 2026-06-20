@@ -38,6 +38,24 @@ router = APIRouter()
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
+# 排程執行狀態英文鍵 → 中文（排程頁與排程紀錄頁共用的 Jinja filter）
+_STATUS_ZH = {
+    "completed": "完成", "partial": "部分完成", "skipped": "略過",
+    "failed": "失敗", "error": "錯誤", "done": "完成", "unknown": "未知",
+}
+
+
+def _status_zh(status: str | None) -> str:
+    """執行狀態中文化；'error: ...' 開頭一律歸『錯誤』，未知值原樣回傳。"""
+    if not status:
+        return "—"
+    if status.startswith("error"):
+        return "錯誤"
+    return _STATUS_ZH.get(status, status)
+
+
+templates.env.filters["status_zh"] = _status_zh
+
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DIRECTION_LABELS = {"bullish": "↑ 偏多", "bearish": "↓ 偏空", "neutral": "— 中性"}
 _CLASS_LABELS = {"up": "漲", "down": "跌", "flat": "平"}
@@ -57,6 +75,7 @@ _TABLE_LABELS = {
     "raw_index": "加權指數日K（原始）",
     "daily_metrics": "每日衍生指標",
     "daily_stock_metrics": "個股籌碼指標",
+    "market_holidays": "休市日曆（國定假日）",
 }
 
 # 資料瀏覽頁的欄位中文標籤（缺漏的欄位 fallback 原名）。
@@ -121,6 +140,10 @@ _COLUMN_LABELS = {
     "price_zone": "價位區間",
     "both_sides_flag": "兩面手法",
     "broker_type": "分點屬性",
+    # market_holidays
+    "name": "假日名稱",
+    "source": "來源",
+    "fetched_at": "抓取時間",
 }
 
 # raw_chip 內部標記列的顯示名稱
@@ -586,52 +609,71 @@ def scheduler_run_route(request: Request, job_id: str = Form(...)):
     return RedirectResponse(url=f"/scheduler?msg={quote(msg)}", status_code=303)
 
 
-@router.post("/scheduler/time")
-def scheduler_time_route(request: Request, job_id: str = Form(...),
-                         time_hhmm: str = Form(...)):
-    """調整 job 的排程時間（存入 DB，重啟後沿用），完成後導回排程頁。"""
-    from server.scheduler import JOB_DEFS, set_schedule_time
+@router.post("/scheduler/save")
+async def scheduler_save_route(request: Request):
+    """整頁批次儲存：逐 job 比對名稱／說明／時間／通知，只套用有變動者。
 
-    ok = set_schedule_time(job_id, time_hhmm.strip(),
-                           scheduler=request.app.state.scheduler,
-                           db_path=request.app.state.db_path)
-    if ok:
-        msg = f"「{JOB_DEFS[job_id]['name']}」排程時間已改為 {time_hhmm.strip()}"
+    表單欄位以 job_id 為後綴：name__<id>/desc__<id>/time__<id>/notify__<id>。
+    只動到的欄位才呼叫對應 setter；回報實際更新數與錯誤後導回排程頁。
+    """
+    from server.scheduler import (
+        get_jobs_info, set_job_desc, set_job_display_name, set_job_notify,
+        set_schedule_time,
+    )
+
+    form = await request.form()
+    scheduler = request.app.state.scheduler
+    db_path = request.app.state.db_path
+    jobs = get_jobs_info(scheduler, db_path=db_path)
+
+    changed = 0
+    errors: list[str] = []
+    for j in jobs:
+        jid = j["id"]
+
+        # 名稱／說明：所有 job（含基礎設施）皆可改
+        new_name = (form.get(f"name__{jid}") or "").strip()
+        if new_name and new_name != j["name"]:
+            if set_job_display_name(jid, new_name, scheduler=scheduler, db_path=db_path):
+                changed += 1
+            else:
+                errors.append(f"{j['name']}：名稱需 1–60 字")
+
+        raw_desc = (form.get(f"desc__{jid}") or "").strip()
+        intended_desc = raw_desc or j["default_desc"]
+        if intended_desc != j["desc"]:
+            if set_job_desc(jid, raw_desc, scheduler=scheduler, db_path=db_path):
+                changed += 1
+            else:
+                errors.append(f"{j['name']}：說明需 ≤300 字")
+
+        # 排程時間／通知：僅每日（editable）job；基礎設施 job 不渲染這些欄位、此處也跳過
+        if not j.get("editable"):
+            continue
+
+        new_time = (form.get(f"time__{jid}") or "").strip()
+        if new_time and new_time != j["time_hhmm"]:
+            if set_schedule_time(jid, new_time, scheduler=scheduler, db_path=db_path):
+                changed += 1
+            else:
+                errors.append(f"{j['name']}：時間格式需為 HH:MM")
+
+        # toggle 開時瀏覽器同時送 hidden 的 "0" 與 checkbox 的 "1"，取最後一個為準；
+        # 完全沒送該欄（部分提交）→ 視為未動，不變更。
+        nvals = form.getlist(f"notify__{jid}")
+        nv = nvals[-1] if nvals else None
+        if nv is not None and (nv == "1") != j["notify_enabled"]:
+            if set_job_notify(jid, nv == "1", scheduler=scheduler, db_path=db_path):
+                changed += 1
+            else:
+                errors.append(f"{j['name']}：通知設定失敗")
+
+    if errors:
+        msg = f"已更新 {changed} 項，{len(errors)} 項失敗：" + "；".join(errors[:3])
+    elif changed:
+        msg = f"已儲存 {changed} 項變更"
     else:
-        msg = "更新失敗：時間格式需為 HH:MM（24 小時制）"
-    return RedirectResponse(url=f"/scheduler?msg={quote(msg)}", status_code=303)
-
-
-@router.post("/scheduler/name")
-def scheduler_name_route(request: Request, job_id: str = Form(...),
-                         display_name: str = Form(...)):
-    """設定 job 的顯示名稱（job_id 不變），完成後導回排程頁。"""
-    from server.scheduler import set_job_display_name
-
-    ok = set_job_display_name(job_id, display_name,
-                              scheduler=request.app.state.scheduler,
-                              db_path=request.app.state.db_path)
-    if ok:
-        msg = f"「{job_id}」顯示名稱已改為 {display_name.strip()}"
-    else:
-        msg = "更新失敗：名稱需 1–60 字、不可空白，且僅每日 job 可改"
-    return RedirectResponse(url=f"/scheduler?msg={quote(msg)}", status_code=303)
-
-
-@router.post("/scheduler/notify")
-def scheduler_notify_route(request: Request, job_id: str = Form(...),
-                           notify_enabled: str | None = Form(None)):
-    """設定 job 是否發 TG 通知。checkbox 未勾時瀏覽器不送該欄 → 視為關閉。"""
-    from server.scheduler import set_job_notify
-
-    enabled = notify_enabled is not None
-    ok = set_job_notify(job_id, enabled,
-                        scheduler=request.app.state.scheduler,
-                        db_path=request.app.state.db_path)
-    if ok:
-        msg = f"「{job_id}」TG 通知已{'開啟' if enabled else '關閉'}"
-    else:
-        msg = "更新失敗：僅每日 job 可設定通知"
+        msg = "沒有變更"
     return RedirectResponse(url=f"/scheduler?msg={quote(msg)}", status_code=303)
 
 

@@ -4,65 +4,75 @@
 <h2>排程狀態</h2>
 
 {% if msg %}
-<div class="msg-banner">✅ {{ msg }}</div>
+<div class="msg-banner">{{ msg }}</div>
 {% endif %}
 
 {% if not scheduler_enabled %}
 <div class="panel empty">
   排程器未啟用（測試模式）。以 <code>python main.py serve</code> 啟動 server 時會自動啟用。
-  下方仍可檢視與調整排程時間，設定會在排程器下次啟動時生效。
+  下方仍可檢視與調整排程設定，會在排程器下次啟動時生效。
 </div>
 {% endif %}
+
+<!-- 整頁一張編輯表單：名稱／說明／時間／通知改完按這裡的「保存變更」一次送出。
+     表格內的欄位以 form="sched-form" 關聯到此表單（不與每列「執行」表單巢狀）。 -->
+<form id="sched-form" method="post" action="/scheduler/save">
+  <div class="actionbar">
+    <button type="submit" id="sched-save" disabled>💾 保存變更</button>
+    <button type="button" class="btn-secondary" id="sched-discard" disabled>捨棄</button>
+    <span class="dim" id="sched-hint">尚未變更</span>
+  </div>
+</form>
 
 <div class="panel" style="overflow-x:auto">
   <table class="stack">
     <thead>
-    <tr><th>Job</th><th>說明</th><th>排程時間</th><th>通知</th><th>下次執行</th><th>上次執行</th><th>操作</th></tr>
+    <tr><th>名稱</th><th>說明</th><th>排程時間</th><th>通知</th><th>下次執行</th><th>上次執行</th><th>操作</th></tr>
     </thead>
     <tbody>
     {% for j in jobs %}
     <tr>
-      <td>
-        <span class="tag">{{ j.id }}</span>
-        <form method="post" action="/scheduler/name"
-              style="display:flex; gap:6px; align-items:center; margin:4px 0 0">
-          <input type="text" name="display_name" value="{{ j.name }}" maxlength="60" required
-                 style="width:160px; min-width:120px; padding:4px 8px">
-          <input type="hidden" name="job_id" value="{{ j.id }}">
-          <button type="submit" title="儲存顯示名稱（job_id 不變）">改名</button>
-        </form>
+      <td data-label="名稱">
+        <input type="text" name="name__{{ j.id }}" form="sched-form" value="{{ j.name }}"
+               maxlength="60" required style="width:170px; min-width:130px">
         {% if j.name != j.default_name %}
         <div class="dim" style="font-size:11px">預設「{{ j.default_name }}」</div>
         {% endif %}
       </td>
-      <td data-label="說明" style="max-width:520px">
-        {% if j.desc %}
-        <span class="dim" style="font-size:12px; line-height:1.5">{{ j.desc }}</span>
+      <td data-label="說明" style="max-width:420px">
+        <textarea name="desc__{{ j.id }}" form="sched-form" rows="3" maxlength="300"
+                  style="width:100%; min-width:240px; resize:vertical; line-height:1.5">{{ j.desc }}</textarea>
+        {% if j.desc_overridden %}
+        <div class="dim" style="font-size:11px">已自訂（清空後儲存可還原預設）</div>
         {% endif %}
       </td>
       <td data-label="排程時間">
-        <form method="post" action="/scheduler/time" style="display:flex; gap:8px; align-items:center; margin:0">
-          <input type="hidden" name="job_id" value="{{ j.id }}">
-          <input type="time" name="time_hhmm" value="{{ j.time_hhmm }}" required
-                 style="width:150px; min-width:150px; padding:5px 10px">
-          <button type="submit" title="儲存排程時間（重啟後沿用）">儲存</button>
-        </form>
+        {% if j.editable %}
+        <input type="time" name="time__{{ j.id }}" form="sched-form" value="{{ j.time_hhmm }}"
+               required style="width:130px; min-width:120px">
         {% if j.time_hhmm != j.default_time %}
-        <div class="dim" style="font-size:11px">預設 {{ j.default_time }}（已覆寫）</div>
+        <div class="dim" style="font-size:11px">預設 {{ j.default_time }}</div>
+        {% endif %}
+        {% else %}
+        {{ j.schedule_label }}
+        <div class="dim" style="font-size:11px">系統排程（時間固定）</div>
         {% endif %}
       </td>
       <td data-label="通知">
-        <form method="post" action="/scheduler/notify"
-              style="display:flex; gap:6px; align-items:center; margin:0">
-          <input type="hidden" name="job_id" value="{{ j.id }}">
-          <label style="display:flex; gap:5px; align-items:center; font-size:12px">
-            <input type="checkbox" name="notify_enabled" {{ "checked" if j.notify_enabled }}
-                   style="width:auto">TG
-          </label>
-          <button type="submit" title="儲存通知設定">儲存</button>
-        </form>
+        {% if j.editable %}
+        <!-- 一個通道一顆開關（目前僅 TG）。hidden 伴隨欄保證未勾時也送出 0 → 後端取最後一個值 -->
+        <label class="switch" title="Telegram 通知開關">
+          <input type="hidden" name="notify__{{ j.id }}" value="0" form="sched-form">
+          <input type="checkbox" name="notify__{{ j.id }}" value="1" form="sched-form"
+                 {{ "checked" if j.notify_enabled }}>
+          <span class="slider"></span>
+          <span class="switch-label">TG</span>
+        </label>
         {% if j.notify_enabled != j.notify_default %}
         <div class="dim" style="font-size:11px">預設{{ "開" if j.notify_default else "關" }}</div>
+        {% endif %}
+        {% else %}
+        <span class="dim">—</span>
         {% endif %}
       </td>
       <td data-label="下次執行">{{ j.next_run or "—" }}</td>
@@ -70,17 +80,17 @@
         {% if j.last_run %}
         <div>{{ j.last_run.time }}</div>
         <div class="{{ 'up' if j.last_run.status == 'completed' else ('flat' if j.last_run.status in ('partial', 'skipped') else 'down') }}"
-             style="font-size:12px">{{ j.last_run.status }}</div>
+             style="font-size:12px">{{ j.last_run.status | status_zh }}</div>
         {% else %}
         <span class="dim">（本次啟動後尚未執行）</span>
         {% endif %}
       </td>
       <td data-label="操作">
         <form method="post" action="/scheduler/run" style="margin:0"
-              onsubmit="return confirm('立即執行「{{ j.name }}」？會以今天日期跑一次完整流程。')">
+              onsubmit="return confirm('執行「{{ j.name }}」？會以今天日期跑一次完整流程。')">
           <input type="hidden" name="job_id" value="{{ j.id }}">
-          <button type="submit" {{ "disabled" if not scheduler_enabled }}
-                  {% if not scheduler_enabled %}title="排程器未啟用時無法手動執行"{% endif %}>▶ 立即執行</button>
+          <button type="submit" class="btn-run" {{ "disabled" if not scheduler_enabled }}
+                  {% if not scheduler_enabled %}title="排程器未啟用時無法手動執行"{% endif %}>▶ 執行</button>
         </form>
       </td>
     </tr>
@@ -88,8 +98,9 @@
     </tbody>
   </table>
   <div class="dim" style="margin-top:8px">
-    手動執行＝用今天的日期立刻跑一次該 job（背景執行，不影響原排程）。
-    排程時間存於資料庫，container 重啟後沿用；上次執行結果只保留在記憶體，重啟後清空。
+    執行＝用今天的日期立刻跑一次該 job（背景執行，不影響原排程）。
+    名稱／說明／時間／通知改完按上方「保存變更」一次儲存，存於資料庫、container 重啟後沿用；
+    上次執行結果只保留在記憶體，重啟後清空。
   </div>
 </div>
 {% endblock %}

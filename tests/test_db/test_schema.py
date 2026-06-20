@@ -116,6 +116,24 @@ class TestCreateAllTables:
         create_all_tables(conn)
         conn.close()
 
+    def test_migration_adds_display_desc_to_existing_job_config(self):
+        """既有(舊 schema)job_config 無 display_desc → create_all_tables 應 ALTER 補上。"""
+        conn = sqlite3.connect(":memory:")
+        # 模擬舊版 job_config（無 display_desc 欄）
+        conn.execute(
+            "CREATE TABLE job_config (job_id TEXT PRIMARY KEY, display_name TEXT, "
+            "notify_enabled INTEGER, updated_at TEXT)"
+        )
+        cols_before = {r[1] for r in conn.execute("PRAGMA table_info(job_config)")}
+        assert "display_desc" not in cols_before
+
+        create_all_tables(conn)  # 應觸發 _migrate_columns
+
+        cols_after = {r[1] for r in conn.execute("PRAGMA table_info(job_config)")}
+        assert "display_desc" in cols_after
+        create_all_tables(conn)  # 冪等
+        conn.close()
+
 
 class TestImportBrokerTags:
     def test_import_broker_tags(self, memory_db, tmp_path):

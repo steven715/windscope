@@ -17,7 +17,7 @@
   <select name="status">
     <option value="">全部狀態</option>
     {% for s in statuses %}
-    <option value="{{ s }}" {{ "selected" if s == sel_status }}>{{ s }}</option>
+    <option value="{{ s }}" {{ "selected" if s == sel_status }}>{{ s | status_zh }}</option>
     {% endfor %}
   </select>
   <label>從 <input type="date" name="date_from" value="{{ date_from }}"></label>
@@ -64,7 +64,7 @@
     <td><span class="tag">{{ r.job_id }}</span> {{ r.job_name or "" }}</td>
     <td>{{ "手動" if r.trigger_type == "manual" else "排程" }}</td>
     <td>{{ r.run_date or "—" }}</td>
-    <td class="{{ 'up' if r.status == 'completed' else ('flat' if r.status in ('partial', 'skipped') else 'down') }}">{{ r.status }}</td>
+    <td class="{{ 'up' if r.status == 'completed' else ('flat' if r.status in ('partial', 'skipped') else 'down') }}">{{ r.status | status_zh }}</td>
     <td>{{ r.duration_ms if r.duration_ms is not none else "—" }}</td>
     <td style="max-width:420px; white-space:normal">
       {% if r.error %}<span class="down">{{ r.error }}</span>{% endif %}

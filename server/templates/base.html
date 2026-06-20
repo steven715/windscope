@@ -59,14 +59,47 @@
   .card .cv { font-size: 17px; font-weight: bold; margin: 2px 0; }
   form.filter { display: flex; gap: 8px; align-items: center; margin-bottom: 14px;
                 font-size: 13px; flex-wrap: wrap; }
-  input, select {
+  input, select, textarea {
     background: var(--panel2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 6px; padding: 5px 8px; font-size: 13px;
+    border-radius: 6px; padding: 5px 8px; font-size: 13px; font-family: inherit;
   }
   button {
     background: var(--accent); border: none; color: #08222e; font-weight: bold;
     border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 13px;
   }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  /* 整頁編輯動作列：置頂、有變動才亮起保存／捨棄 */
+  .actionbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 16px; margin-bottom: 14px;
+    position: sticky; top: 0; z-index: 5;
+  }
+  .btn-secondary {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+  }
+  .btn-run {
+    background: rgba(102,187,106,.15); color: var(--green);
+    border: 1px solid rgba(102,187,106,.5);
+  }
+  .btn-run:hover:not(:disabled) { background: rgba(102,187,106,.28); }
+  /* 通知開關：單一 toggle（一個通道一顆，目前只有 TG）。隱藏原生 checkbox、畫滑塊 */
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .switch input[type="checkbox"] { position: absolute; opacity: 0; width: 0; height: 0; }
+  .switch .slider {
+    position: relative; width: 38px; height: 22px; border-radius: 999px;
+    background: var(--panel2); border: 1px solid var(--border);
+    transition: background .15s, border-color .15s; flex-shrink: 0;
+  }
+  .switch .slider::before {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: var(--dim); transition: transform .15s, background .15s;
+  }
+  .switch input:checked + .slider { background: rgba(79,195,247,.25); border-color: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(16px); background: var(--accent); }
+  .switch input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .switch .switch-label { font-size: 12px; color: var(--dim); }
+  .switch input:checked ~ .switch-label { color: var(--accent); }
   .banner {
     display: flex; align-items: center; gap: 18px; border-radius: 10px;
     padding: 14px 18px; margin-bottom: 14px; border: 1px solid var(--border);
@@ -211,6 +244,30 @@ document.querySelectorAll("input[data-filter]").forEach(function (input) {
     if (counter) counter.textContent = shown;
   });
 });
+
+// 排程頁整頁編輯：偵測表單是否有變動，有改動才啟用「保存／捨棄」
+(function () {
+  var form = document.getElementById("sched-form");
+  if (!form) return;
+  var save = document.getElementById("sched-save");
+  var discard = document.getElementById("sched-discard");
+  var hint = document.getElementById("sched-hint");
+  function snap() { return new URLSearchParams(new FormData(form)).toString(); }
+  var initial = snap();
+  function refresh() {
+    var dirty = snap() !== initial;
+    if (save) save.disabled = !dirty;
+    if (discard) discard.disabled = !dirty;
+    if (hint) hint.textContent = dirty ? "有未儲存的變更" : "尚未變更";
+  }
+  // 可編輯欄位在表格內、僅以 form="sched-form" 關聯（非 DOM 子孫），事件不會
+  // 冒泡到 form；改聽 document 並用 e.target.form 過濾出屬於本表單的控制項。
+  function onEdit(e) { if (e.target && e.target.form === form) refresh(); }
+  document.addEventListener("input", onEdit);
+  document.addEventListener("change", onEdit);
+  if (discard) discard.addEventListener("click", function () { form.reset(); refresh(); });
+  refresh();
+})();
 
 // PWA：註冊 service worker（手機可加到主畫面、全螢幕開啟）
 if ("serviceWorker" in navigator) {

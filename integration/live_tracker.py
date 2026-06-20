@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 
 from collectors.mis import MISCollector
+from utils.trading_calendar import is_trading_day
 
 logger = logging.getLogger(__name__)
 
@@ -24,31 +25,38 @@ _REFRESH_END = (14, 0)
 
 
 def is_market_open(now: datetime | None = None) -> bool:
-    """是否在台股現貨交易時段內（交易日 09:00–13:30）。"""
+    """是否在台股現貨交易時段內（交易日 09:00–13:30）。非交易日（含國定假日）回 False。"""
     now = now or datetime.now()
-    if now.weekday() >= 5:
+    if not is_trading_day(now.strftime("%Y-%m-%d")):
         return False
     return _TRADING_START <= (now.hour, now.minute) <= _TRADING_END
 
 
 def _should_refresh(now: datetime) -> bool:
-    """是否該打網路刷新：快取為空一律刷一次，否則僅在刷新時段內。"""
+    """是否該打網路刷新：非交易日（週末/國定假日）一律不刷；交易日則快取為空刷一次、
+    否則僅在刷新時段內。依 market_holidays 交易日曆判斷，故假日不會空打 MIS。"""
+    if not is_trading_day(now.strftime("%Y-%m-%d")):
+        return False
     if _cache["quote"] is None:
         return True
-    if now.weekday() >= 5:
-        return False
     return _REFRESH_START <= (now.hour, now.minute) <= _REFRESH_END
 
 
-def refresh_live_quote(now: datetime | None = None) -> None:
-    """背景排程呼叫：抓 MIS 加權指數即時報價存入快取。非刷新時段為 no-op。"""
+def refresh_live_quote(now: datetime | None = None) -> bool:
+    """背景排程呼叫：抓 MIS 加權指數即時報價存入快取。非刷新時段為 no-op。
+
+    回傳是否確實抓到並更新快取（非交易日/非時段略過、或 MIS 無回應 → False），
+    供排程器判斷這次 tick 是否真的有做事（避免畫面誤顯示一直在執行）。
+    """
     now = now or datetime.now()
     if not _should_refresh(now):
-        return
+        return False
     quote = MISCollector().collect_index("t00")
     if quote is not None:
         _cache["quote"] = quote
         _cache["as_of"] = now.strftime("%H:%M:%S")
+        return True
+    return False
 
 
 def get_cached_quote() -> tuple[dict | None, str | None]:

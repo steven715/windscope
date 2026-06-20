@@ -16,7 +16,7 @@ router = APIRouter()
 # 可查詢的表白名單：避免任意 table name 注入
 _QUERYABLE_TABLES = {
     "raw_fx", "raw_futures", "raw_chip", "raw_institutional", "raw_index",
-    "daily_metrics", "daily_stock_metrics",
+    "daily_metrics", "daily_stock_metrics", "market_holidays",
 }
 
 _MAX_ROWS = 500

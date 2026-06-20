@@ -91,12 +91,15 @@ def _run_afternoon_fx(db_path: str | None) -> dict:
     return result
 
 
-def _run_live_refresh(db_path: str | None) -> None:
-    """盤中即時行情背景刷新：抓 MIS 存記憶體快取。非刷新時段內部自動 no-op。"""
+def _run_live_refresh(db_path: str | None) -> dict | None:
+    """盤中即時行情背景刷新：抓 MIS 存記憶體快取。非刷新時段內部自動 no-op。
+
+    有真的抓到 → 回 {"status": "completed"}；略過（非交易日/非時段/無回應）→ 回 None，
+    讓排程器不要把這次空轉 tick 記成「上次執行」（否則畫面每 12 秒顯示一次完成）。
+    """
     from integration.live_tracker import refresh_live_quote
 
-    refresh_live_quote()
-    return None
+    return {"status": "completed"} if refresh_live_quote() else None
 
 
 def _run_refresh_holidays(db_path: str | None) -> dict:
@@ -210,7 +213,9 @@ JOB_DEFS: dict[str, dict] = {
     # ── 基礎設施 job：不在排程頁顯示、不發通知 ──
     "live_refresh": {
         "name": "盤中即時行情刷新",
-        "desc": "每 N 秒抓 MIS 即時行情存入記憶體快取，與使用者請求解耦。",
+        "desc": "定時抓台股加權指數即時行情（證交所 MIS 即時資訊系統 mis.twse.com.tw）"
+                "存入記憶體快取，供 /live 盤中驗證頁即時顯示。僅交易日盤中時段實際連網，"
+                "週末／國定假日與非盤中時段自動略過、不打網路。",
         "func": _run_live_refresh,
         "trigger": {"kind": "interval", "seconds": settings.LIVE_REFRESH_SECONDS,
                     "run_at_start": True},
@@ -273,10 +278,12 @@ def _build_trigger(trigger_spec: dict, hhmm: str | None = None):
 
 # 顯示名稱長度上限（避免破版／TG 標題過長）
 _MAX_NAME_LEN = 60
+# 自訂說明長度上限（避免破版）
+_MAX_DESC_LEN = 300
 
 
 def get_job_overrides(db_path: str | None = None) -> dict[str, dict]:
-    """回傳 {job_id: {display_name, notify_enabled}}（讀 job_config）。
+    """回傳 {job_id: {display_name, display_desc, notify_enabled}}（讀 job_config）。
 
     供 get_jobs_info 一次取全部覆寫。表不存在或讀取失敗回 {}，退回 JOB_DEFS 預設。
     """
@@ -284,26 +291,30 @@ def get_job_overrides(db_path: str | None = None) -> dict[str, dict]:
     try:
         with get_connection(db_path) as conn:
             rows = conn.execute(
-                "SELECT job_id, display_name, notify_enabled FROM job_config"
+                "SELECT job_id, display_name, display_desc, notify_enabled "
+                "FROM job_config"
             ).fetchall()
-        for jid, name, notify_en in rows:
-            out[jid] = {"display_name": name, "notify_enabled": notify_en}
+        for jid, name, desc, notify_en in rows:
+            out[jid] = {"display_name": name, "display_desc": desc,
+                        "notify_enabled": notify_en}
     except Exception as e:
         logger.warning("get_job_overrides fallback to empty: %s", e)
     return out
 
 
 def _job_override(job_id: str, db_path: str | None) -> dict:
-    """讀單一 job 的覆寫設定 {display_name, notify_enabled}。無列或失敗回 {}。"""
+    """讀單一 job 的覆寫設定 {display_name, display_desc, notify_enabled}。無列回 {}。"""
     try:
         with get_connection(db_path) as conn:
             row = conn.execute(
-                "SELECT display_name, notify_enabled FROM job_config WHERE job_id = ?",
+                "SELECT display_name, display_desc, notify_enabled "
+                "FROM job_config WHERE job_id = ?",
                 (job_id,),
             ).fetchone()
         if row is None:
             return {}
-        return {"display_name": row[0], "notify_enabled": row[1]}
+        return {"display_name": row[0], "display_desc": row[1],
+                "notify_enabled": row[2]}
     except Exception as e:
         logger.warning("job_config read failed for %s: %s", job_id, e)
         return {}
@@ -312,12 +323,12 @@ def _job_override(job_id: str, db_path: str | None) -> dict:
 def set_job_display_name(job_id: str, name: str,
                          scheduler: BackgroundScheduler | None = None,
                          db_path: str | None = None) -> bool:
-    """設定每日 job 的顯示名稱（覆寫 JOB_DEFS 預設）。job_id 本身永遠不變。
+    """設定 job 的顯示名稱（覆寫 JOB_DEFS 預設）。job_id 本身永遠不變。
 
-    僅每日（schedulable）job 可設；名稱去頭尾空白後不可為空、不可超過上限。
+    任何已知 job（含基礎設施 job）皆可改名；名稱去頭尾空白後不可為空、不可超過上限。
     """
     spec = JOB_DEFS.get(job_id)
-    if spec is None or not spec.get("schedulable"):
+    if spec is None:
         logger.error("set_job_display_name rejected: job_id=%s", job_id)
         return False
     name = (name or "").strip()
@@ -341,6 +352,38 @@ def set_job_display_name(job_id: str, name: str,
         except Exception as e:
             logger.warning("modify_job name failed for %s: %s", job_id, e)
     logger.info("job display name updated: %s -> %s", job_id, name)
+    return True
+
+
+def set_job_desc(job_id: str, desc: str,
+                 scheduler: BackgroundScheduler | None = None,
+                 db_path: str | None = None) -> bool:
+    """設定 job 的顯示說明（覆寫 JOB_DEFS 預設）。
+
+    任何已知 job（含基礎設施 job）皆可設；去頭尾空白後為空＝清除覆寫、還原預設說明；
+    非空則存為覆寫，長度不可超過上限。scheduler 參數僅為簽名一致，不使用。
+    """
+    spec = JOB_DEFS.get(job_id)
+    if spec is None:
+        logger.error("set_job_desc rejected: job_id=%s", job_id)
+        return False
+    desc = (desc or "").strip()
+    if len(desc) > _MAX_DESC_LEN:
+        logger.error("set_job_desc rejected desc len=%d", len(desc))
+        return False
+
+    now = datetime.now().isoformat()
+    # 空白 → 存 NULL（還原預設）；非空 → 存覆寫
+    value = desc or None
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "INSERT INTO job_config (job_id, display_desc, updated_at) "
+            "VALUES (?, ?, ?) "
+            "ON CONFLICT(job_id) DO UPDATE SET "
+            " display_desc = excluded.display_desc, updated_at = excluded.updated_at",
+            (job_id, value, now),
+        )
+    logger.info("job desc updated: %s -> %s", job_id, "(default)" if value is None else value)
     return True
 
 
@@ -433,8 +476,11 @@ def _make_runner(job_id: str, trigger_type: str = "scheduled"):
             error = str(e)
         finished_dt = datetime.now()
 
-        # 記憶體即時結果（排程頁顯示）＋持久化紀錄（排程紀錄頁查詢，記有效顯示名）
-        _last_runs[job_id] = {"time": started, "status": status}
+        # 記憶體即時結果（排程頁顯示）＋持久化紀錄（排程紀錄頁查詢，記有效顯示名）。
+        # skip_logging 的高頻 job（盤中刷新）只在「真的有做事」（result 非 None）時才更新
+        # 上次執行——否則畫面會每 12 秒顯示一次「完成」，與假日/非盤中其實在略過的實況不符。
+        if not (spec.get("skip_logging") and result is None):
+            _last_runs[job_id] = {"time": started, "status": status}
         _record_run(job_id, display_name, trigger_type, started_dt, finished_dt,
                     status, result, error, db_path)
 
@@ -537,24 +583,40 @@ def create_scheduler(db_path: str | None = None) -> BackgroundScheduler:
     return scheduler
 
 
+def _schedule_label(trigger_spec: dict, hhmm: str | None = None) -> str:
+    """人類可讀的排程描述（畫面顯示用，尤其是無法調整的基礎設施 job）。"""
+    kind = trigger_spec["kind"]
+    if kind == "daily":
+        return f"每日 {hhmm or trigger_spec['default']}"
+    if kind == "interval":
+        return f"每 {trigger_spec['seconds']} 秒"
+    if kind == "monthly":
+        return (f"每月 {trigger_spec['day']} 日 "
+                f"{trigger_spec['hour']:02d}:{trigger_spec['minute']:02d}")
+    return "—"
+
+
 def get_jobs_info(scheduler: BackgroundScheduler | None,
                   db_path: str | None = None) -> list[dict]:
-    """回傳每日 job 的排程狀態供頁面顯示：時間、下次執行、上次結果。
+    """回傳所有 job 的排程狀態供頁面顯示：時間、下次執行、上次結果。
 
-    僅列出 schedulable（每日情報）job；基礎設施 job 不顯示。scheduler 未啟用時仍列設定。
+    每日（schedulable）job 帶 editable=True、可調名稱/說明/時間/通知；基礎設施 job
+    （盤中刷新、休市日曆刷新）editable=False、唯讀顯示。scheduler 未啟用時仍列設定。
     name/notify_enabled 取使用者覆寫（無則回 JOB_DEFS 預設），並附 default_* 供頁面標示。
     """
     times = get_schedule_times(db_path)
     overrides = get_job_overrides(db_path)
     jobs = []
     for job_id, d in JOB_DEFS.items():
-        if not d.get("schedulable"):
-            continue
+        editable = bool(d.get("schedulable"))
         ov = overrides.get(job_id, {})
         eff_name = ov.get("display_name") or d["name"]
+        ov_desc = ov.get("display_desc")
+        eff_desc = ov_desc if ov_desc else d.get("desc", "")
         notify_en = ov.get("notify_enabled")
         eff_notify = bool(notify_en) if notify_en is not None else d.get("announce", True)
 
+        time_hhmm = times.get(job_id)  # 基礎設施 job 不在 times → None
         next_run = None
         if scheduler is not None:
             job = scheduler.get_job(job_id)
@@ -562,11 +624,15 @@ def get_jobs_info(scheduler: BackgroundScheduler | None,
             next_run = nrt.strftime("%Y-%m-%d %H:%M:%S") if nrt else None
         jobs.append({
             "id": job_id,
+            "editable": editable,
             "name": eff_name,
             "default_name": d["name"],
-            "desc": d.get("desc", ""),
-            "time_hhmm": times[job_id],
-            "default_time": d["trigger"]["default"],
+            "desc": eff_desc,
+            "default_desc": d.get("desc", ""),
+            "desc_overridden": bool(ov_desc),
+            "time_hhmm": time_hhmm,
+            "default_time": d["trigger"].get("default"),
+            "schedule_label": _schedule_label(d["trigger"], time_hhmm),
             "notify_enabled": eff_notify,
             "notify_default": d.get("announce", True),
             "next_run": next_run,

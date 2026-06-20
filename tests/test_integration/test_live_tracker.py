@@ -9,14 +9,17 @@ from integration.live_tracker import (
     is_market_open,
     refresh_live_quote,
 )
+from utils import trading_calendar
 
 
 @pytest.fixture(autouse=True)
 def clean_cache():
-    """每個測試前後清空模組級快取，避免互相污染。"""
+    """每個測試前後清空報價快取；休市日曆快取設空集合（僅排除週末，確保測試不讀真實 DB）。"""
     live_tracker._reset_cache()
+    trading_calendar._holiday_cache = set()
     yield
     live_tracker._reset_cache()
+    trading_calendar._holiday_cache = None
 
 
 def _quote(price=44500.0):
@@ -59,6 +62,21 @@ class TestRefresh:
             refresh_live_quote(now=datetime(2026, 6, 15, 10, 0))
         assert get_cached_quote() == (None, None)
 
+    def test_refresh_skips_on_holiday_even_cache_empty(self):
+        """國定假日（平日休市）→ 即使快取為空、即使盤中時段也不打網路。"""
+        trading_calendar._holiday_cache = {"2026-06-15"}  # 把這個週一標成休市日
+        with patch("integration.live_tracker.MISCollector") as mock_cls:
+            refresh_live_quote(now=datetime(2026, 6, 15, 10, 0))  # 盤中時段
+            mock_cls.return_value.collect_index.assert_not_called()
+        assert get_cached_quote() == (None, None)
+
+    def test_refresh_skips_on_weekend_even_cache_empty(self):
+        """週末 → 即使快取為空也不打網路（修正前會空打一次）。"""
+        with patch("integration.live_tracker.MISCollector") as mock_cls:
+            refresh_live_quote(now=datetime(2026, 6, 13, 10, 0))  # 週六
+            mock_cls.return_value.collect_index.assert_not_called()
+        assert get_cached_quote() == (None, None)
+
 
 class TestIsMarketOpen:
     def test_open(self):
@@ -69,3 +87,8 @@ class TestIsMarketOpen:
 
     def test_closed_weekend(self):
         assert is_market_open(datetime(2026, 6, 13, 10, 30)) is False
+
+    def test_closed_on_holiday(self):
+        """平日國定假日盤中時段也視為休市。"""
+        trading_calendar._holiday_cache = {"2026-06-15"}
+        assert is_market_open(datetime(2026, 6, 15, 10, 30)) is False
