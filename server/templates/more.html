@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}更多{% endblock %}
+{% block content %}
+<h2>更多</h2>
+
+<div class="more-section">資料與工具</div>
+<div class="menu">
+  <a href="/data"><div class="ml">資料瀏覽</div><span class="mr">原始指標 / 衍生值 ›</span></a>
+  <a href="/chip-import"><div class="ml">分點匯入</div><span class="mr">貼上分點籌碼 ›</span></a>
+  <a href="/scheduler"><div class="ml">排程狀態</div><span class="mr run">運行中 ›</span></a>
+  <a href="/scheduler/runs"><div class="ml">排程紀錄</div><span class="mr">最近執行 ›</span></a>
+</div>
+
+<div class="more-section">設定</div>
+<div class="menu">
+  <div class="menu-row col">
+    <div class="ml" style="margin-bottom:3px">漲跌配色</div>
+    <div class="dim" style="margin-bottom:11px">依你的習慣選擇紅綠對應</div>
+    <div class="ccswitch">
+      <button type="button" class="cc-opt" data-cc-set="tw">紅漲綠跌 台股</button>
+      <button type="button" class="cc-opt" data-cc-set="us">綠漲紅跌 美股</button>
+    </div>
+  </div>
+  <a href="/scheduler">
+    <div class="ml">推播通知<div class="dim" style="margin-top:2px">各時段 TG 推播在「排程狀態」逐項開關</div></div>
+    <span class="mr">排程狀態 ›</span>
+  </a>
+</div>
+
+<div class="ver">開盤前情報 · 規則 {{ rule_version }} · TZ Asia/Taipei</div>
+{% endblock %}

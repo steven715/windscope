@@ -233,6 +233,14 @@ def service_worker():
     return Response(content=_SERVICE_WORKER, media_type="application/javascript")
 
 
+@router.get("/more", response_class=HTMLResponse)
+def more_page(request: Request):
+    """手機『更多』選單：收納資料/排程子頁＋設定（漲跌配色、推播說明）。桌面用側邊欄取代。"""
+    return templates.TemplateResponse(request, "more.html", {
+        "active": "more", "rule_version": settings.SIGNAL_RULE_VERSION,
+    })
+
+
 @router.get("/live", response_class=HTMLResponse)
 def live_page(request: Request):
     """盤中即時驗證：用即時加權指數對早上訊號做雙基準比對，JS 輪詢自動更新。"""
@@ -452,6 +460,7 @@ def signals_page(request: Request, date_from: str | None = None,
             "reasons": json.loads(r[3]) if r[3] else [],
             "rule_version": r[4],
             "day_change_pct": r[5],
+            "day_change_class": r[6],
             "day_label": _CLASS_LABELS.get(r[6], None),
             "hit_day": r[7],
             "open_gap_pct": r[8],

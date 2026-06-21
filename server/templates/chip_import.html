@@ -1,21 +1,37 @@
 {% extends "base.html" %}
 {% block title %}分點匯入{% endblock %}
 {% block content %}
-<h2>分點籌碼匯入</h2>
+<div class="page-head"><div><h1>分點籌碼匯入</h1></div></div>
 
 {% if msg %}<div class="msg-banner">✅ {{ msg }}</div>{% endif %}
 
 <div class="panel">
-  <b>上傳截圖自動填表（階段二）</b>
-  <div class="dim" style="margin:6px 0">
+  <div class="row-between" style="margin-bottom:6px">
+    <b>上傳截圖自動填表</b><span class="ai-badge">AI 辨識 · 階段二</span>
+  </div>
+  <div class="dim" style="margin-bottom:12px">
     上傳看盤軟體的分點明細截圖，AI 辨識後預填下方表單，<b>你核對/修正後再送出</b>。
     未設定 API key 時這區停用，下方手動表單照常可用。
   </div>
-  <input type="file" id="ocr-file" accept="image/*" style="font-size:13px">
-  <button type="button" id="ocr-btn">辨識並填表</button>
-  <span id="ocr-status" class="dim"></span>
+  <label class="dropzone">
+    <input type="file" id="ocr-file" accept="image/*">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M17 8l-5-5-5 5"></path><path d="M12 3v12"></path></svg>
+    <div>點此選擇截圖，或拖放到這裡</div>
+    <div class="muted" id="ocr-fname">尚未選擇檔案</div>
+  </label>
+  <div style="margin-top:12px; display:flex; align-items:center; gap:10px; flex-wrap:wrap">
+    <button type="button" id="ocr-btn">辨識並填表</button>
+    <span id="ocr-status" class="dim"></span>
+  </div>
 </div>
 <script>
+(function () {
+  var file = document.getElementById("ocr-file");
+  var fname = document.getElementById("ocr-fname");
+  if (file && fname) file.addEventListener("change", function () {
+    fname.textContent = file.files.length ? file.files[0].name : "尚未選擇檔案";
+  });
+})();
 document.getElementById("ocr-btn").addEventListener("click", function () {
   var f = document.getElementById("ocr-file").files[0];
   var st = document.getElementById("ocr-status");
@@ -42,14 +58,14 @@ document.getElementById("ocr-btn").addEventListener("click", function () {
 });
 </script>
 
+<div class="section-title" style="margin-top:8px">或手動填寫</div>
 <div class="panel">
-  <div class="dim" style="margin-bottom:10px">
+  <div class="dim" style="margin-bottom:12px">
     看著看盤軟體（XQ／三竹／籌碼K線）的分點明細，把關鍵分點的買賣超「張數」填進來。
-    送出後系統會寫入並自動重算個股訊號（連買/連賣天數、低檔吸籌…）。
-    收盤價可留空（若系統當天已收個股收盤，會自動帶入）。
+    送出後系統會寫入並自動重算個股訊號（連買/連賣天數、低檔吸籌…）。收盤價可留空（若系統當天已收個股收盤，會自動帶入）。
   </div>
   <form method="post" action="/chip-import">
-    <div class="filter" style="margin-bottom:12px">
+    <div class="filter" style="margin-bottom:14px">
       <label>日期 <input type="date" name="date" value="{{ today }}" required></label>
       <label>股票
         <select name="stock_id" required>
@@ -59,27 +75,28 @@ document.getElementById("ocr-btn").addEventListener("click", function () {
       <label>收盤價(選填) <input type="number" step="0.01" name="close_price" style="width:100px"></label>
     </div>
 
-    <table>
-      <thead><tr><th>分點</th><th>買超(張)</th><th>賣超(張)</th></tr></thead>
-      <tbody>
-      {% for i in range(6) %}
-      <tr>
-        <td><input name="broker_name" list="broker-list" placeholder="如 兆豐-嘉義" style="width:180px"></td>
-        <td><input name="buy" type="number" min="0" placeholder="0" style="width:110px"></td>
-        <td><input name="sell" type="number" min="0" placeholder="0" style="width:110px"></td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+    <div class="table-wrap" style="margin-bottom:0">
+      <table class="stack">
+        <thead><tr><th>分點</th><th>買超(張)</th><th>賣超(張)</th></tr></thead>
+        <tbody>
+        {% for i in range(6) %}
+        <tr>
+          <td data-label="分點"><input name="broker_name" list="broker-list" placeholder="如 兆豐-嘉義" style="width:180px; max-width:100%"></td>
+          <td data-label="買超(張)"><input name="buy" type="number" min="0" placeholder="0" style="width:110px"></td>
+          <td data-label="賣超(張)"><input name="sell" type="number" min="0" placeholder="0" style="width:110px"></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
     <datalist id="broker-list">
       {% for b in brokers %}<option value="{{ b }}">{% endfor %}
     </datalist>
 
-    <div style="margin-top:12px"><button type="submit">匯入並重算</button></div>
+    <div style="margin-top:14px"><button type="submit">匯入並重算</button></div>
   </form>
-  <div class="dim" style="margin-top:10px">
+  <div class="footnote" style="margin-top:10px">
     只填關鍵那幾家就好（原文：兆豐-嘉義／凱基-台北／永豐金-萬盛…）。淨額＝買超−賣超，系統自動算。
-    階段二「上傳截圖自動填表」之後會加在這頁上方。
   </div>
 </div>
 {% endblock %}

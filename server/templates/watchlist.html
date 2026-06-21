@@ -1,52 +1,54 @@
 {% extends "base.html" %}
 {% block title %}觀察名單{% endblock %}
 {% block content %}
-<h2>觀察名單</h2>
+<div class="page-head"><div><h1>觀察名單</h1></div></div>
 
-<div class="panel">
-  <b>台股大盤（加權指數 TAIEX）</b>
-  {% if index_days %}
-  <table style="margin-top:8px">
-    <tr><th>日期</th><th>開盤</th><th>最高</th><th>最低</th><th>收盤</th><th>漲跌</th></tr>
+<div class="section-title">台股大盤（加權指數 TAIEX）</div>
+{% if index_days %}
+<div class="table-wrap">
+  <table class="stack">
+    <thead><tr><th>日期</th><th>開盤</th><th>最高</th><th>最低</th><th>收盤</th><th>漲跌</th></tr></thead>
+    <tbody>
     {% for d in index_days %}
     <tr>
-      <td>{{ d.date }}</td>
-      <td>{{ "%.2f"|format(d.open) if d.open is not none else "—" }}</td>
-      <td>{{ "%.2f"|format(d.high) if d.high is not none else "—" }}</td>
-      <td>{{ "%.2f"|format(d.low) if d.low is not none else "—" }}</td>
-      <td><b>{{ "%.2f"|format(d.close) if d.close is not none else "—" }}</b></td>
-      <td>{% if d.change_pct is not none %}<span class="{{ 'up' if d.change_pct > 0 else 'down' if d.change_pct < 0 else 'flat' }}">{{ "%+.2f"|format(d.change_pct) }}%</span>{% else %}—{% endif %}</td>
+      <td data-label="日期"><b class="mono">{{ d.date }}</b></td>
+      <td data-label="開盤" class="mono">{{ "%.2f"|format(d.open) if d.open is not none else "—" }}</td>
+      <td data-label="最高" class="mono">{{ "%.2f"|format(d.high) if d.high is not none else "—" }}</td>
+      <td data-label="最低" class="mono">{{ "%.2f"|format(d.low) if d.low is not none else "—" }}</td>
+      <td data-label="收盤" class="mono"><b>{{ "%.2f"|format(d.close) if d.close is not none else "—" }}</b></td>
+      <td data-label="漲跌">{% if d.change_pct is not none %}<span class="{{ 'up' if d.change_pct > 0 else 'down' if d.change_pct < 0 else 'flat' }} mono">{{ "%+.2f"|format(d.change_pct) }}%</span>{% else %}—{% endif %}</td>
     </tr>
     {% endfor %}
+    </tbody>
   </table>
-  {% else %}
-  <div class="dim" style="margin-top:6px">尚無指數資料（13:40 收盤驗證 job 會自動收集）</div>
-  {% endif %}
 </div>
+{% else %}
+<div class="panel empty">尚無指數資料（13:40 收盤驗證 job 會自動收集）</div>
+{% endif %}
 
-<div class="panel">
-  <b>主力分點觀察清單</b>
-  <span class="dim">掃分點時重點盯這幾家；資料進來後系統會自動套規則並亮燈</span>
-  {% if brokers %}
-  <table style="margin-top:8px">
-    <tr><th>分點</th><th>類型</th><th>特性 / 操作備註</th></tr>
-    {% for b in brokers %}
-    <tr>
-      <td><b>{{ b.name }}</b></td>
-      <td><span class="tag">{{ b.type_label }}</span></td>
-      <td class="dim">{{ b.notes }}</td>
-    </tr>
-    {% endfor %}
-  </table>
-  <div class="dim" style="margin-top:6px">
-    註：隔日沖分點買超「不追」、同分點對敲假量「不碰」、低檔連買「放觀察」——
-    系統已內建這些規則，缺的是分點資料來源。
+<div class="row-between" style="margin:24px 0 11px">
+  <span class="section-title" style="margin:0">主力分點觀察清單</span>
+  <span class="muted">掃分點時重點盯這幾家；資料進來後自動套規則並亮燈</span>
+</div>
+{% if brokers %}
+<div class="broker-grid">
+  {% for b in brokers %}
+  <div class="broker-card">
+    <div style="flex:1; min-width:0">
+      <div class="bn">{{ b.name }} <span class="tag">{{ b.type_label }}</span></div>
+      <div class="dim" style="margin-top:4px">{{ b.notes }}</div>
+    </div>
   </div>
-  {% else %}
-  <div class="dim" style="margin-top:6px">尚無分點標籤</div>
-  {% endif %}
+  {% endfor %}
 </div>
+<div class="footnote" style="margin-top:9px">
+  註：隔日沖分點買超「不追」、同分點對敲假量「不碰」、低檔連買「放觀察」——系統已內建這些規則，缺的是分點資料來源。
+</div>
+{% else %}
+<div class="panel empty">尚無分點標籤</div>
+{% endif %}
 
+<div class="section-title" style="margin-top:24px">觀察股</div>
 <div class="panel">
   <form class="filter" method="post" action="/watchlist/add" style="margin-bottom:0">
     <input name="stock_id" placeholder="代號（如 2454）" required pattern="[0-9A-Za-z]{4,6}" style="width:120px">
@@ -59,28 +61,33 @@
 {% if stocks %}
 {% for s in stocks %}
 <div class="panel">
-  <b>{{ s[1] }}（{{ s[0] }}）</b>
-  <span class="dim">加入於 {{ s[2] }}・{{ s[3] }}</span>
-  <form method="post" action="/watchlist/remove" style="display:inline; float:right"
-        onsubmit="return confirm('移除 {{ s[1] }}（{{ s[0] }}）？歷史資料會保留，只是不再收集新資料。')">
-    <input type="hidden" name="stock_id" value="{{ s[0] }}">
-    <button type="submit" style="background:var(--red); color:#fff; padding:3px 10px; font-size:12px">移除</button>
-  </form>
+  <div class="row-between">
+    <div><b>{{ s[1] }}</b> <span class="dim mono">{{ s[0] }}</span> <span class="dim">· 加入於 {{ s[2] }}{% if s[3] %}・{{ s[3] }}{% endif %}</span></div>
+    <form method="post" action="/watchlist/remove" style="margin:0"
+          onsubmit="return confirm('移除 {{ s[1] }}（{{ s[0] }}）？歷史資料會保留，只是不再收集新資料。')">
+      <input type="hidden" name="stock_id" value="{{ s[0] }}">
+      <button type="submit" class="btn-danger" style="padding:4px 12px; font-size:12px">移除</button>
+    </form>
+  </div>
   {% set sigs = signals_by_stock.get(s[0]) %}
   {% if sigs %}
-  <table style="margin-top:8px">
-    <tr><th>日期</th><th>分點</th><th>分類</th><th>理由</th></tr>
-    {% for sig in sigs[:10] %}
-    <tr>
-      <td>{{ sig.date }}</td>
-      <td>{{ sig.broker_name }}</td>
-      <td><span class="tag">{{ sig.category }}</span></td>
-      <td class="dim">{{ sig.reasons }}</td>
-    </tr>
-    {% endfor %}
-  </table>
+  <div class="table-wrap" style="margin-top:12px; margin-bottom:0">
+    <table class="stack">
+      <thead><tr><th>日期</th><th>分點</th><th>分類</th><th>理由</th></tr></thead>
+      <tbody>
+      {% for sig in sigs[:10] %}
+      <tr>
+        <td data-label="日期"><span class="mono">{{ sig.date }}</span></td>
+        <td data-label="分點">{{ sig.broker_name }}</td>
+        <td data-label="分類"><span class="tag">{{ sig.category }}</span></td>
+        <td data-label="理由" class="muted">{{ sig.reasons }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% else %}
-  <div class="dim" style="margin-top:6px">尚無個股觀察訊號</div>
+  <div class="dim" style="margin-top:8px">尚無個股觀察訊號</div>
   {% endif %}
 </div>
 {% endfor %}

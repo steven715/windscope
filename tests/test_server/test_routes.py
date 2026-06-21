@@ -1018,12 +1018,13 @@ class TestTableUX:
     def test_data_page_sortable_and_filter(self, client_with_data):
         """資料瀏覽表格有排序 class 與過濾輸入框。"""
         resp = client_with_data.get("/data?table=raw_index")
-        assert 'class="sortable"' in resp.text
+        # class 可含其他 class（手機 stack 卡片化），只要排序 class 仍套在 table 上
+        assert 'class="sortable' in resp.text
         assert "data-filter" in resp.text
 
     def test_signals_page_sortable_and_filter(self, client_with_data):
         resp = client_with_data.get("/signals")
-        assert 'class="sortable"' in resp.text
+        assert 'class="sortable' in resp.text
         assert "data-filter" in resp.text
 
 

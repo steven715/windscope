@@ -1,7 +1,22 @@
 {% extends "base.html" %}
 {% block title %}訊號與驗證紀錄{% endblock %}
 {% block content %}
-<h2>訊號與驗證紀錄</h2>
+<div class="page-head"><div><h1>訊號與驗證紀錄</h1></div></div>
+
+{% if stats.total > 0 %}
+<div class="grid2" style="margin-bottom:16px">
+  <div class="card">
+    <div class="ct">收盤基準命中</div>
+    <div class="cv mono" style="color:var(--ok)">{{ stats.hit_day_rate }}%</div>
+    <div class="muted mono">近 {{ stats.total }} 個交易日</div>
+  </div>
+  <div class="card">
+    <div class="ct">跳空基準命中</div>
+    <div class="cv mono" style="color:var(--warn)">{{ stats.hit_open_rate }}%</div>
+    <div class="muted mono">近 {{ stats.total }} 個交易日</div>
+  </div>
+</div>
+{% endif %}
 
 <form class="filter" method="get" action="/signals">
   <label>從 <input type="date" name="date_from" value="{{ date_from }}"></label>
@@ -9,34 +24,29 @@
   <button type="submit">查詢</button>
 </form>
 
-{% if stats.total > 0 %}
-<div class="dim" style="margin-bottom:10px">
-  近 {{ stats.total }} 日命中率：收盤基準 {{ stats.hit_day_rate }}%・跳空基準 {{ stats.hit_open_rate }}%
-</div>
-{% endif %}
-
 {% if records %}
-<div class="panel">
-<div style="margin-bottom:10px">
+<div style="margin-bottom:12px">
   <input type="search" data-filter="#signals-table"
-         placeholder="🔍 過濾（如：偏多、✗、v1）" style="width:260px">
+         placeholder="🔍 過濾（如：偏多、✗、v1）" style="width:260px; max-width:100%">
 </div>
-<table class="sortable" id="signals-table">
+<div class="table-wrap">
+<table class="sortable stack" id="signals-table">
   <thead>
   <tr><th title="點擊排序">日期</th><th title="點擊排序">判斷</th><th title="點擊排序">信心</th><th title="點擊排序">規則</th>
       <th title="點擊排序">收盤漲跌</th><th title="點擊排序">結果</th><th title="點擊排序">跳空</th><th>理由</th></tr>
   </thead>
   <tbody>
   {% for r in records %}
+  {% set rdir = "up" if "↑" in r.direction_label else "down" if "↓" in r.direction_label else "flat" %}
   <tr>
-    <td>{{ r.date }}</td>
-    <td>{{ r.direction_label }}</td>
-    <td>{{ r.confidence }}/5</td>
-    <td><span class="tag">{{ r.rule_version }}</span></td>
-    <td>{% if r.day_change_pct is not none %}{{ "%+.2f"|format(r.day_change_pct) }}%（{{ r.day_label }}）{% else %}<span class="dim">未驗證</span>{% endif %}</td>
-    <td>{% if r.hit_day is not none %}<span class="{{ 'hit' if r.hit_day else 'miss' }}">{{ "✓" if r.hit_day else "✗" }}</span>{% else %}—{% endif %}</td>
-    <td>{% if r.hit_open is not none %}<span class="{{ 'hit' if r.hit_open else 'miss' }}">{{ "✓" if r.hit_open else "✗" }}</span>{% else %}—{% endif %}</td>
-    <td class="dim" style="font-size:12px">{{ r.reasons | join("；") }}</td>
+    <td data-label="日期"><b class="mono">{{ r.date }}</b></td>
+    <td data-label="判斷"><span class="chip chip-{{ rdir }}">{{ r.direction_label }}</span></td>
+    <td data-label="信心" class="mono">{{ r.confidence }}/5</td>
+    <td data-label="規則"><span class="tag">{{ r.rule_version }}</span></td>
+    <td data-label="收盤漲跌">{% if r.day_change_pct is not none %}<span class="{{ r.day_change_class if r.day_change_class else '' }} mono">{{ "%+.2f"|format(r.day_change_pct) }}%（{{ r.day_label }}）</span>{% else %}<span class="dim">未驗證</span>{% endif %}</td>
+    <td data-label="結果">{% if r.hit_day is not none %}<span class="{{ 'hit' if r.hit_day else 'miss' }}">{{ "✓ 命中" if r.hit_day else "✗ 失誤" }}</span>{% else %}—{% endif %}</td>
+    <td data-label="跳空">{% if r.hit_open is not none %}<span class="{{ 'hit' if r.hit_open else 'miss' }}">{{ "✓" if r.hit_open else "✗" }}</span>{% else %}—{% endif %}</td>
+    <td data-label="理由" class="muted">{{ r.reasons | join("；") }}</td>
   </tr>
   {% endfor %}
   </tbody>

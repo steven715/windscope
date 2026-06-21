@@ -1,11 +1,9 @@
 {% extends "base.html" %}
 {% block title %}排程紀錄{% endblock %}
 {% block content %}
-<h2>排程執行紀錄</h2>
+<div class="page-head"><div><h1>排程執行紀錄</h1></div></div>
 
-{% if msg %}
-<div class="msg-banner">{{ msg }}</div>
-{% endif %}
+{% if msg %}<div class="msg-banner">{{ msg }}</div>{% endif %}
 
 <form class="filter" method="get" action="/scheduler/runs">
   <select name="job_id">
@@ -25,12 +23,12 @@
   <button type="submit">查詢</button>
 </form>
 
-<div class="dim" style="margin-bottom:10px; max-width:760px">
+<div class="footnote" style="margin-bottom:12px; max-width:760px">
   ℹ️ 每次排程或手動執行的結果都會記錄於此（重啟後仍保留）。盤中即時行情刷新因高頻不記錄。日期篩選作用於「執行歸屬日」。
 </div>
 
 {% if rows %}
-<div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap">
+<div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap">
   {% if sel_job or sel_status or date_from or date_to %}
   <form method="post" action="/scheduler/runs/delete" style="margin:0"
         onsubmit="return confirm('刪除所有符合目前篩選的執行紀錄？')">
@@ -39,18 +37,18 @@
     <input type="hidden" name="status" value="{{ sel_status }}">
     <input type="hidden" name="date_from" value="{{ date_from }}">
     <input type="hidden" name="date_to" value="{{ date_to }}">
-    <button type="submit" style="background:var(--orange); color:#08222e">🗑 刪除符合目前篩選</button>
+    <button type="submit" class="btn-danger">🗑 刪除符合目前篩選</button>
   </form>
   {% endif %}
   <form method="post" action="/scheduler/runs/delete" style="margin:0"
         onsubmit="return confirm('確定清空全部排程紀錄？此動作無法復原。')">
     <input type="hidden" name="mode" value="all">
-    <button type="submit" style="background:var(--red); color:#fff">清空全部</button>
+    <button type="submit" class="btn-danger">清空全部</button>
   </form>
 </div>
 
-<div class="panel" style="overflow-x:auto">
-<table class="sortable" id="runs-table">
+<div class="table-wrap" style="overflow-x:auto">
+<table class="sortable stack" id="runs-table">
   <thead>
     <tr>
       <th>開始時間</th><th>Job</th><th>觸發</th><th>歸屬日</th>
@@ -60,15 +58,15 @@
   <tbody>
   {% for r in rows %}
   <tr>
-    <td style="white-space:nowrap">{{ r.started_at }}</td>
-    <td><span class="tag">{{ r.job_id }}</span> {{ r.job_name or "" }}</td>
-    <td>{{ "手動" if r.trigger_type == "manual" else "排程" }}</td>
-    <td>{{ r.run_date or "—" }}</td>
-    <td class="{{ 'up' if r.status == 'completed' else ('flat' if r.status in ('partial', 'skipped') else 'down') }}">{{ r.status | status_zh }}</td>
-    <td>{{ r.duration_ms if r.duration_ms is not none else "—" }}</td>
-    <td style="max-width:420px; white-space:normal">
-      {% if r.error %}<span class="down">{{ r.error }}</span>{% endif %}
-      {% if r.summary %}<span class="dim" style="font-size:12px">{{ r.summary }}</span>{% endif %}
+    <td data-label="開始時間" class="mono" style="white-space:nowrap">{{ r.started_at }}</td>
+    <td data-label="Job"><span class="tag">{{ r.job_id }}</span> {{ r.job_name or "" }}</td>
+    <td data-label="觸發">{{ "手動" if r.trigger_type == "manual" else "排程" }}</td>
+    <td data-label="歸屬日" class="mono">{{ r.run_date or "—" }}</td>
+    <td data-label="狀態"><span class="chip {{ 'chip-ok' if r.status == 'completed' else 'chip-flat' if r.status in ('partial', 'skipped') else 'chip-bad' }}">{{ r.status | status_zh }}</span></td>
+    <td data-label="耗時(ms)" class="mono">{{ r.duration_ms if r.duration_ms is not none else "—" }}</td>
+    <td data-label="摘要 / 錯誤" style="max-width:420px; white-space:normal">
+      {% if r.error %}<span class="miss">{{ r.error }}</span>{% endif %}
+      {% if r.summary %}<span class="muted">{{ r.summary }}</span>{% endif %}
       {% if not r.error and not r.summary %}—{% endif %}
     </td>
     <td data-label="操作">
@@ -80,20 +78,21 @@
         <input type="hidden" name="status" value="{{ sel_status }}">
         <input type="hidden" name="date_from" value="{{ date_from }}">
         <input type="hidden" name="date_to" value="{{ date_to }}">
-        <button type="submit" style="background:var(--red); color:#fff">刪除</button>
+        <button type="submit" class="btn-danger" style="padding:4px 12px; font-size:12px">刪除</button>
       </form>
     </td>
   </tr>
   {% endfor %}
   </tbody>
 </table>
-<div class="dim" style="margin-top:8px">
+</div>
+<div class="footnote" style="margin-top:10px">
   第 {{ row_start }}–{{ row_end }} 筆，共 {{ total }} 筆・點表頭可排序
 </div>
 
 {% if total_pages > 1 %}
 {% set qs = ("&job_id=" ~ sel_job if sel_job else "") ~ ("&status=" ~ sel_status if sel_status else "") ~ ("&date_from=" ~ date_from if date_from else "") ~ ("&date_to=" ~ date_to if date_to else "") %}
-<div class="pager" style="display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap">
+<div class="pager" style="display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap">
   {% if page > 1 %}
   <a class="pgbtn" href="/scheduler/runs?page=1{{ qs }}">« 第一頁</a>
   <a class="pgbtn" href="/scheduler/runs?page={{ page - 1 }}{{ qs }}">‹ 上一頁</a>
@@ -105,7 +104,6 @@
   {% endif %}
 </div>
 {% endif %}
-</div>
 {% else %}
 <div class="panel empty">查無執行紀錄</div>
 {% endif %}

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}資料瀏覽{% endblock %}
 {% block content %}
-<h2>資料瀏覽</h2>
+<div class="page-head"><div><h1>資料瀏覽</h1></div></div>
 
 <form class="filter" method="get" action="/data">
   <select name="table">
@@ -15,33 +15,34 @@
 </form>
 
 {% if table_note %}
-<div class="dim" style="margin-bottom:10px; max-width:760px">ℹ️ {{ table_note }}</div>
+<div class="footnote" style="margin-bottom:12px; max-width:760px">ℹ️ {{ table_note }}</div>
 {% endif %}
 
 {% if rows %}
-<div class="panel" style="overflow-x:auto">
-<div style="margin-bottom:10px">
+<div style="margin-bottom:12px">
   <input type="search" data-filter="#data-table" data-count="#shown-count"
-         placeholder="🔍 過濾（任一欄包含關鍵字）" style="width:260px">
+         placeholder="🔍 過濾（任一欄包含關鍵字）" style="width:260px; max-width:100%">
 </div>
-<table class="sortable" id="data-table">
+<div class="table-wrap" style="overflow-x:auto">
+<table class="sortable stack" id="data-table">
   <thead>
     <tr>{% for name, label in columns %}<th title="{{ name }}・點擊排序">{{ label }}</th>{% endfor %}</tr>
   </thead>
   <tbody>
   {% for row in rows %}
-  <tr>{% for name, label in columns %}<td>{{ row[name] if row[name] is not none else "—" }}</td>{% endfor %}</tr>
+  <tr>{% for name, label in columns %}<td data-label="{{ label }}">{{ row[name] if row[name] is not none else "—" }}</td>{% endfor %}</tr>
   {% endfor %}
   </tbody>
 </table>
-<div class="dim" style="margin-top:8px">
+</div>
+<div class="footnote" style="margin-top:10px">
   第 {{ row_start }}–{{ row_end }} 筆，共 {{ total }} 筆
   （顯示中 <span id="shown-count">{{ rows | length }}</span>）・點表頭可排序、過濾僅作用於本頁
 </div>
 
 {% if total_pages > 1 %}
 {% set qs = "&table=" ~ table ~ ("&date_from=" ~ date_from if date_from else "") ~ ("&date_to=" ~ date_to if date_to else "") %}
-<div class="pager" style="display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap">
+<div class="pager" style="display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap">
   {% if page > 1 %}
   <a class="pgbtn" href="/data?page=1{{ qs }}">« 第一頁</a>
   <a class="pgbtn" href="/data?page={{ page - 1 }}{{ qs }}">‹ 上一頁</a>
@@ -53,7 +54,6 @@
   {% endif %}
 </div>
 {% endif %}
-</div>
 {% else %}
 <div class="panel empty">{{ table_label }}（{{ table }}）查無資料</div>
 {% endif %}
