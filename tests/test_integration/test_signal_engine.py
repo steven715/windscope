@@ -5,6 +5,7 @@ import sqlite3
 
 import pytest
 
+from config import settings
 from db.schema import create_all_tables
 from integration.signal_engine import (
     compute_market_signal,
@@ -199,7 +200,7 @@ class TestSignalPersistence:
         ).fetchone()
         assert row[0] == "bullish"
         assert row[1] == 3
-        assert row[2] == "v1"
+        assert row[2] == settings.SIGNAL_RULE_VERSION
         assert isinstance(json.loads(row[3]), list)
 
     def test_idempotent_recompute(self):

@@ -36,7 +36,11 @@ PRICE_ZONE_HIGH = 20
 # === Signal Engine (Layer 3) ===
 # 門檻來源：專案發想文章的經驗值。調整任何門檻時記得 bump SIGNAL_RULE_VERSION，
 # 否則新舊規則的命中率會混在一起統計。
-SIGNAL_RULE_VERSION = "v1"
+# v2 (2026-06-22): 修正前一交易日基準會抓到休市日空殼 row 的 bug（休市日次一交易日
+#   的訊號原本因基準錯置而資料不可用→中性）。屬正確性修正。
+#   註：命中率統計不依 rule_version 篩選，bump 僅標記新訊號版本；受影響日的命中率
+#   由 recompute + 重新驗證覆蓋舊 row 來修正，非靠版本篩選。
+SIGNAL_RULE_VERSION = "v2"
 FUTURES_SPREAD_THRESHOLD = 100      # 調整後價差 ±100 點才算有方向
 VOLUME_RATIO_HIGH = 1.5             # 夜盤量比 >= 1.5 → 大戶佈局，信心 +1
 VOLUME_RATIO_LOW = 0.7              # 夜盤量比 <= 0.7 → 觀望，信心 -1

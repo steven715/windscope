@@ -117,6 +117,43 @@ def test_load_holidays_missing_table_returns_empty(tmp_path):
     assert is_trading_day("2026-06-19") is True  # 週五，無休市資料 → 視為交易日
 
 
+class TestPreviousTradingDaySkipsHolidayRow:
+    """回歸測試：raw_futures 混入休市日空殼 row 時，前一交易日不可抓到休市日。
+
+    重現 bug：週一(06-22)的前一交易日應為週四(06-18)，而非端午休市的週五(06-19)
+    —— 即使 raw_futures 有一筆 06-19 的空殼 row（休市日除息預設值寫入造成）。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _set_holiday(self, monkeypatch):
+        monkeypatch.setattr(trading_calendar, "_holiday_cache", {"2026-06-19"})
+
+    @pytest.fixture
+    def db_with_holiday_row(self):
+        conn = sqlite3.connect(":memory:")
+        create_all_tables(conn)
+        # 06-17、06-18 為正常交易日；06-19 為端午休市但有一筆空殼 row（污染）
+        for d in ("2026-06-17", "2026-06-18"):
+            conn.execute("INSERT INTO raw_futures (date) VALUES (?)", (d,))
+        conn.execute(
+            "INSERT INTO raw_futures (date, ex_dividend_points) VALUES "
+            "('2026-06-19', 0.0)"  # 休市日空殼 row（只有除息預設值）
+        )
+        conn.commit()
+        yield conn
+        conn.close()
+
+    def test_previous_skips_holiday_placeholder(self, db_with_holiday_row):
+        # 06-22(週一) → 跳過 06-19(休市空殼) → 06-18(週四)
+        assert get_previous_trading_day(
+            "2026-06-22", db_with_holiday_row) == "2026-06-18"
+
+    def test_recent_skips_holiday_placeholder(self, db_with_holiday_row):
+        # 近 2 交易日不含 06-19
+        assert get_recent_trading_days(
+            "2026-06-22", 2, db_with_holiday_row) == ["2026-06-18", "2026-06-17"]
+
+
 class TestGetRecentTradingDays:
     def test_normal(self, cal_db):
         result = get_recent_trading_days("2026-04-09", 3, cal_db)

@@ -84,20 +84,22 @@ def get_next_trading_day(date: str) -> str:
 def get_previous_trading_day(
     date: str, conn: sqlite3.Connection | None = None
 ) -> str | None:
-    """回傳 date 的前一個交易日（YYYY-MM-DD）。跳過週末和假日。"""
+    """回傳 date 的前一個交易日（YYYY-MM-DD）。跳過週末和假日。
+
+    有 conn 時取 raw_futures/raw_institutional 最近一筆「交易日」資料作基準；以
+    is_trading_day 過濾，避免休市日混入的空殼 row（如休市日寫入的除息預設值）
+    被當成前一交易日。
+    """
     if conn is not None:
-        row = conn.execute(
-            "SELECT date FROM raw_futures WHERE date < ? ORDER BY date DESC LIMIT 1",
-            (date,),
-        ).fetchone()
-        if row:
-            return row[0]
-        row = conn.execute(
-            "SELECT date FROM raw_institutional WHERE date < ? ORDER BY date DESC LIMIT 1",
-            (date,),
-        ).fetchone()
-        if row:
-            return row[0]
+        for table in ("raw_futures", "raw_institutional"):
+            rows = conn.execute(
+                f"SELECT date FROM {table} WHERE date < ? "
+                "ORDER BY date DESC LIMIT 30",
+                (date,),
+            ).fetchall()
+            for (d,) in rows:
+                if is_trading_day(d):
+                    return d
 
     # Fallback: skip weekends and holidays, max 20 days back
     dt = datetime.strptime(date, "%Y-%m-%d")
@@ -114,12 +116,14 @@ def get_recent_trading_days(
 ) -> list[str]:
     """回傳 date 之前的 n 個交易日（不含 date），最新的排前面。"""
     if conn is not None:
+        # 多取一些再用 is_trading_day 過濾掉混入的休市日/週末空殼 row，取前 n 筆
         rows = conn.execute(
             "SELECT date FROM raw_futures WHERE date < ? ORDER BY date DESC LIMIT ?",
-            (date, n),
+            (date, n * 3 + 10),
         ).fetchall()
-        if rows:
-            return [r[0] for r in rows]
+        filtered = [r[0] for r in rows if is_trading_day(r[0])]
+        if filtered:
+            return filtered[:n]
 
     # Fallback: skip weekends and holidays
     result: list[str] = []
