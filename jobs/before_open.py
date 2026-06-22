@@ -2,10 +2,13 @@
 
 import logging
 import sqlite3
+import time
 from datetime import datetime
 
 from db.connection import get_connection
 from jobs.helpers import determine_status, run_step
+from utils.logger import log_event
+from utils.notify import notify
 from utils.trading_calendar import is_trading_day
 
 logger = logging.getLogger(__name__)
@@ -21,6 +24,7 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
     回傳格式同 after_close，額外包含 summary 文字與 market_open 旗標。
     """
     logger.info("run_before_open: starting for %s", date)
+    t0 = time.perf_counter()
 
     trading = is_trading_day(date)
     if not trading:
@@ -94,6 +98,28 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
 
     status = determine_status(results)
     logger.info("run_before_open: %s status=%s (market_open=%s)", date, status, trading)
+
+    # 收尾結構化事件：把已算好的狀態一次發出，讓「今天 before_open」可被 jq 直接回答。
+    # signal_produced：交易日 + signal step ok + 確有算出訊號（休市日不該有訊號）。
+    signal_produced = bool(trading and results.get("signal") and signal is not None)
+    log_event(
+        "job_completed",
+        level=logging.WARNING if (trading and not signal_produced) else logging.INFO,
+        job="before_open", date=date, status=status, market_open=trading,
+        steps_ok=sum(1 for v in results.values() if v),
+        steps_failed=sum(1 for v in results.values() if not v),
+        signal_produced=signal_produced,
+        duration_ms=int((time.perf_counter() - t0) * 1000),
+    )
+    # alert 只打 user-facing 症狀：交易日卻沒產出訊號（使用者會痛）。
+    # 內部 step 失敗但訊號仍產出 → 不通知，只進事件供事後診斷。
+    if trading and not signal_produced:
+        notify(
+            "⚠️ 開盤前情報：今日未產出訊號",
+            f"{date} 為交易日，但 before_open 結束時未產出可用訊號"
+            f"（status={status}）。請查 logs/events.jsonl 的 step_run / collector_run。",
+        )
+
     return {
         "date": date, "status": status,
         "results": results, "errors": errors,
