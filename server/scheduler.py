@@ -280,13 +280,19 @@ def _build_trigger(trigger_spec: dict, hhmm: str | None = None):
       interval—— 每 seconds 秒；run_at_start 則啟動時先跑一次
       monthly —— 每月 day 日 hour:minute；run_at_start 則啟動時先跑一次
     """
+    # executor 偶有 ~1s 抖動，預設 misfire grace 僅 1s 會讓到點時慢一拍的 job 整個被跳過
+    # （曾使 08:50 before_open 整天不產訊號）。所有 job 統一放寬 grace。
+    grace = settings.SCHEDULE_MISFIRE_GRACE_SEC
+
     kind = trigger_spec["kind"]
     if kind == "daily":
         h, m = _parse_hhmm(hhmm or trigger_spec["default"])
-        return CronTrigger(day_of_week=trigger_spec["days"], hour=h, minute=m), {}
+        return (CronTrigger(day_of_week=trigger_spec["days"], hour=h, minute=m),
+                {"misfire_grace_time": grace})
 
     if kind in ("interval", "monthly"):
-        kwargs = {"max_instances": 1, "coalesce": True, "replace_existing": True}
+        kwargs = {"max_instances": 1, "coalesce": True, "replace_existing": True,
+                  "misfire_grace_time": grace}
         if trigger_spec.get("run_at_start"):
             kwargs["next_run_time"] = datetime.now()
         if kind == "interval":

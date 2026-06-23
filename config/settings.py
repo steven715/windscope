@@ -96,3 +96,7 @@ SCHEDULE_VERIFY_CLOSE = "14:30"   # 13:30 收盤後，證交所指數OHLC約需~
 # 18:30：三大法人(T86)/外資個股/除息/期貨未平倉等盤後資料分批發布，~傍晚才齊，故留安全邊際
 SCHEDULE_AFTER_CLOSE = "18:30"
 SCHEDULE_CHIP_COLLECT = "18:00"   # 籌碼分點收集(個股收盤+分點+算指標)；預設停用，串好來源再開
+# APScheduler misfire 容忍秒數：executor 偶有 ~1s 抖動，預設 grace 只有 1s 會讓排程到點
+# 時若慢超過 1 秒就整個跳過（曾導致 08:50 before_open 整天不產訊號）。放寬到 30 分鐘：
+# 遲到 30 分內仍補跑（每日訊號晚一點勝過沒有），超過才跳過（避免拿盤中資料冒充盤前）。
+SCHEDULE_MISFIRE_GRACE_SEC = 1800

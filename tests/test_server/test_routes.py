@@ -415,14 +415,18 @@ class TestScheduler:
         from apscheduler.triggers.cron import CronTrigger
         from apscheduler.triggers.interval import IntervalTrigger
 
+        from config import settings
         from server.scheduler import _build_trigger
 
         t, k = _build_trigger({"kind": "daily", "days": "mon-fri", "default": "08:50"})
-        assert isinstance(t, CronTrigger) and k == {}
+        # 每日 job 須帶 misfire grace（避免到點慢一拍被跳過）
+        assert isinstance(t, CronTrigger)
+        assert k["misfire_grace_time"] == settings.SCHEDULE_MISFIRE_GRACE_SEC
 
         t, k = _build_trigger(
             {"kind": "interval", "seconds": 12, "run_at_start": True})
         assert isinstance(t, IntervalTrigger) and "next_run_time" in k
+        assert k["misfire_grace_time"] == settings.SCHEDULE_MISFIRE_GRACE_SEC
 
         t, k = _build_trigger({"kind": "monthly", "day": 1, "hour": 6, "minute": 0})
         assert isinstance(t, CronTrigger)
