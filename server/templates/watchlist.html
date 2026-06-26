@@ -69,9 +69,32 @@
       <button type="submit" class="btn-danger" style="padding:4px 12px; font-size:12px">移除</button>
     </form>
   </div>
+  {% set ex = stock_explain.get(s[0], []) %}
+  {% if ex %}
+  <div class="section-title" style="font-size:13px; margin:12px 0 8px">籌碼解讀 <span class="muted" style="font-weight:400">原數據 → 判讀(門檻) → 為什麼(觀點)</span></div>
+  <div class="explain">
+    <div class="explain-head"><span>維度</span><span>原數據</span><span>判讀</span><span>為什麼</span></div>
+    {% for e in ex %}
+    <div class="explain-row" data-card>
+      <div class="er-main" data-toggle>
+        <span class="er-dim">{{ e.dim }}</span>
+        <span class="er-raw">{{ e.raw }}</span>
+        <span class="er-verdict"><span class="chip chip-{{ e.css }}">{{ e.verdict }}</span></span>
+        <span class="er-why">{{ e.why }}{% if e.why_source %}<span class="src">{{ e.why_source }}觀點</span>{% endif %}</span>
+        <span class="er-caret"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></span>
+      </div>
+      <div class="er-detail">
+        <div class="dl"><span class="dk">原數據</span><span class="dv">{{ e.raw }}</span></div>
+        <div class="dl"><span class="dk">為什麼</span><span class="dv">{{ e.why }}{% if e.why_source %}<span class="src">{{ e.why_source }}觀點</span>{% endif %}</span></div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   {% set sigs = signals_by_stock.get(s[0]) %}
   {% if sigs %}
-  <div class="table-wrap" style="margin-top:12px; margin-bottom:0">
+  <div class="section-title" style="font-size:13px; margin:14px 0 8px">歷史觀察訊號</div>
+  <div class="table-wrap" style="margin-bottom:0">
     <table class="stack">
       <thead><tr><th>日期</th><th>分點</th><th>分類</th><th>理由</th></tr></thead>
       <tbody>

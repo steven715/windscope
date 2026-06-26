@@ -4,7 +4,7 @@ import json
 import sqlite3
 
 from db.schema import create_all_tables
-from integration.explain import _note, build_explain
+from integration.explain import _note, build_explain, build_stock_explain
 
 
 def test_note_prefers_my_note_with_source():
@@ -117,3 +117,89 @@ def test_anomaly_divergence_flagged():
     rows = build_explain("2026-06-16", conn)
     anomaly = next(r for r in rows if r["dim"] == "美股對照（看異常）")
     assert "異常" in anomaly["verdict"]
+
+
+def _setup_stock(conn, stock_id="2330"):
+    """外資連買 3 天 + 主力分點低檔連買 + 股價位置(月線下)。"""
+    for d in ("2026-06-15", "2026-06-16", "2026-06-17"):
+        conn.execute(
+            "INSERT INTO raw_chip (date, stock_id, broker_name, net_volume) "
+            "VALUES (?, ?, '__FOREIGN__', 2000)", (d, stock_id))
+    conn.execute(
+        "INSERT INTO daily_stock_metrics (date, stock_id, broker_name, net_amount, "
+        " consecutive_days, price_vs_ma20, price_zone, both_sides_flag, broker_type) "
+        "VALUES ('2026-06-18', ?, '兆豐-嘉義', 60000000, 3, -5.0, 'low', 0, NULL)",
+        (stock_id,))
+    conn.commit()
+
+
+def test_build_stock_explain_happy():
+    """有外資+分點資料 → 三維度判讀正確（外資連買/主力摸底/低檔）。"""
+    conn = sqlite3.connect(":memory:")
+    create_all_tables(conn)
+    _setup_stock(conn)
+
+    rows = build_stock_explain("2026-06-18", "2330", conn)
+    by_dim = {r["dim"]: r for r in rows}
+    assert set(by_dim) == {"外資動向", "主力分點", "股價位置"}
+
+    assert by_dim["外資動向"]["css"] == "up"
+    assert "連買" in by_dim["外資動向"]["verdict"]
+    assert by_dim["主力分點"]["css"] == "up"
+    assert "摸底" in by_dim["主力分點"]["verdict"]
+    assert "低檔" in by_dim["股價位置"]["verdict"]
+    # 觀點從 explain_notes 帶入（立場 vs 觀點分離）
+    assert by_dim["外資動向"]["why"] and by_dim["外資動向"]["why_source"] == "原文"
+    conn.close()
+
+
+def test_build_stock_explain_no_data_graceful():
+    """無任何籌碼資料 → 三維度都優雅顯示『資料不可用』，不報錯。"""
+    conn = sqlite3.connect(":memory:")
+    create_all_tables(conn)
+
+    rows = build_stock_explain("2026-06-18", "9999", conn)
+    assert len(rows) == 3
+    assert all(r["verdict"] == "資料不可用" for r in rows)
+    assert all(r["css"] == "flat" for r in rows)
+    conn.close()
+
+
+def test_build_stock_explain_broker_picks_signal_over_size():
+    """主力分點挑『有訊號』優先於『淨額大但無訊號』。"""
+    conn = sqlite3.connect(":memory:")
+    create_all_tables(conn)
+    # 甲：淨額大(1億)但無訊號（連買僅 1 天 < 門檻）
+    conn.execute(
+        "INSERT INTO daily_stock_metrics (date, stock_id, broker_name, net_amount, "
+        " consecutive_days, price_zone, both_sides_flag, broker_type) "
+        "VALUES ('2026-06-18', '2454', '甲分點', 100000000, 1, 'consolidation', 0, NULL)")
+    # 乙：淨額較小(6千萬)但有訊號（低檔連買 3 天 → 摸底）
+    conn.execute(
+        "INSERT INTO daily_stock_metrics (date, stock_id, broker_name, net_amount, "
+        " consecutive_days, price_zone, both_sides_flag, broker_type) "
+        "VALUES ('2026-06-18', '2454', '乙分點', 60000000, 3, 'low', 0, NULL)")
+    conn.commit()
+
+    broker = next(r for r in build_stock_explain("2026-06-18", "2454", conn)
+                  if r["dim"] == "主力分點")
+    assert "乙分點" in broker["raw"]   # 有訊號者勝出，非淨額大者
+    assert "摸底" in broker["verdict"]
+    conn.close()
+
+
+def test_build_stock_explain_day_trade_warning():
+    """隔日沖分點買超 → 標『不追』，警示走 flat。"""
+    conn = sqlite3.connect(":memory:")
+    create_all_tables(conn)
+    conn.execute(
+        "INSERT INTO daily_stock_metrics (date, stock_id, broker_name, net_amount, "
+        " consecutive_days, price_zone, both_sides_flag, broker_type) "
+        "VALUES ('2026-06-18', '2454', '隔日沖分點', 80000000, 1, 'high', 0, 'day_trade')")
+    conn.commit()
+
+    broker = next(r for r in build_stock_explain("2026-06-18", "2454", conn)
+                  if r["dim"] == "主力分點")
+    assert "不追" in broker["verdict"]
+    assert broker["css"] == "flat"
+    conn.close()

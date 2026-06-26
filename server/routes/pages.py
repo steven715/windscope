@@ -537,6 +537,17 @@ def watchlist_page(request: Request):
             "ORDER BY broker_type, broker_name"
         ).fetchall()
 
+        # 個股籌碼解讀：每檔一張表（鏡像大盤盤前解讀），as-of 取最近訊號日
+        from datetime import datetime
+
+        from integration.explain import build_stock_explain
+
+        asof = (conn.execute("SELECT MAX(date) FROM signals").fetchone()[0]
+                or datetime.now().strftime("%Y-%m-%d"))
+        stock_explain = {
+            s[0]: build_stock_explain(asof, s[0], conn) for s in stocks
+        }
+
     brokers = [
         {"name": b[0], "type": b[1],
          "type_label": _BROKER_TYPE_LABELS.get(b[1], b[1]), "notes": b[2]}
@@ -566,6 +577,7 @@ def watchlist_page(request: Request):
         "active": "watchlist", "stocks": stocks,
         "signals_by_stock": signals_by_stock,
         "index_days": index_days, "brokers": brokers,
+        "stock_explain": stock_explain,
     })
 
 
