@@ -1,120 +1,126 @@
 {% extends "base.html" %}
 {% block title %}觀察名單{% endblock %}
-{% block content %}
-<div class="page-head"><div><h1>觀察名單</h1></div></div>
 
-<div class="section-title">台股大盤（加權指數 TAIEX）</div>
-{% if index_days %}
-<div class="table-wrap">
-  <table class="stack">
-    <thead><tr><th>日期</th><th>開盤</th><th>最高</th><th>最低</th><th>收盤</th><th>漲跌</th></tr></thead>
-    <tbody>
-    {% for d in index_days %}
-    <tr>
-      <td data-label="日期"><b class="mono">{{ d.date }}</b></td>
-      <td data-label="開盤" class="mono">{{ "%.2f"|format(d.open) if d.open is not none else "—" }}</td>
-      <td data-label="最高" class="mono">{{ "%.2f"|format(d.high) if d.high is not none else "—" }}</td>
-      <td data-label="最低" class="mono">{{ "%.2f"|format(d.low) if d.low is not none else "—" }}</td>
-      <td data-label="收盤" class="mono"><b>{{ "%.2f"|format(d.close) if d.close is not none else "—" }}</b></td>
-      <td data-label="漲跌">{% if d.change_pct is not none %}<span class="{{ 'up' if d.change_pct > 0 else 'down' if d.change_pct < 0 else 'flat' }} mono">{{ "%+.2f"|format(d.change_pct) }}%</span>{% else %}—{% endif %}</td>
-    </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
-{% else %}
-<div class="panel empty">尚無指數資料（13:40 收盤驗證 job 會自動收集）</div>
-{% endif %}
+{% macro spark_svg(bars, w, h) %}
+<svg class="spark" viewBox="0 0 {{ w }} {{ h }}" width="{{ w }}" height="{{ h }}" preserveAspectRatio="none">
+  <line class="mid" x1="0" y1="{{ h / 2 }}" x2="{{ w }}" y2="{{ h / 2 }}"></line>
+  {% for b in bars %}<rect class="{{ 'up' if b.up else 'down' }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="1"></rect>{% endfor %}
+</svg>
+{% endmacro %}
 
-<div class="row-between" style="margin:24px 0 11px">
-  <span class="section-title" style="margin:0">主力分點觀察清單</span>
-  <span class="muted">掃分點時重點盯這幾家；資料進來後自動套規則並亮燈</span>
-</div>
-{% if brokers %}
-<div class="broker-grid">
-  {% for b in brokers %}
-  <div class="broker-card">
-    <div style="flex:1; min-width:0">
-      <div class="bn">{{ b.name }} <span class="tag">{{ b.type_label }}</span></div>
-      <div class="dim" style="margin-top:4px">{{ b.notes }}</div>
+{% macro explain_table(ex) %}
+<div class="explain">
+  <div class="explain-head"><span>維度</span><span>原數據</span><span>判讀</span><span>為什麼</span></div>
+  {% for e in ex %}
+  <div class="explain-row" data-card>
+    <div class="er-main" data-toggle>
+      <span class="er-dim">{{ e.dim }}</span>
+      <span class="er-raw">{{ e.raw }}</span>
+      <span class="er-verdict"><span class="chip chip-{{ e.css }}">{{ e.verdict }}</span></span>
+      <span class="er-why">{{ e.why }}{% if e.why_source %}<span class="src">{{ e.why_source }}觀點</span>{% endif %}</span>
+      <span class="er-caret"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></span>
+    </div>
+    <div class="er-detail">
+      <div class="dl"><span class="dk">原數據</span><span class="dv">{{ e.raw }}</span></div>
+      <div class="dl"><span class="dk">為什麼</span><span class="dv">{{ e.why }}{% if e.why_source %}<span class="src">{{ e.why_source }}觀點</span>{% endif %}</span></div>
     </div>
   </div>
   {% endfor %}
 </div>
-<div class="footnote" style="margin-top:9px">
-  註：隔日沖分點買超「不追」、同分點對敲假量「不碰」、低檔連買「放觀察」——系統已內建這些規則，缺的是分點資料來源。
-</div>
-{% else %}
-<div class="panel empty">尚無分點標籤</div>
-{% endif %}
+{% endmacro %}
 
-<div class="section-title" style="margin-top:24px">觀察股</div>
-<div class="panel">
-  <form class="filter" method="post" action="/watchlist/add" style="margin-bottom:0">
-    <input name="stock_id" placeholder="代號（如 2454）" required pattern="[0-9A-Za-z]{4,6}" style="width:120px">
-    <input name="stock_name" placeholder="名稱（如 聯發科）" required style="width:140px">
-    <input name="reason" placeholder="加入原因（選填）" style="flex:1; min-width:160px">
-    <button type="submit">＋ 新增觀察股</button>
-  </form>
+{% macro scan_row(c) %}
+<div class="scan-row{{ ' quiet' if not c.has_signal }}" data-card data-scan-row
+     data-sentiment="{{ c.sentiment }}" data-has-signal="{{ 1 if c.has_signal else 0 }}"
+     data-search="{{ (c.stock_id ~ ' ' ~ c.stock_name) | lower }}">
+  <div class="scan-main" data-toggle>
+    <div class="scan-code">{{ c.stock_id }}<span class="added">{{ c.added_date }} 加入</span></div>
+    <div class="scan-name">{{ c.stock_name }}{% if c.sentiment == 'bull' %} <span class="scan-badge bull">偏多</span>{% elif c.sentiment == 'bear' %} <span class="scan-badge bear">偏空</span>{% endif %}</div>
+    <div class="scan-lights">{% for l in c.lights %}<span class="dot {{ l }}"></span>{% endfor %}</div>
+    <span class="scan-zone">{{ c.zone_label }}</span>
+    <div class="scan-spark">{{ spark_svg(c.spark_bars, 140, 34) }}{% if c.foreign_raw %}<span class="cap {{ c.foreign_css }}">{{ c.foreign_raw }}</span>{% endif %}</div>
+    <div class="scan-broker">{{ c.broker_verdict }}</div>
+    <div class="scan-caret"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></div>
+  </div>
+  <div class="scan-detail">
+    {% if c.explain %}
+    <div class="section-title" style="font-size:13px; margin:0 0 8px">籌碼解讀 <span class="muted" style="font-weight:400">原數據 → 判讀(門檻) → 為什麼(觀點)</span></div>
+    {{ explain_table(c.explain) }}
+    {% endif %}
+    <a class="drill" href="/watchlist/{{ c.stock_id }}">看完整詳情（籌碼K線式）›</a>
+  </div>
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="page-head">
+  <div><h1>觀察名單</h1></div>
+  <button type="button" data-toggle="#add-panel">＋ 新增觀察股</button>
 </div>
 
-{% if stocks %}
-{% for s in stocks %}
-<div class="panel">
-  <div class="row-between">
-    <div><b>{{ s[1] }}</b> <span class="dim mono">{{ s[0] }}</span> <span class="dim">· 加入於 {{ s[2] }}{% if s[3] %}・{{ s[3] }}{% endif %}</span></div>
-    <form method="post" action="/watchlist/remove" style="margin:0"
-          onsubmit="return confirm('移除 {{ s[1] }}（{{ s[0] }}）？歷史資料會保留，只是不再收集新資料。')">
-      <input type="hidden" name="stock_id" value="{{ s[0] }}">
-      <button type="submit" class="btn-danger" style="padding:4px 12px; font-size:12px">移除</button>
+<div id="add-panel" class="add-panel">
+  <div class="panel" style="margin-bottom:0">
+    <form class="filter" method="post" action="/watchlist/add" style="margin-bottom:0">
+      <input name="stock_id" placeholder="代號（如 2454）" required pattern="[0-9A-Za-z]{4,6}" style="width:120px">
+      <input name="stock_name" placeholder="名稱（如 聯發科）" required style="width:140px">
+      <input name="reason" placeholder="加入原因（選填）" style="flex:1; min-width:160px">
+      <button type="submit">＋ 新增</button>
     </form>
   </div>
-  {% set ex = stock_explain.get(s[0], []) %}
-  {% if ex %}
-  <div class="section-title" style="font-size:13px; margin:12px 0 8px">籌碼解讀 <span class="muted" style="font-weight:400">原數據 → 判讀(門檻) → 為什麼(觀點)</span></div>
-  <div class="explain">
-    <div class="explain-head"><span>維度</span><span>原數據</span><span>判讀</span><span>為什麼</span></div>
-    {% for e in ex %}
-    <div class="explain-row" data-card>
-      <div class="er-main" data-toggle>
-        <span class="er-dim">{{ e.dim }}</span>
-        <span class="er-raw">{{ e.raw }}</span>
-        <span class="er-verdict"><span class="chip chip-{{ e.css }}">{{ e.verdict }}</span></span>
-        <span class="er-why">{{ e.why }}{% if e.why_source %}<span class="src">{{ e.why_source }}觀點</span>{% endif %}</span>
-        <span class="er-caret"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></span>
-      </div>
-      <div class="er-detail">
-        <div class="dl"><span class="dk">原數據</span><span class="dv">{{ e.raw }}</span></div>
-        <div class="dl"><span class="dk">為什麼</span><span class="dv">{{ e.why }}{% if e.why_source %}<span class="src">{{ e.why_source }}觀點</span>{% endif %}</span></div>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
-  {% set sigs = signals_by_stock.get(s[0]) %}
-  {% if sigs %}
-  <div class="section-title" style="font-size:13px; margin:14px 0 8px">歷史觀察訊號</div>
-  <div class="table-wrap" style="margin-bottom:0">
-    <table class="stack">
-      <thead><tr><th>日期</th><th>分點</th><th>分類</th><th>理由</th></tr></thead>
-      <tbody>
-      {% for sig in sigs[:10] %}
-      <tr>
-        <td data-label="日期"><span class="mono">{{ sig.date }}</span></td>
-        <td data-label="分點">{{ sig.broker_name }}</td>
-        <td data-label="分類"><span class="tag">{{ sig.category }}</span></td>
-        <td data-label="理由" class="muted">{{ sig.reasons }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <div class="dim" style="margin-top:8px">尚無個股觀察訊號</div>
-  {% endif %}
 </div>
-{% endfor %}
+
+{% if index_latest %}
+<div class="mkt-strip">
+  <div>
+    <div class="lbl">加權指數</div>
+    <div style="display:flex; align-items:baseline; gap:8px">
+      <span class="val">{{ "{:,.0f}".format(index_latest.close) }}</span>
+      {% if index_change is not none %}<span class="{{ 'up' if index_change > 0 else 'down' if index_change < 0 else 'flat' }} mono" style="font-weight:700">{{ "%+.2f"|format(index_change) }}%</span>{% endif %}
+    </div>
+  </div>
+  {{ spark_svg(index_bars, 300, 52) }}
+  <div class="cap">近 10 日 · 紅漲綠跌</div>
+</div>
+{% endif %}
+
+{% if cards %}
+<div class="filters">
+  <span class="chip-filter{{ ' active' if counts.signal == 0 }}" data-f="all">全部 {{ counts.all }}</span>
+  <span class="chip-filter{{ ' active' if counts.signal > 0 }}" data-f="signal">今天有訊號 {{ counts.signal }}</span>
+  <span class="chip-filter" data-f="bull">偏多 {{ counts.bull }}</span>
+  <span class="chip-filter" data-f="bear">偏空 {{ counts.bear }}</span>
+  <span class="chip-filter" data-f="none">無訊號 {{ counts.none }}</span>
+  <input id="scan-search" class="search" type="search" placeholder="🔍 搜尋代號 / 名稱">
+</div>
+
+<div class="scan-legend">
+  <span>代號</span><span>名稱</span><span>外·主·位</span><span>位置</span><span>外資買賣超</span><span>主力訊號</span><span></span>
+</div>
+
+{% set sig_cards = cards | selectattr("has_signal") | list %}
+{% set quiet_cards = cards | rejectattr("has_signal") | list %}
+
+{% if sig_cards %}
+<div data-scan-section>
+  <div class="row-between" style="margin:6px 0 10px">
+    <span class="section-title" style="margin:0">今天值得看 <span class="tag" style="color:var(--accent); border-color:var(--accent)">{{ sig_cards | length }} 檔</span></span>
+    <span class="muted">有外資 / 主力動向的浮上來</span>
+  </div>
+  {% for c in sig_cards %}{{ scan_row(c) }}{% endfor %}
+</div>
+{% endif %}
+
+{% if quiet_cards %}
+<div data-scan-section>
+  <div class="row-between" style="margin:18px 0 10px">
+    <span class="section-title" style="margin:0">其餘觀察</span>
+    <span class="muted">無訊號 · {{ quiet_cards | length }} 檔</span>
+  </div>
+  {% for c in quiet_cards %}{{ scan_row(c) }}{% endfor %}
+</div>
+{% endif %}
+
 {% else %}
-<div class="panel empty">觀察名單為空——用 <code>python main.py watchlist add</code> 加入</div>
+<div class="panel empty">觀察名單為空——點右上「＋ 新增觀察股」，或 <code>python main.py watchlist add</code></div>
 {% endif %}
 {% endblock %}

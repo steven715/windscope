@@ -53,6 +53,11 @@ def client_with_data(tmp_path):
         "reasons, rule_version) VALUES "
         "('2026-06-12', '2330', '兆豐-嘉義', 'bottom_watch', '低檔連買 3 天', 'v1')"
     )
+    # 外資個股連買 3 天（date < asof 2026-06-12）→ 外資動向=連買、sentiment=bull
+    for _d in ("2026-06-09", "2026-06-10", "2026-06-11"):
+        conn.execute(
+            "INSERT INTO raw_chip (date, stock_id, broker_name, net_volume) "
+            "VALUES (?, '2330', '__FOREIGN__', 2000)", (_d,))
     conn.execute("INSERT INTO raw_index (date, open, close) VALUES ('2026-06-11', 42900, 43000)")
     conn.execute(
         "INSERT INTO market_holidays (date, name, source, fetched_at) "
@@ -125,13 +130,73 @@ class TestPagesWithData:
     def test_watchlist_page(self, client_with_data):
         resp = client_with_data.get("/watchlist")
         assert "台積電" in resp.text
-        assert "bottom_watch" in resp.text
+        # 掃描列展開的籌碼解讀維度（歷史訊號 category 已移到個股詳情頁）
+        assert "外資動向" in resp.text
 
     def test_watchlist_page_shows_taiex(self, client_with_data):
-        """觀察名單頁置頂顯示大盤指數。"""
+        """觀察名單頁置頂顯示大盤指數 strip。"""
         resp = client_with_data.get("/watchlist")
         assert "加權指數" in resp.text
-        assert "43000" in resp.text  # raw_index 的收盤
+        assert "43,000" in resp.text  # raw_index 收盤（大盤 strip，千分位格式）
+
+    def test_stock_detail_page(self, client_with_data):
+        """個股詳情頁回 200，含籌碼綜合判讀、該股名稱、歷史訊號。"""
+        resp = client_with_data.get("/watchlist/2330")
+        assert resp.status_code == 200
+        assert "台積電" in resp.text
+        assert "籌碼綜合判讀" in resp.text
+        assert "歷史觀察訊號" in resp.text
+
+    def test_stock_detail_unknown_redirects(self, client_with_data):
+        """未知代號 → 303 轉回觀察名單。"""
+        resp = client_with_data.get("/watchlist/9999", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"] == "/watchlist"
+
+    def test_watchlist_scan_sentiment_and_sparkline(self, client_with_data):
+        """外資連買的股票 → 偏多徽章 + sparkline <rect> 有渲染。"""
+        resp = client_with_data.get("/watchlist")
+        assert "偏多" in resp.text
+        assert "<rect" in resp.text
+
+    def test_spark_bars_empty_zero_and_quiet_percent(self):
+        """_spark_bars：空回 []、全 0 不除零仍有最小高度、小百分比序列自我撐高。"""
+        from server.routes.pages import _spark_bars
+        assert _spark_bars([]) == []
+        zero = _spark_bars([0, 0, 0])
+        assert len(zero) == 3 and all(b["h"] >= 1.5 for b in zero)
+        bars = _spark_bars([0.2, -0.3, 0.1], 100, 40)
+        assert max(b["h"] for b in bars) > 15          # 不被 mx=1 壓扁
+        assert bars[0]["up"] is True and bars[1]["up"] is False
+
+    def test_lights_sentiment_na_vs_flat(self):
+        """na（資料不可用）與 genuine flat 要區分；空殼回 na/none。"""
+        from server.routes.pages import _stock_lights_sentiment
+        na = [{"dim": "外資動向", "css": "flat", "verdict": "資料不可用", "raw": "尚未取得"},
+              {"dim": "主力分點", "css": "flat", "verdict": "資料不可用", "raw": "尚未匯入"},
+              {"dim": "股價位置", "css": "flat", "verdict": "資料不可用", "raw": "尚無"}]
+        lights, sent = _stock_lights_sentiment(na)
+        assert lights == ["na", "na", "na"] and sent == "none"
+
+        mixed = [{"dim": "外資動向", "css": "flat", "verdict": "外資無明顯方向", "raw": "淨買超 5 張"},
+                 {"dim": "主力分點", "css": "flat", "verdict": "資料不可用", "raw": "尚未匯入"},
+                 {"dim": "股價位置", "css": "flat", "verdict": "低檔（月線下方）", "raw": "-5%"}]
+        lights2, _ = _stock_lights_sentiment(mixed)
+        assert lights2 == ["flat", "na", "flat"]       # 真 flat 顯示灰、缺資料顯示空心
+
+    def test_lights_sentiment_bull_bear(self):
+        """外資 up→bull、外資 down→bear。"""
+        from server.routes.pages import _stock_lights_sentiment
+        bull = [{"dim": "外資動向", "css": "up", "verdict": "外資連買 3 天", "raw": "連買 3 天"},
+                {"dim": "主力分點", "css": "flat", "verdict": "資料不可用", "raw": "尚未"},
+                {"dim": "股價位置", "css": "flat", "verdict": "低檔", "raw": "x"}]
+        _, sent = _stock_lights_sentiment(bull)
+        assert sent == "bull"
+        bear = [{"dim": "外資動向", "css": "down", "verdict": "外資連賣 3 天", "raw": "連賣 3 天"},
+                {"dim": "主力分點", "css": "flat", "verdict": "資料不可用", "raw": "尚未"},
+                {"dim": "股價位置", "css": "flat", "verdict": "低檔", "raw": "x"}]
+        _, sent2 = _stock_lights_sentiment(bear)
+        assert sent2 == "bear"
 
     def test_data_page_chinese_labels(self, client_with_data):
         """資料瀏覽下拉選單顯示中文標籤。"""

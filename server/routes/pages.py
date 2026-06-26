@@ -62,10 +62,6 @@ _CLASS_LABELS = {"up": "漲", "down": "跌", "flat": "平"}
 # 亞幣方向中文 + 卡片配色（升值對台股偏多→綠/up；貶值→紅/down）
 _FX_DIR_ZH = {"bullish": ("升", "up"), "bearish": ("貶", "down"),
               "neutral": ("平", "flat")}
-# 分點類型中文標籤
-_BROKER_TYPE_LABELS = {
-    "swing": "波段／主力", "day_trade": "隔日沖", "hedge": "避險（外資券商）",
-}
 
 _TABLE_LABELS = {
     "raw_fx": "匯率（原始）",
@@ -515,69 +511,125 @@ def data_page(request: Request, table: str = "daily_metrics",
     })
 
 
+def _spark_bars(vals: list, w: float = 140.0, h: float = 34.0) -> list[dict]:
+    """數列 → sparkline <rect> 座標（純 Python，模板用 <rect> 迴圈畫，不引圖表庫）。"""
+    if not vals:
+        return []
+    # 各序列自我縮放（張數很大、%很小都能撐滿高度）；全 0 時用 1 避免除零
+    mx = max(abs(v) for v in vals) or 1
+    n = len(vals)
+    gap = max(1.0, w * 0.012)
+    bw = (w - gap * (n - 1)) / n
+    mid = h / 2
+    bars = []
+    for i, v in enumerate(vals):
+        bh = max(1.5, abs(v) / mx * (h / 2 - 1))
+        bars.append({"x": round(i * (bw + gap), 1),
+                     "y": round(mid - bh if v >= 0 else mid, 1),
+                     "w": round(bw, 1), "h": round(bh, 1), "up": v >= 0})
+    return bars
+
+
+def _stock_lights_sentiment(explain: list[dict]) -> tuple[list[str], str]:
+    """從 build_stock_explain 三維度算 (三顆燈[up/down/flat/na], 情緒[bull/bear/none])。"""
+    def is_na(d: dict) -> bool:
+        return ("資料不可用" in (d.get("verdict") or "")
+                or "尚未" in (d.get("raw") or ""))
+
+    def light(d: dict) -> str:
+        if not d or is_na(d):
+            return "na"
+        return d["css"] if d.get("css") in ("up", "down") else "flat"
+
+    dims = {d["dim"]: d for d in explain}
+    foreign, broker, zone = (dims.get("外資動向", {}), dims.get("主力分點", {}),
+                             dims.get("股價位置", {}))
+    lights = ([light(foreign), light(broker), light(zone)] if explain
+              else ["na", "na", "na"])
+    fcss, bcss = foreign.get("css"), broker.get("css")
+    if fcss == "up" or (bcss == "up" and fcss != "down"):
+        sentiment = "bull"
+    elif fcss == "down" or bcss == "down":
+        sentiment = "bear"
+    else:
+        sentiment = "none"
+    return lights, sentiment
+
+
+def _build_cards(stocks, stock_explain: dict, conn) -> list[dict]:
+    """把每檔 build_stock_explain 整理成掃描列卡片（燈號/情緒/sparkline/排序）。"""
+    cards = []
+    for s in stocks:
+        ex = stock_explain.get(s[0], [])
+        dims = {d["dim"]: d for d in ex}
+        foreign, broker, zone = (dims.get("外資動向", {}), dims.get("主力分點", {}),
+                                 dims.get("股價位置", {}))
+        lights, sentiment = _stock_lights_sentiment(ex)
+        spark_rows = conn.execute(
+            "SELECT net_volume FROM raw_chip "
+            "WHERE stock_id = ? AND broker_name = '__FOREIGN__' "
+            "      AND net_volume IS NOT NULL ORDER BY date DESC LIMIT 10",
+            (s[0],),
+        ).fetchall()
+        spark = [r[0] for r in reversed(spark_rows)]
+        cards.append({
+            "stock_id": s[0], "stock_name": s[1],
+            "added_date": s[2], "reason": s[3],
+            "lights": lights, "sentiment": sentiment,
+            "has_signal": sentiment != "none",
+            "foreign_raw": foreign.get("raw", ""),
+            "foreign_css": foreign.get("css", "flat"),
+            "broker_verdict": broker.get("verdict", "") or "—",
+            "zone_label": zone.get("verdict", "—"),
+            "spark_bars": _spark_bars(spark, 140, 34),
+            "explain": ex,
+        })
+    order = {"bull": 0, "bear": 1, "none": 2}
+    cards.sort(key=lambda c: (order[c["sentiment"]], c["stock_id"]))
+    return cards
+
+
 @router.get("/watchlist", response_class=HTMLResponse)
 def watchlist_page(request: Request):
-    """觀察名單 + 各股最新的個股觀察訊號。台股大盤指數固定置頂。"""
+    """觀察名單（掃描優先 + 亮燈 + 鑽取）：每檔一列摘要，今天有訊號的浮上來。"""
+    from datetime import datetime
+
+    from integration.explain import build_stock_explain
+
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
         index_rows = conn.execute(
-            "SELECT date, open, high, low, close FROM raw_index "
-            "ORDER BY date DESC LIMIT 11"
+            "SELECT date, close FROM raw_index ORDER BY date DESC LIMIT 11"
         ).fetchall()
         stocks = conn.execute(
             "SELECT stock_id, stock_name, added_date, reason "
             "FROM watchlist ORDER BY stock_id"
         ).fetchall()
-        signal_rows = conn.execute(
-            "SELECT date, stock_id, broker_name, category, reasons "
-            "FROM stock_signals ORDER BY date DESC LIMIT 100"
-        ).fetchall()
-        broker_rows = conn.execute(
-            "SELECT broker_name, broker_type, notes FROM broker_tags "
-            "ORDER BY broker_type, broker_name"
-        ).fetchall()
-
-        # 個股籌碼解讀：每檔一張表（鏡像大盤盤前解讀），as-of 取最近訊號日
-        from datetime import datetime
-
-        from integration.explain import build_stock_explain
-
         asof = (conn.execute("SELECT MAX(date) FROM signals").fetchone()[0]
                 or datetime.now().strftime("%Y-%m-%d"))
-        stock_explain = {
-            s[0]: build_stock_explain(asof, s[0], conn) for s in stocks
-        }
+        stock_explain = {s[0]: build_stock_explain(asof, s[0], conn) for s in stocks}
+        cards = _build_cards(stocks, stock_explain, conn)
 
-    brokers = [
-        {"name": b[0], "type": b[1],
-         "type_label": _BROKER_TYPE_LABELS.get(b[1], b[1]), "notes": b[2]}
-        for b in broker_rows
-    ]
+    # 大盤 strip：最新收盤 + 近 10 日漲跌% sparkline（index_rows 為新→舊）
+    closes = [r[1] for r in reversed(index_rows)]  # 舊→新
+    idx_changes = [round((closes[i] - closes[i - 1]) / closes[i - 1] * 100, 2)
+                   for i in range(1, len(closes)) if closes[i - 1] and closes[i]]
+    index_latest = ({"close": index_rows[0][1], "date": index_rows[0][0]}
+                    if index_rows else None)
 
-    signals_by_stock: dict[str, list] = {}
-    for date, stock_id, broker, category, reasons in signal_rows:
-        signals_by_stock.setdefault(stock_id, []).append(
-            {"date": date, "broker_name": broker,
-             "category": category, "reasons": reasons}
-        )
-
-    # 大盤指數：最近 10 日 OHLC + 對前一日的漲跌幅（多查 1 列算第一天的漲跌）
-    index_days = []
-    for i, (date, open_, high, low, close) in enumerate(index_rows[:10]):
-        change_pct = None
-        if i + 1 < len(index_rows) and index_rows[i + 1][4] and close:
-            prev_close = index_rows[i + 1][4]
-            change_pct = round((close - prev_close) / prev_close * 100, 2)
-        index_days.append({
-            "date": date, "open": open_, "high": high,
-            "low": low, "close": close, "change_pct": change_pct,
-        })
+    counts = {
+        "all": len(cards),
+        "signal": sum(1 for c in cards if c["has_signal"]),
+        "bull": sum(1 for c in cards if c["sentiment"] == "bull"),
+        "bear": sum(1 for c in cards if c["sentiment"] == "bear"),
+        "none": sum(1 for c in cards if c["sentiment"] == "none"),
+    }
 
     return templates.TemplateResponse(request, "watchlist.html", {
-        "active": "watchlist", "stocks": stocks,
-        "signals_by_stock": signals_by_stock,
-        "index_days": index_days, "brokers": brokers,
-        "stock_explain": stock_explain,
+        "active": "watchlist", "cards": cards, "counts": counts,
+        "index_latest": index_latest,
+        "index_change": idx_changes[-1] if idx_changes else None,
+        "index_bars": _spark_bars(idx_changes, 300, 52),
     })
 
 
@@ -601,6 +653,74 @@ def watchlist_remove_route(request: Request, stock_id: str = Form(...)):
 
     watchlist_remove(stock_id.strip(), db_path=request.app.state.db_path)
     return RedirectResponse(url="/watchlist", status_code=303)
+
+
+@router.get("/watchlist/{stock_id}", response_class=HTMLResponse)
+def stock_detail_page(request: Request, stock_id: str):
+    """個股詳情：該檔迷你今日情報（籌碼綜合判讀 + 外資買賣超 + 大盤對照 + 歷史訊號）。
+
+    純唯讀；未知代號 303 轉回觀察名單。windscope 無收個股價格，故不顯示個股漲跌/收盤。
+    """
+    from datetime import datetime
+
+    from integration.explain import build_stock_explain
+
+    db_path = request.app.state.db_path
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT stock_id, stock_name, added_date, reason FROM watchlist "
+            "WHERE stock_id = ?", (stock_id,)
+        ).fetchone()
+        if row is None:
+            return RedirectResponse(url="/watchlist", status_code=303)
+        asof = (conn.execute("SELECT MAX(date) FROM signals").fetchone()[0]
+                or datetime.now().strftime("%Y-%m-%d"))
+        explain = build_stock_explain(asof, stock_id, conn)
+        foreign_rows = conn.execute(
+            "SELECT net_volume FROM raw_chip "
+            "WHERE stock_id = ? AND broker_name = '__FOREIGN__' "
+            "      AND net_volume IS NOT NULL ORDER BY date DESC LIMIT 20",
+            (stock_id,)
+        ).fetchall()
+        signal_rows = conn.execute(
+            "SELECT date, broker_name, category, reasons FROM stock_signals "
+            "WHERE stock_id = ? ORDER BY date DESC LIMIT 20", (stock_id,)
+        ).fetchall()
+        index_rows = conn.execute(
+            "SELECT close FROM raw_index ORDER BY date DESC LIMIT 11"
+        ).fetchall()
+
+    lights, sentiment = _stock_lights_sentiment(explain)
+    dir_label = {"bull": "↑ 偏多", "bear": "↓ 偏空", "none": "— 中性"}[sentiment]
+    dims = {d["dim"]: d for d in explain}
+    foreign = dims.get("外資動向", {})
+    directional = [d["verdict"] for d in explain
+                   if d.get("css") in ("up", "down")
+                   and "資料不可用" not in (d.get("verdict") or "")]
+    summary = "；".join(directional) if directional else "三維度目前無明顯方向"
+
+    spark = [r[0] for r in reversed(foreign_rows)]
+    closes = [r[0] for r in reversed(index_rows)]  # 舊→新
+    idx_changes = [round((closes[i] - closes[i - 1]) / closes[i - 1] * 100, 2)
+                   for i in range(1, len(closes)) if closes[i - 1] and closes[i]]
+
+    signals = [{"date": r[0], "broker_name": r[1], "category": r[2], "reasons": r[3]}
+               for r in signal_rows]
+
+    return templates.TemplateResponse(request, "stock_detail.html", {
+        "active": "watchlist",
+        "stock": {"stock_id": row[0], "stock_name": row[1],
+                  "added_date": row[2], "reason": row[3]},
+        "explain": explain, "lights": lights, "sentiment": sentiment,
+        "dir_label": dir_label, "summary": summary,
+        "foreign_caption": foreign.get("raw", "—"),
+        "foreign_css": foreign.get("css", "flat"),
+        "spark_bars": _spark_bars(spark, 520, 104),
+        "signals": signals,
+        "index_latest": index_rows[0][0] if index_rows else None,
+        "index_change": idx_changes[-1] if idx_changes else None,
+        "index_bars": _spark_bars(idx_changes, 300, 52),
+    })
 
 
 @router.get("/scheduler", response_class=HTMLResponse)

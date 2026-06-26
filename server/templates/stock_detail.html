@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ stock.stock_name }}（{{ stock.stock_id }}）{% endblock %}
+
+{% macro spark_svg(bars, w, h) %}
+<svg class="spark" viewBox="0 0 {{ w }} {{ h }}" width="{{ w }}" height="{{ h }}" preserveAspectRatio="none">
+  <line class="mid" x1="0" y1="{{ h / 2 }}" x2="{{ w }}" y2="{{ h / 2 }}"></line>
+  {% for b in bars %}<rect class="{{ 'up' if b.up else 'down' }}" x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}" rx="1.5"></rect>{% endfor %}
+</svg>
+{% endmacro %}
+
+{% macro explain_table(ex) %}
+<div class="explain">
+  <div class="explain-head"><span>維度</span><span>原數據</span><span>判讀</span><span>為什麼</span></div>
+  {% for e in ex %}
+  <div class="explain-row" data-card>
+    <div class="er-main" data-toggle>
+      <span class="er-dim">{{ e.dim }}</span>
+      <span class="er-raw">{{ e.raw }}</span>
+      <span class="er-verdict"><span class="chip chip-{{ e.css }}">{{ e.verdict }}</span></span>
+      <span class="er-why">{{ e.why }}{% if e.why_source %}<span class="src">{{ e.why_source }}觀點</span>{% endif %}</span>
+      <span class="er-caret"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></span>
+    </div>
+    <div class="er-detail">
+      <div class="dl"><span class="dk">原數據</span><span class="dv">{{ e.raw }}</span></div>
+      <div class="dl"><span class="dk">為什麼</span><span class="dv">{{ e.why }}{% if e.why_source %}<span class="src">{{ e.why_source }}觀點</span>{% endif %}</span></div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% block content %}
+<a class="backlink" href="/watchlist"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>返回觀察名單</a>
+
+<div class="detail-head" data-sentiment="{{ sentiment }}">
+  <span class="code">{{ stock.stock_id }}</span>
+  <span class="nm">{{ stock.stock_name }}</span>
+  <span class="chip chip-{{ 'up' if sentiment == 'bull' else 'down' if sentiment == 'bear' else 'flat' }}">{{ dir_label }}</span>
+  <form method="post" action="/watchlist/remove" style="margin-left:auto"
+        onsubmit="return confirm('移除 {{ stock.stock_name }}（{{ stock.stock_id }}）？歷史資料會保留。')">
+    <input type="hidden" name="stock_id" value="{{ stock.stock_id }}">
+    <button type="submit" class="btn-danger">移除觀察</button>
+  </form>
+</div>
+
+<div class="detail-grid">
+  <div class="hero-stock" data-sentiment="{{ sentiment }}">
+    <div class="dim">籌碼綜合判讀</div>
+    <div class="big">{{ dir_label }}</div>
+    <div class="hero-lights">
+      {% for e in explain %}
+      {% set l = lights[loop.index0] %}
+      <div class="hl">
+        <span class="dot {{ l }}"></span>
+        <div>
+          <div style="font:700 12px var(--font); color:var(--text)">{{ e.dim }}</div>
+          <div class="{{ 'up' if e.css == 'up' else 'down' if e.css == 'down' else 'dim' }}" style="font-size:10.5px">{{ e.verdict }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="dim" style="border-top:1px solid var(--border-subtle); padding-top:12px; line-height:1.6">{{ summary }}</div>
+  </div>
+
+  <div class="foreign-card">
+    <div class="row-between">
+      <span class="section-title" style="margin:0; font-size:14px">外資買賣超走勢</span>
+      {% if foreign_caption %}<span class="{{ foreign_css }} mono" style="font-weight:700; font-size:12px">{{ foreign_caption }}</span>{% endif %}
+    </div>
+    <div class="footnote" style="margin:4px 0 12px">資料來源：證交所 T86（外陸資買賣超，單日，單位：張）</div>
+    {{ spark_svg(spark_bars, 520, 104) }}
+    <div class="spark-legend"><span><i style="background:var(--up)"></i>買超</span><span><i style="background:var(--down)"></i>賣超</span></div>
+  </div>
+</div>
+
+{% if index_latest %}
+<div class="mkt-strip">
+  <div>
+    <div class="lbl">大盤對照 · 加權指數</div>
+    <div style="display:flex; align-items:baseline; gap:8px">
+      <span class="val">{{ "{:,.0f}".format(index_latest) }}</span>
+      {% if index_change is not none %}<span class="{{ 'up' if index_change > 0 else 'down' if index_change < 0 else 'flat' }} mono" style="font-weight:700">{{ "%+.2f"|format(index_change) }}%</span>{% endif %}
+    </div>
+  </div>
+  {{ spark_svg(index_bars, 300, 52) }}
+  <div class="cap">個股外資動向 vs 大盤同步 → 訊號可信度較高</div>
+</div>
+{% endif %}
+
+<div class="section-title">籌碼解讀</div>
+{{ explain_table(explain) }}
+
+<div class="section-title" style="margin-top:18px">歷史觀察訊號</div>
+{% if signals %}
+<div class="table-wrap">
+  <table class="stack">
+    <thead><tr><th>日期</th><th>分點</th><th>分類</th><th>理由</th></tr></thead>
+    <tbody>
+    {% for sig in signals %}
+    <tr>
+      <td data-label="日期"><span class="mono">{{ sig.date }}</span></td>
+      <td data-label="分點">{{ sig.broker_name }}</td>
+      <td data-label="分類"><span class="tag">{{ sig.category }}</span></td>
+      <td data-label="理由" class="muted">{{ sig.reasons }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="panel empty">尚無個股觀察訊號</div>
+{% endif %}
+{% endblock %}

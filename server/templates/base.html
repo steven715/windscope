@@ -347,6 +347,95 @@
     border: 1px solid var(--border); border-radius: 13px; padding: 13px 15px; }
   .broker-card .bn { font: 600 13.5px var(--font); color: #dbe4ec; }
 
+  /* ── 觀察名單：掃描列 + 亮燈 + sparkline + 過濾 + 詳情 ── */
+  /* 大盤 strip */
+  .mkt-strip { display: flex; align-items: center; gap: 18px; background: var(--surface-sunken);
+    border: 1px solid var(--border-subtle); border-radius: 12px; padding: 13px 18px; margin-bottom: 16px; }
+  .mkt-strip .lbl { font: 700 11px var(--font); color: var(--text-dim); }
+  .mkt-strip .val { font: 700 22px var(--mono); color: var(--text); }
+  .mkt-strip .cap { margin-left: auto; font: 400 11px var(--font); color: var(--text-dim); text-align: right; }
+
+  /* sparkline（純 <svg><rect>，座標 server 算） */
+  .spark { display: block; }
+  .spark .mid { stroke: #2a3642; stroke-width: 1; }
+  .spark rect.up { fill: var(--up); }
+  .spark rect.down { fill: var(--down); }
+
+  /* 過濾膠囊 */
+  .filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .chip-filter { font: 500 12px var(--font); border-radius: 999px; padding: 6px 14px; cursor: pointer;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-dim); }
+  .chip-filter[data-f="bull"] { color: var(--up); border-color: color-mix(in srgb, var(--up) 45%, transparent); }
+  .chip-filter[data-f="bear"] { color: var(--down); border-color: color-mix(in srgb, var(--down) 45%, transparent); }
+  .chip-filter.active { background: var(--accent); border-color: var(--accent); color: #08222e; font-weight: 700; }
+  .chip-filter.active[data-f="bull"] { background: var(--up); border-color: var(--up); color: #08222e; }
+  .chip-filter.active[data-f="bear"] { background: var(--down); border-color: var(--down); color: #08222e; }
+  .filters .search { margin-left: auto; min-width: 200px; }
+
+  /* 新增觀察股 collapsible */
+  .add-panel { display: none; margin-bottom: 16px; }
+  .add-panel.open { display: block; }
+
+  /* 欄位 legend */
+  .scan-legend { display: grid; grid-template-columns: 88px 168px 74px 116px 168px 1fr 26px;
+    gap: 14px; padding: 0 16px 7px; font: 700 10px var(--font); color: var(--text-faint); }
+
+  /* 掃描列 */
+  .scan-row { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid transparent;
+    border-radius: 12px; margin-bottom: 8px; overflow: hidden; cursor: pointer; }
+  .scan-row[data-sentiment="bull"] { border-left-color: var(--up); }
+  .scan-row[data-sentiment="bear"] { border-left-color: var(--down); }
+  .scan-row.quiet { background: #171d24; border-color: var(--border-subtle); }
+  .scan-main { display: grid; grid-template-columns: 88px 168px 74px 116px 168px 1fr 26px;
+    align-items: center; gap: 14px; padding: 13px 16px; }
+  .scan-code { font: 700 16px var(--mono); color: #cdd8e2; }
+  .scan-row[data-sentiment="bull"] .scan-code { color: var(--up); }
+  .scan-row[data-sentiment="bear"] .scan-code { color: var(--down); }
+  .scan-code .added { display: block; font: 400 9.5px var(--mono); color: var(--text-faint); margin-top: 2px; }
+  .scan-name { font: 600 14px var(--font); color: var(--text); }
+  .scan-badge { font: 700 9.5px var(--font); border-radius: 999px; padding: 1px 7px; margin-left: 6px; white-space: nowrap; }
+  .scan-badge.bull { color: var(--up); background: color-mix(in srgb, var(--up) 13%, transparent); }
+  .scan-badge.bear { color: var(--down); background: color-mix(in srgb, var(--down) 13%, transparent); }
+  .scan-lights { display: flex; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .dot.up { background: var(--up); } .dot.down { background: var(--down); } .dot.flat { background: #6b7886; }
+  .dot.na { background: transparent; border: 1.5px solid #3a4654; }
+  .scan-zone { justify-self: start; font: 500 11px var(--font); color: #9fb0c0; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+  .scan-spark { min-width: 0; }
+  .scan-spark .cap { display: block; font: 500 9.5px var(--mono); color: var(--text-mute); margin-top: 3px; }
+  .scan-spark .cap.up { color: var(--up); } .scan-spark .cap.down { color: var(--down); }
+  .scan-broker { font: 400 12px var(--font); color: #7f8c9b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .scan-caret { color: var(--text-faint); transition: transform .15s; display: flex; justify-content: flex-end; }
+  .scan-row.open .scan-caret { transform: rotate(180deg); }
+  .scan-detail { display: none; border-top: 1px solid var(--border-subtle); padding: 14px 18px 16px; background: var(--surface-sunken); }
+  .scan-row.open .scan-detail { display: block; }
+  .scan-detail .drill { display: block; text-align: right; margin-top: 10px; font: 500 12px var(--font); color: var(--accent); text-decoration: none; }
+
+  /* 個股詳情頁 */
+  .backlink { display: inline-flex; align-items: center; gap: 6px; font: 600 12px var(--font);
+    color: var(--text-mute); text-decoration: none; margin-bottom: 14px; }
+  .backlink:hover { color: var(--text); }
+  .detail-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  .detail-head .code { font: 700 26px var(--mono); color: #cdd8e2; }
+  .detail-head[data-sentiment="bull"] .code { color: var(--up); }
+  .detail-head[data-sentiment="bear"] .code { color: var(--down); }
+  .detail-head .nm { font: 900 26px var(--font); color: var(--text); }
+  .detail-grid { display: grid; grid-template-columns: 1.45fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .hero-stock { border-radius: 15px; padding: 22px 24px; border: 1px solid var(--border); background: var(--surface); }
+  .hero-stock[data-sentiment="bull"] { background: linear-gradient(135deg, color-mix(in srgb, var(--up) 13%, transparent), var(--surface) 60%); border-color: color-mix(in srgb, var(--up) 35%, transparent); }
+  .hero-stock[data-sentiment="bear"] { background: linear-gradient(135deg, color-mix(in srgb, var(--down) 13%, transparent), var(--surface) 60%); border-color: color-mix(in srgb, var(--down) 35%, transparent); }
+  .hero-stock .big { font: 900 42px var(--font); line-height: 1; }
+  .hero-stock[data-sentiment="bull"] .big { color: var(--up); }
+  .hero-stock[data-sentiment="bear"] .big { color: var(--down); }
+  .hero-stock[data-sentiment="none"] .big { color: var(--warn); }
+  .hero-lights { display: flex; gap: 20px; margin: 16px 0; flex-wrap: wrap; }
+  .hero-lights .hl { display: flex; align-items: center; gap: 8px; }
+  .hero-lights .hl .dot { width: 13px; height: 13px; }
+  .foreign-card { background: var(--surface); border: 1px solid var(--border); border-radius: 15px; padding: 20px 22px; }
+  .spark-legend { display: flex; gap: 16px; margin-top: 10px; font: 400 11px var(--font); color: var(--text-dim); }
+  .spark-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
   /* ── 手機底部分頁導覽（桌面隱藏） ── */
   .tabbar { display: none; }
 
@@ -425,6 +514,26 @@
     .verdict-card { padding: 20px 18px; }
     .verdict-card .vbig { font-size: 30px; }
     .grid2 .card .cv { font-size: 22px; }
+
+    /* 觀察名單手機版 */
+    .scan-legend { display: none; }
+    .mkt-strip { flex-wrap: wrap; gap: 10px 14px; }
+    .mkt-strip .cap { display: none; }
+    .mkt-strip .spark { width: 100%; height: auto; }
+    .filters { flex-wrap: nowrap; overflow-x: auto; }
+    .filters .search { margin-left: 8px; min-width: 150px; }
+    .scan-main { grid-template-columns: 1fr auto; gap: 6px 10px; padding: 12px 14px; }
+    .scan-main .scan-code   { grid-area: 1 / 1 / 2 / 2; }
+    .scan-main .scan-lights { grid-area: 1 / 2 / 2 / 3; justify-self: end; }
+    .scan-main .scan-name   { grid-area: 2 / 1 / 3 / 3; }
+    .scan-main .scan-zone   { grid-area: 3 / 1 / 4 / 3; justify-self: start; }
+    .scan-main .scan-spark  { grid-area: 4 / 1 / 5 / 3; }
+    .scan-main .scan-broker { grid-area: 5 / 1 / 6 / 3; white-space: normal; }
+    .scan-main .scan-caret  { display: none; }
+    .detail-grid { display: block; }
+    .detail-grid > * { margin-bottom: 14px; }
+    .detail-head .code, .detail-head .nm { font-size: 22px; }
+    .hero-stock .big { font-size: 32px; }
 
     .tabbar {
       display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
@@ -593,13 +702,56 @@ document.querySelectorAll("input[data-filter]").forEach(function (input) {
   paint();
 })();
 
-// 漸進揭露：點 [data-toggle="<選擇器>"] 切換目標 .open（手機盤前解讀等卡片展開）
+// 漸進揭露：點 [data-toggle] 切換 .open。data-toggle 有值＝該 CSS 選擇器的目標；
+// 無值＝最近的 [data-card]（盤前解讀卡、掃描列展開）。
 document.querySelectorAll("[data-toggle]").forEach(function (head) {
   head.addEventListener("click", function () {
-    var card = head.closest("[data-card]") || head.parentElement;
-    if (card) card.classList.toggle("open");
+    var sel = head.getAttribute("data-toggle");
+    var target = sel ? document.querySelector(sel)
+                     : (head.closest("[data-card]") || head.parentElement);
+    if (target) target.classList.toggle("open");
   });
 });
+
+// 觀察名單過濾：膠囊切 data-f(all/signal/bull/bear/none) + 搜尋比對 data-search；
+// 區塊(今天值得看/其餘觀察)無可見列時整段隱藏。
+(function () {
+  var rows = document.querySelectorAll("[data-scan-row]");
+  if (!rows.length) return;
+  var pills = document.querySelectorAll(".chip-filter");
+  var search = document.getElementById("scan-search");
+  var active = document.querySelector(".chip-filter.active");
+  var cur = active ? active.getAttribute("data-f") : "all";
+
+  function apply() {
+    var kw = (search && search.value.trim().toLowerCase()) || "";
+    rows.forEach(function (r) {
+      var sent = r.getAttribute("data-sentiment");
+      var sig = r.getAttribute("data-has-signal") === "1";
+      var passF = cur === "all" || (cur === "signal" && sig)
+        || (cur === "bull" && sent === "bull") || (cur === "bear" && sent === "bear")
+        || (cur === "none" && !sig);
+      var passK = kw === "" || (r.getAttribute("data-search") || "").indexOf(kw) !== -1;
+      r.style.display = (passF && passK) ? "" : "none";
+    });
+    document.querySelectorAll("[data-scan-section]").forEach(function (sec) {
+      var vis = Array.prototype.some.call(
+        sec.querySelectorAll("[data-scan-row]"),
+        function (r) { return r.style.display !== "none"; });
+      sec.style.display = vis ? "" : "none";
+    });
+  }
+  pills.forEach(function (p) {
+    p.addEventListener("click", function () {
+      cur = p.getAttribute("data-f");
+      pills.forEach(function (x) { x.classList.remove("active"); });
+      p.classList.add("active");
+      apply();
+    });
+  });
+  if (search) search.addEventListener("input", apply);
+  apply();
+})();
 
 // PWA：註冊 service worker（手機可加到主畫面、全螢幕開啟）
 if ("serviceWorker" in navigator) {
