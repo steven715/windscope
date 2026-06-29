@@ -64,7 +64,8 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
     # 顯示基準與指標一致：今日報價 vs「前一交易日」收盤（今日收盤 18:30 才有）。
     prev_day = get_previous_trading_day(date, conn)
 
-    # 匯率：今日 08:45 報價 + 前一交易日 16:00 收盤（基準）
+    # 匯率：CNY/KRW 用今日 08:45 報價 + 前一交易日 16:00 收盤（基準）。
+    # TWD 在下方 86 行覆寫成離岸晨對晨（在岸 08:45 牌價開盤前未更新、失真）。
     fx_rates = {}
     for pair in ["USD/TWD", "USD/CNY", "USD/KRW"]:
         today_r = conn.execute(
@@ -82,6 +83,13 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
             "close_16": prev_close,
             "quote_0845": today_r[0] if today_r else None,
         }
+
+    # TWD 顯示與 delta 一致：改用離岸晨對晨（在岸 08:45 牌價開盤前未更新、失真）。
+    from integration.fx_metrics import offshore_twd_morning
+    fx_rates["USD/TWD"] = {
+        "close_16": offshore_twd_morning(conn, prev_day) if prev_day else None,
+        "quote_0845": offshore_twd_morning(conn, date),
+    }
 
     # 期貨：今日夜盤收盤 + 前一交易日現貨收盤（基準）
     today_fut = conn.execute(
@@ -133,7 +141,8 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
         else:
             delta_str = "△N/A"
         arrow = _fx_arrow(delta)
-        lines.append(f"{label:8s} {quote_str} (前日 {close_str}) {delta_str} {arrow}")
+        note = "  ←離岸晨對晨" if pair == "USD/TWD" else ""
+        lines.append(f"{label:8s} {quote_str} (前日 {close_str}) {delta_str} {arrow}{note}")
 
     # 亞幣同步
     if fx_sync is not None:

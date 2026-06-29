@@ -4,7 +4,11 @@ import sqlite3
 from unittest.mock import patch
 
 from db.schema import create_all_tables
-from jobs.verify_close import _ensure_prev_index_baseline, run_verify_close
+from jobs.verify_close import (
+    _backfill_unverified_signals,
+    _ensure_prev_index_baseline,
+    run_verify_close,
+)
 
 
 def _setup_db(tmp_path) -> str:
@@ -133,6 +137,83 @@ class TestEnsurePrevBaseline:
                    return_value=None):
             ok = _ensure_prev_index_baseline("2026-06-15", db_path)
         assert ok is False
+
+
+class TestBackfillUnverified:
+    """自癒：補驗最近漏掉 verification 的訊號日（重現 6/25 指數延遲發布情境）。"""
+
+    def _seed(self, tmp_path) -> str:
+        """6/24、6/25 都有訊號與指數，但都還沒 verification；前日基準 6/23 在。"""
+        db_path = str(tmp_path / "bf.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.execute(
+            "INSERT INTO raw_index (date, open, close) "
+            "VALUES ('2026-06-23', 46100, 46043.6)")
+        conn.execute(
+            "INSERT INTO raw_index (date, open, close) "
+            "VALUES ('2026-06-24', 46909.98, 46043.6)")
+        conn.execute(
+            "INSERT INTO raw_index (date, open, close) "
+            "VALUES ('2026-06-25', 46339.68, 46255.26)")
+        conn.executemany(
+            "INSERT INTO signals (date, direction, confidence) VALUES (?, ?, ?)",
+            [("2026-06-24", "bearish", 3), ("2026-06-25", "bullish", 2)])
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_backfills_missing_verifications(self, tmp_path):
+        """漏驗的 6/24、6/25 在後續日子被補上 verification 列。"""
+        db_path = self._seed(tmp_path)
+        conn = sqlite3.connect(db_path)
+        ok = _backfill_unverified_signals("2026-06-26", conn)
+        assert ok is True
+        dates = [r[0] for r in conn.execute(
+            "SELECT date FROM verifications ORDER BY date")]
+        conn.close()
+        assert dates == ["2026-06-24", "2026-06-25"]
+
+    def test_skips_dates_still_missing_index(self, tmp_path):
+        """訊號日仍缺自身指數 → 略過不補、不報錯，留待下次。"""
+        db_path = str(tmp_path / "bf2.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.execute(
+            "INSERT INTO raw_index (date, open, close) "
+            "VALUES ('2026-06-23', 46100, 46043.6)")  # 只有前日基準
+        conn.execute(
+            "INSERT INTO signals (date, direction, confidence) "
+            "VALUES ('2026-06-24', 'bearish', 3)")  # 6/24 自身無指數
+        conn.commit()
+        ok = _backfill_unverified_signals("2026-06-26", conn)
+        cnt = conn.execute("SELECT COUNT(*) FROM verifications").fetchone()[0]
+        conn.close()
+        assert ok is True
+        assert cnt == 0
+
+    def test_run_verify_close_backfills_prior_day(self, tmp_path):
+        """整合：跑 6/26 的 verify_close 會順手補驗漏掉的 6/25。"""
+        db_path = self._seed(tmp_path)
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO signals (date, direction, confidence) "
+            "VALUES ('2026-06-26', 'bearish', 3)")
+        conn.commit()
+        conn.close()
+
+        ohlc = {"open": 46188.6, "high": 46188.6, "low": 44454.22, "close": 44571.76}
+        with patch("collectors.twse.TWSECollector.collect_index_ohlc",
+                   return_value=ohlc):
+            result = run_verify_close("2026-06-26", db_path=db_path)
+
+        assert result["results"]["backfill_unverified"] is True
+        assert result["status"] == "completed"
+        conn = sqlite3.connect(db_path)
+        dates = [r[0] for r in conn.execute(
+            "SELECT date FROM verifications ORDER BY date")]
+        conn.close()
+        assert dates == ["2026-06-24", "2026-06-25", "2026-06-26"]
 
 
 def test_full_flow_backfills_prev_then_completes(tmp_path):

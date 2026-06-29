@@ -53,6 +53,16 @@ def run_verify_close(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
+        # 2b. 自癒：補驗最近「有訊號卻無 verification」的交易日。
+        #     某日 14:30 指數尚未發布 → 當日 verify partial、無驗證列；隔日
+        #     _ensure_prev_index_baseline 會補回該日指數，此步隨後補上驗證，
+        #     避免訊號靜默掉出命中率統計（如 2026-06-25）。
+        ok, err = run_step("backfill_unverified",
+                           lambda: _backfill_unverified_signals(date, conn))
+        results["backfill_unverified"] = ok
+        if err:
+            errors.append(err)
+
     status = determine_status(results)
     logger.info("run_verify_close: %s status=%s", date, status)
     return {
@@ -111,3 +121,34 @@ def _verify(date: str, conn: sqlite3.Connection) -> bool:
 
     result = verify_signal(date, conn)
     return result is not None
+
+
+def _backfill_unverified_signals(date: str, conn: sqlite3.Connection,
+                                 lookback_days: int = 10) -> bool:
+    """補驗最近 lookback_days 天內「有訊號卻無 verification」的交易日。
+
+    回傳 True（補了幾筆都算成功，無事可補也回 True）；個別日仍缺指數則略過，
+    留待下次再試。只處理 date 之前的日子（當日由主驗證步驟負責）。
+    """
+    from datetime import datetime, timedelta
+
+    from integration.verification import verify_signal
+
+    start = (datetime.strptime(date, "%Y-%m-%d")
+             - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    rows = conn.execute(
+        """SELECT s.date FROM signals s
+           LEFT JOIN verifications v ON s.date = v.date
+           WHERE v.date IS NULL AND s.date < ? AND s.date >= ?
+           ORDER BY s.date""",
+        (date, start),
+    ).fetchall()
+
+    backfilled = 0
+    for (d,) in rows:
+        if verify_signal(d, conn) is not None:
+            backfilled += 1
+            logger.info("_backfill_unverified_signals: 補驗 %s", d)
+    if backfilled:
+        logger.info("_backfill_unverified_signals: 共補驗 %d 筆", backfilled)
+    return True

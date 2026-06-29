@@ -36,6 +36,11 @@ def test_summary_with_full_data(memory_db):
         memory_db.execute("INSERT INTO raw_fx (date, currency_pair, quote_0845) "
                           "VALUES ('2026-04-08', ?, ?)", (pair, q0845))
 
+    # TWD 顯示改用離岸晨對晨：灌昨晨(04-07)/今晨(04-08)離岸最後一根（與 delta 一致）
+    for d, close in [("2026-04-07", 31.50), ("2026-04-08", 31.35)]:
+        memory_db.execute("INSERT INTO intraday_fx (date, currency_pair, ts, close) "
+                          "VALUES (?, 'USD/TWD', 200, ?)", (d, close))
+
     # 準備 raw_futures：前日現貨(基準) + 當日夜盤
     memory_db.execute("INSERT INTO raw_futures (date, spot_close) "
                       "VALUES ('2026-04-07', 20050.0)")
@@ -63,7 +68,8 @@ def test_summary_with_full_data(memory_db):
     assert "外資連買" in summary       # 個股訊號有顯示
     assert "20150" in summary          # 今日夜盤
     assert "20050" in summary          # 前日現貨（基準）
-    assert "31.5000" in summary        # 前日 USD/TWD 收盤
+    assert "31.5000" in summary        # 昨晨離岸 USD/TWD（前日基準）
+    assert "←離岸晨對晨" in summary     # TWD 改用離岸晨對晨的標記
 
 
 def test_summary_with_null_fields(memory_db):

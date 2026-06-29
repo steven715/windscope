@@ -11,7 +11,9 @@ HTTP_DELAY_MAX = 3.0
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 # === FX Thresholds ===
-FX_THRESHOLD_TWD = 0.1
+# TWD：離岸晨對晨 delta 門檻。實測晨對晨 |delta| 多落在 0.001–0.128，0.05 在明確
+#   隔夜波動時觸發、雜訊 <0.05 維持中性。（v2 時為 0.1，但 TWD 走在岸故 delta≈0 永不觸發。）
+FX_THRESHOLD_TWD = 0.05
 FX_THRESHOLD_CNY = 0.005
 FX_THRESHOLD_KRW = 5.0
 # 盤前匯率節奏（原文第一件事①）：跳空＝08:45 vs 前日16:00 變動 ≥ 0.05（5分）；
@@ -40,7 +42,9 @@ PRICE_ZONE_HIGH = 20
 #   的訊號原本因基準錯置而資料不可用→中性）。屬正確性修正。
 #   註：命中率統計不依 rule_version 篩選，bump 僅標記新訊號版本；受影響日的命中率
 #   由 recompute + 重新驗證覆蓋舊 row 來修正，非靠版本篩選。
-SIGNAL_RULE_VERSION = "v2"
+# v3 (2026-06-30): TWD 隔夜 delta 改用離岸 USDTWD=X 晨對晨（取代在岸 08:45 牌價，後者
+#   開盤前未更新＝前收、delta≈0 永遠中性，FX 維度等於沒在投票）。門檻 0.1→0.05。
+SIGNAL_RULE_VERSION = "v3"
 FUTURES_SPREAD_THRESHOLD = 100      # 調整後價差 ±100 點才算有方向
 VOLUME_RATIO_HIGH = 1.5             # 夜盤量比 >= 1.5 → 大戶佈局，信心 +1
 VOLUME_RATIO_LOW = 0.7              # 夜盤量比 <= 0.7 → 觀望，信心 -1

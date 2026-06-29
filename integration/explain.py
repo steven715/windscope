@@ -63,11 +63,12 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
     prev = get_previous_trading_day(date, conn)
     rows = []
 
-    # 1. 匯率（台幣）
-    twd_now = _scalar(conn, "SELECT quote_0845 FROM raw_fx WHERE date=? AND currency_pair='USD/TWD'", (date,))
-    twd_prev = _scalar(conn, "SELECT close_16 FROM raw_fx WHERE date=? AND currency_pair='USD/TWD'", (prev,)) if prev else None
+    # 1. 匯率（台幣）：離岸 USDTWD=X 晨對晨（在岸 08:45 牌價開盤前未更新、失真）
+    from integration.fx_metrics import offshore_twd_morning
+    twd_now = offshore_twd_morning(conn, date)
+    twd_prev = offshore_twd_morning(conn, prev) if prev else None
     if twd_now is not None and twd_prev is not None:
-        raw = f"08:45 {twd_now:.3f} vs 前日16:00 {twd_prev:.3f} → Δ{fx_delta_twd:+.4f}"
+        raw = f"今晨離岸 {twd_now:.3f} vs 昨晨 {twd_prev:.3f} → Δ{fx_delta_twd:+.4f}"
     else:
         raw = f"Δ{fx_delta_twd:+.4f}" if fx_delta_twd is not None else "資料不足"
     verdict, css = {
@@ -196,7 +197,7 @@ def _jpy_risk_gauge(date: str, conn: sqlite3.Connection, prev_day: str | None,
 
 def _fx_rhythm(date: str, conn: sqlite3.Connection, fx_delta_twd: float | None,
                notes: dict) -> dict:
-    """升貶節奏：跳空（08:45 vs 前日16:00）+ 緩步/急拉（盤前 5 分序列）。"""
+    """升貶節奏：跳空（離岸晨對晨 Δ ≥ 門檻）+ 緩步/急拉（盤前 5 分序列）。"""
     # 跳空（台幣升＝USD/TWD delta 為負）
     gap = None
     if fx_delta_twd is not None and abs(fx_delta_twd) >= settings.FX_GAP_THRESHOLD:

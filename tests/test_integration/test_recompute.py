@@ -8,11 +8,13 @@ from integration.recompute import recompute_date
 
 def _setup_raw(conn):
     """塞入會導出『偏多』訊號的原始事實：匯率升值 + 期貨正價差。"""
-    # raw_fx：前一交易日收盤 + 當日今早報價（TWD 升值 0.15 → bullish）
-    conn.execute("INSERT INTO raw_fx (date, currency_pair, close_16) "
-                 "VALUES ('2026-06-12', 'USD/TWD', 31.50)")
+    # raw_fx：留在岸 row（before_open 也會收）；TWD delta 走離岸晨對晨。
     conn.execute("INSERT INTO raw_fx (date, currency_pair, quote_0845) "
                  "VALUES ('2026-06-15', 'USD/TWD', 31.35)")
+    # 離岸晨對晨：昨晨 31.50 → 今晨 31.35（TWD 升值 0.15 → bullish）。
+    for d, close in [("2026-06-12", 31.50), ("2026-06-15", 31.35)]:
+        conn.execute("INSERT INTO intraday_fx (date, currency_pair, ts, close) "
+                     "VALUES (?, 'USD/TWD', 200, ?)", (d, close))
     # raw_futures：前一交易日現貨 + 當日夜盤（spread +150 → bullish）
     conn.execute("INSERT INTO raw_futures (date, spot_close) "
                  "VALUES ('2026-06-12', 20000)")

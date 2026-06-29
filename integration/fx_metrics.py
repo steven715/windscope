@@ -31,10 +31,26 @@ def _classify_direction(delta: float | None, threshold: float) -> str | None:
         return "neutral"
 
 
+def offshore_twd_morning(conn: sqlite3.Connection, date: str) -> float | None:
+    """取某日離岸 USD/TWD 晨間最後一根 5 分 K（≈08:50 報價）的收盤，無則 None。
+
+    來源 intraday_fx（before_open 收的 Yahoo USDTWD=X 離岸序列）。在岸台銀 08:45
+    牌價開盤前未更新＝前一日收盤，隔夜 delta 失真，故 TWD 隔夜變動改用此離岸值。
+    """
+    row = conn.execute(
+        "SELECT close FROM intraday_fx "
+        "WHERE date = ? AND currency_pair = 'USD/TWD' "
+        "ORDER BY ts DESC LIMIT 1",
+        (date,),
+    ).fetchone()
+    return row[0] if row else None
+
+
 def compute_fx_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
     """計算匯率衍生指標，寫入 daily_metrics。回傳結果 dict 或 None（無原始資料）。"""
-    # delta = 當日 08:45 報價 − 前一交易日 16:00 收盤（隔夜匯率變動）。
-    # 當日 close_16 要等當天 18:30 才收，故基準必取「前一交易日」的 close_16。
+    # CNY/KRW delta = 當日 08:45 報價 − 前一交易日 16:00 收盤（Yahoo 真實報價，隔夜有效）。
+    # TWD delta = 離岸晨對晨（今晨 − 昨晨離岸，取自 intraday_fx）；在岸 08:45 牌價開盤前
+    #   ＝前一日收盤、隔夜變動≈0 失真，故 TWD 不走在岸 quote_0845/close_16。
     prev_day = get_previous_trading_day(date, conn)
 
     # 讀當日報價：只要當日有 row（即使值為 NULL）就視為有資料
@@ -63,15 +79,22 @@ def compute_fx_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
             if prev_row:
                 prev_closes[pair] = prev_row[0]
 
-    # Compute deltas
+    # Compute deltas：CNY/KRW 走在岸 08:45 − 前日 16:00；TWD 走離岸晨對晨。
     deltas = {}
-    for pair in _PAIRS:
+    for pair in ("USD/CNY", "USD/KRW"):
         quote = today_quotes.get(pair)
         prev_close = prev_closes[pair]
         if quote is not None and prev_close is not None:
             deltas[pair] = round(quote - prev_close, 6)
         else:
             deltas[pair] = None
+
+    twd_today = offshore_twd_morning(conn, date)
+    twd_prev = offshore_twd_morning(conn, prev_day) if prev_day else None
+    if twd_today is not None and twd_prev is not None:
+        deltas["USD/TWD"] = round(twd_today - twd_prev, 6)
+    else:
+        deltas["USD/TWD"] = None
 
     fx_delta_twd = deltas["USD/TWD"]
     fx_delta_cny = deltas["USD/CNY"]

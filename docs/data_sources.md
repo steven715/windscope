@@ -203,6 +203,21 @@
 
 ---
 
+### 3.4 離岸 USD/TWD（隔夜 delta 來源，Yahoo USDTWD=X）
+
+| 項目 | 內容 |
+|------|------|
+| 用途 | **USD/TWD 隔夜 delta 的真實來源**（v3 起）。亦供盤前匯率節奏（跳空/急拉）的 5 分序列 |
+| URL | `https://query1.finance.yahoo.com/v8/finance/chart/USDTWD=X?interval=5m&range=1d` |
+| 方法 | GET |
+| 回傳格式 | JSON（5 分 K，存入 `intraday_fx`，pair=`USD/TWD`） |
+| 更新時間 | 離岸盤近 24h 連續報價；before_open（08:50）收當晨最近 `FX_INTRADAY_BARS` 根 |
+| 狀態 | ✅ VERIFIED（2026-06-30 真實回應驗證，含 `meta.regularMarketPrice`） |
+| ⚠️ 關鍵發現（2026-06-30） | **在岸台銀 08:45 牌價在開盤前未更新＝前一日收盤**：實測 2026-06-16～22 的 `quote_0845` 逐日精準等於前一日 `close_16`，隔夜 delta 結構性≈0，FX 維度等於從未投票（9/9 neutral）。同晨離岸 USDTWD=X 卻已反映夜盤美元變動（如 06-16 在岸 31.485 vs 離岸 ~31.57）。故 **TWD 隔夜 delta 改用離岸「晨對晨」**：`今晨最後一根 − 前一交易日晨間最後一根`（兩者皆 `intraday_fx`，同來源、同時點可比）。在岸 `quote_0845`/`close_16` 仍續收（顯示參考、CNY/KRW 與日圓溫度計仍用），但不再驅動 TWD 投票。 |
+| 備註 | 門檻 `FX_THRESHOLD_TWD` 隨之 0.1→0.05（實測晨對晨 \|delta\| 多落在 0.001–0.128）；屬訊號語意變更，已 bump `SIGNAL_RULE_VERSION` v2→v3。日線 bar（`interval=1d`）會缺日（如 06-26 不出現），故不採「最後一根日線」當前收，改用我們穩定每晨收的 5 分序列。helper：`integration/fx_metrics.offshore_twd_morning()`。**回補限制**：`intraday_fx` 只能即時收（離岸無歷史回補），故歷史 backfill 的 TWD delta 仍為 None（與在岸 `quote_0845` 無法回補同性質，屬正常）。 |
+
+---
+
 ## 四、分點籌碼
 
 ### 4.1 證交所券商買賣日報
@@ -311,3 +326,4 @@
 | 2026-06-12 | backfill 實測歷史回補能力：**可回補** = FMTQIK、STOCK_DAY、T86、MI_5MINS_HIST（月查詢含歷史）；**不可回補** = BFI82U（date 參數被忽略）、台銀匯率 CSV（只有即時牌價）、期交所夜盤（僅當日 CSV）。不可回補的來源只能逐日累積。|
 | 2026-06-12 | 補齊三個 STUB：(1) 外資 OI 實測接通（futContractsDateDown，VERIFIED），順帶發現並修正夜盤端點錯誤（futContractsDateDown→futDataDown）；(2) 分點：TWT43U 實測為自營商彙總表非分點、bsr 有 CAPTCHA → 標 BLOCKED，自動來源改接 FinMind（PARTIAL，需 Sponsor token，環境變數 `FINMIND_TOKEN`）；(3) S&P 500 ^GSPC 實測接通（VERIFIED）。|
 | 2026-06-15 | 台銀匯率 CSV 修正：UTF-8 BOM + 台銀改 flcsv 格式（即期買入＝第一個「即期」欄），修正前對 live 資料 100% 失效（見 3.1）。新增 MIS 盤中即時加權指數（1.2c，VERIFIED），供 `/live` 盤中即時驗證觀察。|
+| 2026-06-30 | **TWD 隔夜 delta 改用離岸 USDTWD=X 晨對晨**（新增 3.4）：發現在岸 08:45 牌價開盤前＝前收、delta≈0，FX 維度從未投票。改用 `intraday_fx` 離岸晨對晨，門檻 0.1→0.05，bump `SIGNAL_RULE_VERSION` v2→v3。在岸 `quote_0845`/`close_16` 仍續收（顯示／CNY・KRW／日圓溫度計用）。另修：verify_close 新增 `backfill_unverified` 自癒步驟，補回因指數延遲發布而漏驗的訊號日（如 06-25）。|
