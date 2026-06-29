@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+    <rect width="512" height="512" rx="96" fill="#0f1419"/>
+    
+    <g fill="none" stroke="#4fc3f7" stroke-linecap="round">
+      <circle cx="256" cy="256" r="150" stroke-width="23.599999999999998"
+              stroke-dasharray="175.62 60" stroke-dashoffset="-30"/>
+      <g stroke-width="23.599999999999998">
+        <line x1="256" y1="84"  x2="256" y2="122"/>
+        <line x1="256" y1="390" x2="256" y2="428"/>
+        <line x1="84"  y1="256" x2="122" y2="256"/>
+        <line x1="390" y1="256" x2="428" y2="256"/>
+      </g>
+    </g>
+    <g fill="none" stroke="#4fc3f7" stroke-width="28.32"
+       stroke-linejoin="round" stroke-linecap="round">
+      <polyline points="188,300 236,260 282,288 326,212"/>
+      <polyline points="300,212 326,212 326,238"/>
+    </g>
+  </svg>
