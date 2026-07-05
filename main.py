@@ -516,6 +516,30 @@ def cmd_backfill(args: argparse.Namespace) -> None:
                 print(f"    - {err}")
 
 
+def _print_trend_result(stock_id: str, n_bars: int, result: dict | None) -> None:
+    """印出回補結果與個股趨勢訊號摘要。"""
+    print(f"  已回補 {n_bars} 根日K")
+    if not result:
+        print("  無足夠K線，未產生趨勢訊號")
+        return
+    print(f"  趨勢: {result['big_trend']}  行動: {result['action_hint']}  "
+          f"加減倉: {result['position_hint']}")
+    if result.get("value_center") is not None:
+        print(f"  月線支點: {result['value_center']}  乖離: {result['bias_pct']}  "
+              f"小勢: {result['small_state']}")
+    for r in result["reasons"]:
+        print(f"    · {r}")
+
+
+def cmd_backfill_stock(args: argparse.Namespace) -> None:
+    """回補個股歷史日K並分析當前趨勢。"""
+    from integration.stock_history import backfill_and_analyze
+
+    print(f"回補 {args.stock_id} 歷史K線並分析趨勢中（每月一次 HTTP，可能需數十秒）...")
+    n, result = backfill_and_analyze(args.stock_id, months=args.months)
+    _print_trend_result(args.stock_id, n, result)
+
+
 def cmd_watchlist(args: argparse.Namespace) -> None:
     """觀察名單管理。"""
     from db.watchlist import watchlist_add, watchlist_list, watchlist_remove
@@ -542,6 +566,12 @@ def cmd_watchlist(args: argparse.Namespace) -> None:
         ok = watchlist_add(args.stock_id, args.stock_name, reason)
         if ok:
             print(f"Added {args.stock_id} {args.stock_name}")
+            if not args.no_backfill:
+                from integration.stock_history import backfill_and_analyze
+
+                print("回補歷史K線並分析趨勢中（每月一次 HTTP，可能需數十秒）...")
+                n, result = backfill_and_analyze(args.stock_id)
+                _print_trend_result(args.stock_id, n, result)
 
     elif action == "remove":
         if not args.stock_id:
@@ -687,6 +717,21 @@ def main() -> None:
         "reason", nargs="?", default=None,
         help="Reason for adding (optional)",
     )
+    watchlist_parser.add_argument(
+        "--no-backfill", action="store_true",
+        help="Skip history K-line backfill + trend analysis on add",
+    )
+
+    # backfill-stock（回補個股歷史日K + 分析趨勢）
+    backfill_stock_parser = subparsers.add_parser(
+        "backfill-stock",
+        help="Backfill a stock's daily K-line history and analyze its trend",
+    )
+    backfill_stock_parser.add_argument("stock_id", help="Stock ID (e.g. 2330)")
+    backfill_stock_parser.add_argument(
+        "--months", type=int, default=None,
+        help="Months of history to backfill (default: settings.TREND_BACKFILL_MONTHS)",
+    )
 
     # query
     query_parser = subparsers.add_parser(
@@ -766,6 +811,8 @@ def main() -> None:
         cmd_recompute(args)
     elif args.command == "backfill":
         cmd_backfill(args)
+    elif args.command == "backfill-stock":
+        cmd_backfill_stock(args)
     elif args.command == "watchlist":
         cmd_watchlist(args)
     elif args.command == "query":

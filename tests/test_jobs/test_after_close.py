@@ -60,8 +60,8 @@ def test_after_close_partial_failure(memory_db, monkeypatch):
     assert result["results"]["taifex_oi"] is False
     assert result["results"]["twse_spot_close"] is True
     assert len(result["errors"]) == 1
-    # 收盤後現在只剩 5 個市場面步驟（個股收盤/分點/籌碼指標/匯率已拆出）
-    assert call_count["n"] == 5
+    # 收盤後 6 步：5 個市場面步驟 + 個股日K趨勢刷新（stock_trends）
+    assert call_count["n"] == 6
     # 拆出去的步驟不應再出現在 after_close
     for moved in ("twse_stock_close", "chip", "integration_chip", "fx_close"):
         assert moved not in result["results"]

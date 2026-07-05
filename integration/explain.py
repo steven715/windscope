@@ -344,20 +344,43 @@ def _stock_broker_row(date, stock_id, conn, notes) -> dict:
     return _row("主力分點", raw, reason, _STOCK_CSS.get(cat, "flat"), notes)
 
 
+_ZONE_ZH = {"low": "低檔（月線下方）", "consolidation": "盤整（貼近月線）",
+            "high": "高檔（月線上方）", "other": "月線上下之間"}
+
+
 def _stock_price_zone_row(date, stock_id, conn, notes) -> dict:
-    """股價位置維度（daily_stock_metrics.price_vs_ma20 / price_zone）。"""
+    """股價位置維度：優先用分點的 daily_stock_metrics；沒有分點時退回 K線趨勢的乖離。
+
+    股價位置本質＝收盤對月線 MA20 的乖離，一定能從 K線（還原後）算出，故無分點資料時
+    以 stock_trend_signals.bias_pct（還原後對 MA20 乖離）補上。
+    """
     row = conn.execute(
         "SELECT price_vs_ma20, price_zone FROM daily_stock_metrics "
         "WHERE stock_id = ? AND date <= ? AND price_vs_ma20 IS NOT NULL "
         "ORDER BY date DESC LIMIT 1",
         (stock_id, date),
     ).fetchone()
-    if row is None or row[0] is None:
-        return _row("股價位置", "尚無股價位置資料", "資料不可用", "flat", notes)
-    pct, zone = row
-    zone_zh = {"low": "低檔（月線下方）", "consolidation": "盤整（貼近月線）",
-               "high": "高檔（月線上方）"}.get(zone, zone or "—")
-    return _row("股價位置", f"股價 vs MA20 {pct:+.1f}%", zone_zh, "flat", notes)
+    if row is not None and row[0] is not None:
+        pct, zone = row
+        return _row("股價位置", f"股價 vs MA20 {pct:+.1f}%",
+                    _ZONE_ZH.get(zone, zone or "—"), "flat", notes)
+
+    # 退回 K線趨勢的乖離（bias_pct 是還原後對 MA20 的乖離，比例）
+    trow = conn.execute(
+        "SELECT bias_pct FROM stock_trend_signals "
+        "WHERE stock_id = ? AND date <= ? AND bias_pct IS NOT NULL "
+        "ORDER BY date DESC LIMIT 1",
+        (stock_id, date),
+    ).fetchone()
+    if trow is not None and trow[0] is not None:
+        from integration.chip_metrics import _classify_price_zone
+
+        pct = trow[0] * 100
+        zone = _classify_price_zone(pct)
+        return _row("股價位置", f"股價 vs 月線 {pct:+.1f}%（由K線還原後算）",
+                    _ZONE_ZH.get(zone, "—"), "flat", notes)
+
+    return _row("股價位置", "尚無股價位置資料（回補K線即可算）", "資料不可用", "flat", notes)
 
 
 def build_stock_explain(date: str, stock_id: str,
@@ -372,4 +395,66 @@ def build_stock_explain(date: str, stock_id: str,
         _stock_foreign_row(date, stock_id, conn, notes),
         _stock_broker_row(date, stock_id, conn, notes),
         _stock_price_zone_row(date, stock_id, conn, notes),
+    ]
+
+
+# ── 個股趨勢解讀（技術面 + 基本面預留）──────────────────────────
+# 鏡像籌碼解讀的三欄：原數據(事實)→判讀(綁 TREND_RULE_VERSION 門檻)→為什麼(觀點)。
+# 技術面讀 stock_trend_signals（由個股日K導出）；基本面資料源未接，先預留占位。
+
+_TREND_LABELS = {"UP": "上升趨勢", "DOWN": "下降趨勢",
+                 "FLAT": "震盪盤整", "UNKNOWN": "資料不足"}
+_TREND_CSS = {"UP": "up", "DOWN": "down", "FLAT": "flat", "UNKNOWN": "flat"}
+
+
+def _stock_trend_row(date: str, stock_id: str, conn: sqlite3.Connection,
+                     notes: dict) -> dict:
+    """趨勢（技術面）維度：讀 stock_trend_signals 最新一筆，組原數據＋三態判讀。"""
+    row = conn.execute(
+        "SELECT big_trend, big_trend_confidence, value_center, bias_pct, "
+        "       small_state, small_turn_up, action_hint, position_hint, adjust_note "
+        "FROM stock_trend_signals WHERE stock_id = ? AND date <= ? "
+        "ORDER BY date DESC LIMIT 1",
+        (stock_id, date),
+    ).fetchone()
+    if row is None:
+        return _row("趨勢（技術面）", "尚未回補歷史K線（可用『K線匯入』補）",
+                    "資料不可用", "flat", notes)
+
+    big, slope, center, bias, small, turn_up, action, pos, adj_note = row
+    if big == "UNKNOWN":
+        return _row("趨勢（技術面）", "歷史K線不足，年線暖機未完成（需~260根）",
+                    "資料不足", "flat", notes)
+
+    parts = []
+    if center is not None:
+        parts.append(f"月線{center:.1f}")
+    if slope is not None:
+        parts.append(f"年線斜率{slope * 100:+.1f}%")
+    if bias is not None:
+        parts.append(f"乖離{bias * 100:+.1f}%")
+    parts.append(f"小勢{small}" + ("·MA5轉升" if turn_up else ""))
+    raw = "｜".join(parts)
+    if adj_note:                       # 還原提示：公司行為缺口偵測（供人工核對）
+        raw += f"｜{adj_note}"
+
+    verdict = f"{_TREND_LABELS.get(big, big)}·{action}"
+    if pos and pos != "—":
+        verdict += f"（{pos}）"
+    return _row("趨勢（技術面）", raw, verdict, _TREND_CSS.get(big, "flat"), notes)
+
+
+def _stock_fundamental_row(notes: dict) -> dict:
+    """基本面維度：資料源未接，預留占位（判讀恆為資料不可用）。"""
+    return _row("基本面", "尚未接入基本面資料（營收/財報）",
+                "資料不可用（預留）", "flat", notes)
+
+
+def build_stock_trend_explain(date: str, stock_id: str,
+                              conn: sqlite3.Connection) -> list[dict]:
+    """組出個股趨勢解讀表：趨勢（技術面）＋基本面（預留）。與籌碼解讀同一 row 結構。"""
+    notes = _load_notes()
+    return [
+        _stock_trend_row(date, stock_id, conn, notes),
+        _stock_fundamental_row(notes),
     ]

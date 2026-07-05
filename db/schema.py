@@ -100,6 +100,52 @@ CREATE TABLE IF NOT EXISTS raw_index (
     collected_at TEXT
 );
 
+-- 個股日K OHLCV（趨勢訊號層的原始資料來源）。來源：證交所 STOCK_DAY，
+-- 注意為「未還原股價」——除權息當日會有跳空缺口（TODO: 接還原股價來源）。
+CREATE TABLE IF NOT EXISTS raw_stock_daily (
+    date TEXT NOT NULL,
+    stock_id TEXT NOT NULL,
+    open REAL,
+    high REAL,
+    low REAL,
+    close REAL,
+    volume INTEGER,
+    collected_at TEXT,
+    PRIMARY KEY (date, stock_id)
+);
+CREATE INDEX IF NOT EXISTS idx_stock_daily_id ON raw_stock_daily(stock_id, date);
+
+-- 個股還原因子：免費 FinMind TaiwanStockDividendResult 的除權息 after/before 比例。
+-- 供還原股價「配息細調」用（分割/大除權缺口另由價格自動偵測，不需此表）。
+CREATE TABLE IF NOT EXISTS stock_dividends (
+    stock_id TEXT NOT NULL,
+    ex_date TEXT NOT NULL,
+    factor REAL,
+    collected_at TEXT,
+    PRIMARY KEY (stock_id, ex_date)
+);
+
+-- 個股趨勢訊號（spec v2 每日輸出 schema）。純技術面，由 raw_stock_daily 還原後導出。
+CREATE TABLE IF NOT EXISTS stock_trend_signals (
+    date TEXT NOT NULL,
+    stock_id TEXT NOT NULL,
+    big_trend TEXT,
+    big_trend_confidence REAL,
+    value_center REAL,
+    bias_pct REAL,
+    small_state TEXT,
+    small_turn_up INTEGER,
+    fundamental_gate TEXT,
+    action_hint TEXT,
+    position_hint TEXT,
+    flat_redirect TEXT,
+    reasons TEXT,
+    adjust_note TEXT,
+    rule_version TEXT,
+    created_at TEXT,
+    PRIMARY KEY (date, stock_id)
+);
+
 CREATE TABLE IF NOT EXISTS signals (
     date TEXT PRIMARY KEY,
     direction TEXT,
@@ -206,6 +252,7 @@ CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs(job_id, started_at DESC)
 _COLUMN_MIGRATIONS = [
     ("job_config", "display_desc", "TEXT"),
     ("job_config", "enabled", "INTEGER"),
+    ("stock_trend_signals", "adjust_note", "TEXT"),
 ]
 
 # 既有表移除欄位用的 migration：(table, column)。SQLite >=3.35 支援 DROP COLUMN，

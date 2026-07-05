@@ -67,6 +67,13 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
+        # 6. 個股日K + 趨勢訊號：更新 watchlist 當月日K並重算趨勢（spec v2 趨勢層）
+        ok, err = run_step("stock_trends",
+                           lambda: _refresh_stock_trends(date, conn, db_path))
+        results["stock_trends"] = ok
+        if err:
+            errors.append(err)
+
     status = determine_status(results)
     logger.info("run_after_close: %s status=%s", date, status)
     return {"date": date, "status": status, "results": results, "errors": errors}
@@ -133,3 +140,28 @@ def _collect_taifex_oi(date: str, conn: sqlite3.Connection) -> bool:
         return False
     c.save_oi_foreign(date, data)
     return True
+
+
+def _refresh_stock_trends(date: str, conn: sqlite3.Connection,
+                          db_path: str | None) -> bool:
+    """更新 watchlist 個股當月日K並重算趨勢訊號。至少一檔成功回 True，無名單回 False。"""
+    from collectors.twse import TWSECollector
+    from integration.trend_signal import compute_trend_signal
+
+    watch = conn.execute("SELECT stock_id FROM watchlist ORDER BY stock_id").fetchall()
+    if not watch:
+        return False
+
+    collector = TWSECollector(db_path=db_path)
+    any_ok = False
+    for (stock_id,) in watch:
+        try:
+            bars = collector.collect_stock_ohlc_month(date, stock_id)
+            if bars:
+                collector.save_stock_ohlc(stock_id, bars)
+            # 只有真的算出訊號才算成功；剛加入尚未回補歷史的股會回 None，不虛報成功
+            if compute_trend_signal(stock_id, conn) is not None:
+                any_ok = True
+        except Exception as e:
+            logger.error("_refresh_stock_trends %s failed: %s", stock_id, e)
+    return any_ok

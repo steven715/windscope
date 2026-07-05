@@ -189,6 +189,81 @@ class TestCollectStockClose:
         assert isinstance(results, list)
 
 
+# ── 個股日K OHLCV（趨勢訊號資料源）─────────────────────────────
+
+
+class TestCollectStockOhlcMonth:
+    def test_parse_full_month_ohlcv(self, twse_collector):
+        """STOCK_DAY 一次回整月，逐根解析出 OHLCV 與西元日期。"""
+        fixture = _load_fixture("stock_day_2330_202604.json")
+
+        with patch("collectors.twse.http_get", return_value=_mock_resp(fixture)):
+            bars = twse_collector.collect_stock_ohlc_month("2026-04-01", "2330")
+
+        assert bars is not None
+        assert len(bars) == 6
+        first = bars[0]
+        assert first["date"] == "2026-04-01"       # 民國→西元
+        assert first["open"] == 888.0
+        assert first["high"] == 895.0
+        assert first["low"] == 885.0
+        assert first["close"] == 890.0
+        assert first["volume"] == 25000000
+        # 收盤價與既有 collect_stock_close 對齊（2026-04-08 → 895）
+        assert next(b for b in bars if b["date"] == "2026-04-08")["close"] == 895.0
+
+    def test_no_data_returns_none(self, twse_collector):
+        """stat != OK（非交易月/查無資料）回傳 None。"""
+        with patch("collectors.twse.http_get",
+                   return_value=_mock_resp({"stat": "很抱歉，沒有符合條件的資料"})):
+            bars = twse_collector.collect_stock_ohlc_month("2099-01-01", "2330")
+        assert bars is None
+
+    def test_skips_non_numeric_rows(self, twse_collector):
+        """無交易日價格為「--」等非數字 → 跳過該列，不讓整月壞掉。"""
+        fixture = {
+            "stat": "OK",
+            "data": [
+                ["115/04/01", "25,000,000", "22,250,000,000",
+                 "888.00", "895.00", "885.00", "890.00", "+5.00", "15,000"],
+                ["115/04/02", "0", "0", "--", "--", "--", "--", "0.00", "0"],
+            ],
+        }
+        with patch("collectors.twse.http_get", return_value=_mock_resp(fixture)):
+            bars = twse_collector.collect_stock_ohlc_month("2026-04-01", "2330")
+        assert bars is not None
+        assert len(bars) == 1
+        assert bars[0]["date"] == "2026-04-01"
+
+    def test_save_stock_ohlc_roundtrip(self, twse_collector):
+        """save_stock_ohlc 寫入後可讀回，重複寫入（同日）不重複列。"""
+        from db.connection import get_connection
+
+        bars = [
+            {"date": "2026-04-01", "open": 888.0, "high": 895.0, "low": 885.0,
+             "close": 890.0, "volume": 25000000},
+            {"date": "2026-04-02", "open": 891.0, "high": 905.0, "low": 889.0,
+             "close": 900.0, "volume": 28000000},
+        ]
+        n = twse_collector.save_stock_ohlc("2330", bars)
+        assert n == 2
+        # 再寫一次（更新收盤）→ 仍 2 列
+        bars[0]["close"] = 999.0
+        twse_collector.save_stock_ohlc("2330", bars)
+        with get_connection(twse_collector.db_path) as conn:
+            rows = conn.execute(
+                "SELECT date, close FROM raw_stock_daily WHERE stock_id='2330' ORDER BY date"
+            ).fetchall()
+        assert len(rows) == 2
+        assert rows[0] == ("2026-04-01", 999.0)
+
+
+def test_roc_to_iso():
+    from collectors.twse import _roc_to_iso
+    assert _roc_to_iso("115/04/08") == "2026-04-08"
+    assert _roc_to_iso("89/1/1") == "2000-01-01"
+
+
 # ── 外資個股買賣超 ──────────────────────────────────────────────
 
 

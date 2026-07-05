@@ -1,0 +1,146 @@
+{
+ "msg": "success",
+ "status": 200,
+ "data": [
+  {
+   "date": "2026-06-30",
+   "stock_id": "2454",
+   "buy": 0,
+   "name": "Foreign_Dealer_Self",
+   "sell": 0
+  },
+  {
+   "date": "2026-06-30",
+   "stock_id": "2454",
+   "buy": 122661,
+   "name": "Investment_Trust",
+   "sell": 801257
+  },
+  {
+   "date": "2026-06-30",
+   "stock_id": "2454",
+   "buy": 118096,
+   "name": "Dealer_self",
+   "sell": 46031
+  },
+  {
+   "date": "2026-06-30",
+   "stock_id": "2454",
+   "buy": 408926,
+   "name": "Dealer_Hedging",
+   "sell": 350852
+  },
+  {
+   "date": "2026-06-30",
+   "stock_id": "2454",
+   "buy": 8424167,
+   "name": "Foreign_Investor",
+   "sell": 7609922
+  },
+  {
+   "date": "2026-07-01",
+   "stock_id": "2454",
+   "buy": 0,
+   "name": "Foreign_Dealer_Self",
+   "sell": 0
+  },
+  {
+   "date": "2026-07-01",
+   "stock_id": "2454",
+   "buy": 114900,
+   "name": "Dealer_self",
+   "sell": 74000
+  },
+  {
+   "date": "2026-07-01",
+   "stock_id": "2454",
+   "buy": 106232,
+   "name": "Dealer_Hedging",
+   "sell": 117186
+  },
+  {
+   "date": "2026-07-01",
+   "stock_id": "2454",
+   "buy": 5354015,
+   "name": "Foreign_Investor",
+   "sell": 4859760
+  },
+  {
+   "date": "2026-07-01",
+   "stock_id": "2454",
+   "buy": 317116,
+   "name": "Investment_Trust",
+   "sell": 470365
+  },
+  {
+   "date": "2026-07-02",
+   "stock_id": "2454",
+   "buy": 0,
+   "name": "Foreign_Dealer_Self",
+   "sell": 0
+  },
+  {
+   "date": "2026-07-02",
+   "stock_id": "2454",
+   "buy": 122100,
+   "name": "Dealer_self",
+   "sell": 52200
+  },
+  {
+   "date": "2026-07-02",
+   "stock_id": "2454",
+   "buy": 61848,
+   "name": "Dealer_Hedging",
+   "sell": 31261
+  },
+  {
+   "date": "2026-07-02",
+   "stock_id": "2454",
+   "buy": 4089369,
+   "name": "Foreign_Investor",
+   "sell": 5202653
+  },
+  {
+   "date": "2026-07-02",
+   "stock_id": "2454",
+   "buy": 512089,
+   "name": "Investment_Trust",
+   "sell": 425100
+  },
+  {
+   "date": "2026-07-03",
+   "stock_id": "2454",
+   "buy": 0,
+   "name": "Foreign_Dealer_Self",
+   "sell": 0
+  },
+  {
+   "date": "2026-07-03",
+   "stock_id": "2454",
+   "buy": 4700614,
+   "name": "Foreign_Investor",
+   "sell": 8066940
+  },
+  {
+   "date": "2026-07-03",
+   "stock_id": "2454",
+   "buy": 517383,
+   "name": "Investment_Trust",
+   "sell": 587000
+  },
+  {
+   "date": "2026-07-03",
+   "stock_id": "2454",
+   "buy": 194250,
+   "name": "Dealer_self",
+   "sell": 86100
+  },
+  {
+   "date": "2026-07-03",
+   "stock_id": "2454",
+   "buy": 762867,
+   "name": "Dealer_Hedging",
+   "sell": 706621
+  }
+ ]
+}

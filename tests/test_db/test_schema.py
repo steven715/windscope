@@ -27,6 +27,9 @@ class TestCreateAllTables:
             "stock_signals",
             "verifications",
             "stock_info",
+            "raw_stock_daily",
+            "stock_trend_signals",
+            "stock_dividends",
         }
         assert expected.issubset(table_names)
 

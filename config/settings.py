@@ -64,6 +64,34 @@ FOREIGN_CONSECUTIVE_MIN = 2         # 外資連買/連賣天數門檻
 FOREIGN_CUM_NET_MIN = 3000          # 連續期間累計張數門檻（過濾雜訊）
 FOREIGN_BIG_NET = 10000             # 單日大買/大賣門檻（如「反手大買」）
 
+# === 個股趨勢訊號層（Layer 3b，spec v2：三態趨勢＋順大勢逆小勢）===
+# 純技術面，資料來源＝個股還原日K OHLC（raw_stock_daily）。與市場訊號的
+# SIGNAL_RULE_VERSION 各自獨立版本，命中率統計才不會混版；調整任一門檻請 bump
+# TREND_RULE_VERSION。門檻皆為起始值須回測（回測優先序：FLAT 三症狀 → confirm_bars
+# → 超買 bias）。fundamental_gate 目前無基本面資料源 → 一律 UNKNOWN（保守：不放行建倉）。
+# t1→t2 (2026-07-05): 趨勢改用還原股價（偵測分割/大除權缺口按比例回推 + 免費配息比例
+#   細調），修正 0050 等分割/配息股在除權息期間趨勢失真。屬 spec §6.1「需還原股價」的
+#   資料修正，非改判讀門檻。
+TREND_RULE_VERSION = "t2"
+TREND_MA_BIG = 240              # 年線（大勢方向）；台股慣例 240、A股 250
+TREND_MA_CENTER = 20           # 月線＝價值中樞（源修正，非季線）
+TREND_MA_FAST = 5              # 小勢回升偵測（5日）
+TREND_SLOPE_LOOKBACK = 20      # 年線斜率量測窗
+TREND_SLOPE_DEADBAND = 0.02    # 走平死區
+TREND_CROSS_WINDOW = 20        # 穿越/箱型量測窗
+TREND_CROSS_THRESH = 4         # 反復穿越月線次數門檻
+TREND_BOX_EPS = 0.06           # 箱型寬門檻（不創新高低）
+TREND_CONFIRM_BARS = 3         # 遲滯確認（連續同態幾根才切換 state）
+TREND_OVERBOUGHT_BIAS = 0.15   # 超買乖離（源留白，須自訂+回測）
+# 回補歷史 K 線月數：暖機需 MA_BIG(240)+SLOPE_LOOKBACK(20)=260 根（約 13 個月），
+# 取 16 個月（~300+ 交易日）留安全邊際（月含假日、暖機門檻才穩）。
+TREND_BACKFILL_MONTHS = 16
+# 還原股價：單日收盤變動 > 此比例＝公司行為缺口（股票分割/大除權）。台股有 ±10%
+# 漲跌幅限制，故單日 >11% 必非市場波動→按 close[i]/close[i-1] 比例回推歷史價。
+# 配息（<10%，價格看不出）另用免費 FinMind TaiwanStockDividendResult 的 after/before 比例細調。
+# 註：極少數無漲跌幅限制的槓桿/反向/外國 ETF 可能誤判（會在來源說明標註）。
+TREND_ADJUST_GAP_PCT = 0.11
+
 # === Verification (Layer 4) ===
 VERIFY_FLAT_BAND_PCT = 0.3          # |漲跌幅| <= 0.3% 視為「平」
 

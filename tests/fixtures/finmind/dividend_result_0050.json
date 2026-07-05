@@ -1,0 +1,42 @@
+{
+ "msg": "success",
+ "status": 200,
+ "data": [
+  {
+   "date": "2025-01-17",
+   "stock_id": "0050",
+   "before_price": 198.05,
+   "after_price": 195.35,
+   "stock_and_cache_dividend": 2.7,
+   "stock_or_cache_dividend": "息",
+   "max_price": 214.85,
+   "min_price": 175.85,
+   "open_price": 195.35,
+   "reference_price": 195.35
+  },
+  {
+   "date": "2025-07-21",
+   "stock_id": "0050",
+   "before_price": 51.45,
+   "after_price": 51.09,
+   "stock_and_cache_dividend": 0.36,
+   "stock_or_cache_dividend": "息",
+   "max_price": 56.15,
+   "min_price": 45.99,
+   "open_price": 51.1,
+   "reference_price": 51.09
+  },
+  {
+   "date": "2026-01-22",
+   "stock_id": "0050",
+   "before_price": 71.85,
+   "after_price": 70.85,
+   "stock_and_cache_dividend": 1.0,
+   "stock_or_cache_dividend": "息",
+   "max_price": 77.9,
+   "min_price": 63.8,
+   "open_price": 70.85,
+   "reference_price": 70.85
+  }
+ ]
+}

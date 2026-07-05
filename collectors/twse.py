@@ -34,6 +34,13 @@ def _to_roc_date(date: str) -> str:
     return f"{roc_year}/{month}/{day}"
 
 
+def _roc_to_iso(roc_date: str) -> str:
+    """民國日期 YYY/MM/DD 轉西元 YYYY-MM-DD。"""
+    roc_year, month, day = roc_date.split("/")
+    year = int(roc_year) + 1911
+    return f"{year:04d}-{int(month):02d}-{int(day):02d}"
+
+
 def _load_watchlist(db_path: str | None = None) -> list[dict]:
     """讀取觀察名單：以 DB 的 watchlist 表為準（網頁/CLI 增刪即時生效），
     表不存在或為空時 fallback 到 watchlist.json（初始種子）。"""
@@ -187,6 +194,42 @@ class TWSECollector(BaseCollector):
             except Exception as e:
                 logger.error("Failed to get close for %s: %s", stock_id, e)
         return results
+
+    def collect_stock_ohlc_month(self, date: str, stock_id: str) -> list[dict] | None:
+        """取得個股某月所有日K OHLCV（STOCK_DAY 一次回整月）。回傳 bar list 或 None。
+
+        date 僅取其年月定位查詢月份（YYYY-MM-DD）；bar 內 date 為西元 YYYY-MM-DD。
+        注意：STOCK_DAY 為未還原股價，除權息當日會有跳空缺口。無交易列（價格為「--」）跳過。
+        """
+        date_param = date.replace("-", "")
+        resp = http_get(
+            TWSE_STOCK_DAY_URL,
+            params={"date": date_param, "stockNo": stock_id, "response": "json"},
+        )
+        data = resp.json()
+
+        if data.get("stat") != "OK":
+            logger.info("STOCK_DAY(ohlc): no data for %s/%s (stat=%s)",
+                        stock_id, date, data.get("stat"))
+            return None
+
+        bars = []
+        for row in data.get("data", []):
+            try:
+                bars.append({
+                    "date": _roc_to_iso(row[0].strip()),
+                    "open": _parse_amount(row[3]),
+                    "high": _parse_amount(row[4]),
+                    "low": _parse_amount(row[5]),
+                    "close": _parse_amount(row[6]),
+                    "volume": int(_parse_amount(row[1])),
+                })
+            except (ValueError, IndexError):
+                # 無交易日價格欄為「--」等非數字 → 跳過該列，不讓整月壞掉
+                logger.debug("STOCK_DAY(ohlc): skip non-numeric row %s", row)
+
+        logger.info("STOCK_DAY(ohlc) parsed: %d bars for %s/%s", len(bars), stock_id, date)
+        return bars or None
 
     def collect_foreign_stock(self, date: str) -> list[dict] | None:
         """取得外資個股買賣超，篩選 watchlist 中的個股。"""
@@ -362,6 +405,24 @@ class TWSECollector(BaseCollector):
                             collected_at = excluded.collected_at""",
                         (date, item["stock_id"], "", item["close_price"], now),
                     )
+
+    def save_stock_ohlc(self, stock_id: str, bars: list[dict]) -> int:
+        """存入 raw_stock_daily（個股日K），ON CONFLICT DO UPDATE。回傳筆數。"""
+        now = datetime.now().isoformat()
+        with get_connection(self.db_path) as conn:
+            for b in bars:
+                conn.execute(
+                    """INSERT INTO raw_stock_daily
+                       (date, stock_id, open, high, low, close, volume, collected_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(date, stock_id) DO UPDATE SET
+                        open = excluded.open, high = excluded.high,
+                        low = excluded.low, close = excluded.close,
+                        volume = excluded.volume, collected_at = excluded.collected_at""",
+                    (b["date"], stock_id, b["open"], b["high"], b["low"],
+                     b["close"], b["volume"], now),
+                )
+        return len(bars)
 
     def save_foreign_stock(self, date: str, data_list: list[dict]) -> None:
         """外資個股買賣超存入 raw_chip 的特殊 broker_name，並順手維護 stock_info。"""
