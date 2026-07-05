@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}K線匯入{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>K線匯入</h1>
+    <div class="sub">回補各觀察股的歷史日K（趨勢訊號的資料源）。新增觀察股時會自動回補，<b>失敗時來這裡手動補</b>。</div>
+  </div>
+  <button type="button" class="btn-secondary" onclick="location.reload()">↻ 重整</button>
+</div>
+
+{% if msg %}<div class="msg-banner">✅ {{ msg }}</div>{% endif %}
+{% if pending %}
+<div class="msg-banner" id="autorf" style="background:color-mix(in srgb, var(--warn) 12%, transparent); border-color:color-mix(in srgb, var(--warn) 30%, transparent)">⟳ 有股票回補中，頁面每 15 秒自動更新…（也可按右上「重整」）</div>
+<script>
+(function () {
+  var n = parseInt(sessionStorage.getItem("siRefresh") || "0", 10);
+  if (n < 20) { sessionStorage.setItem("siRefresh", n + 1); setTimeout(function () { location.reload(); }, 15000); }
+  else { var e = document.getElementById("autorf"); if (e) e.textContent = "已停止自動更新（回補可能未完成，請按重整或查 log）"; }
+})();
+</script>
+{% else %}
+<script>sessionStorage.removeItem("siRefresh");</script>
+{% endif %}
+
+<form method="post" action="/stock-import/run">
+  <div class="panel" style="margin-bottom:16px">
+    <div class="row-between" style="margin-bottom:8px"><b>資料來源</b><span class="muted">證交所 STOCK_DAY</span></div>
+    <div class="dim" style="line-height:1.65">原始日K來自證交所 STOCK_DAY（未還原）。趨勢與 K 線圖<b style="color:var(--text)">已自動還原股價</b>：
+      用台股 ±10% 漲跌幅限制偵測分割/大除權缺口按比例回推，再用免費除權息資料細調配息。
+      （付費的 FinMind 還原源需 Sponsor 等級，免費 token 撈不到，故走此自動還原。）</div>
+    <div class="footnote" style="margin-top:8px">
+      每檔回補約 {{ backfill_months }} 次請求（數十秒）+ 1 次除權息，送出後在背景進行；稍後重整此頁看「日K根數」更新。
+      年線暖機需 ≥ {{ warm_bars }} 根，趨勢才會由「資料不足」轉為三態。
+    </div>
+  </div>
+
+  {% if rows %}
+  <div class="table-wrap">
+    <table class="stack">
+      <thead><tr>
+        <th>代號</th><th>名稱</th><th>日K根數</th><th>資料區間</th>
+        <th>趨勢</th><th style="text-align:right">匯入</th>
+      </tr></thead>
+      <tbody>
+      {% for r in rows %}
+      <tr>
+        <td data-label="代號"><span class="mono">{{ r.stock_id }}</span></td>
+        <td data-label="名稱">{{ r.stock_name }}</td>
+        <td data-label="日K根數">
+          <span class="mono">{{ r.bar_count }}</span>
+          {% if r.bar_count == 0 %}<span class="tag" style="margin-left:6px">無資料</span>
+          {% elif not r.warm %}<span class="tag" style="margin-left:6px">暖機中</span>{% endif %}
+        </td>
+        <td data-label="資料區間" class="muted mono">{% if r.first_date %}{{ r.first_date }} ~ {{ r.last_date }}{% else %}—{% endif %}</td>
+        <td data-label="趨勢">{% if r.trend_label %}<span class="chip chip-{{ r.trend_css }}">{{ r.trend_label }}</span>{% if r.action %} <span class="muted">{{ r.action }}</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td data-label="匯入" style="text-align:right">
+          <button type="submit" name="stock_id" value="{{ r.stock_id }}" class="btn-run">
+            {{ '匯入' if r.bar_count == 0 else '重新匯入' }}
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div style="margin-top:16px; display:flex; justify-content:flex-end">
+    <button type="submit" name="stock_id" value="__ALL__" class="btn-run"
+            onclick="return confirm('回補全部 {{ rows|length }} 檔？每檔數十秒，全部在背景進行。')">
+      全部匯入（{{ rows|length }} 檔）
+    </button>
+  </div>
+  {% else %}
+  <div class="panel empty">觀察名單為空 — 先到「觀察名單」新增股票，再回來回補K線。</div>
+  {% endif %}
+</form>
+{% endblock %}

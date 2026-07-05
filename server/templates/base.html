@@ -568,11 +568,16 @@
     <a href="/watchlist" class="{{ 'active' if active == 'watchlist' }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9 6.7 19.6l1-5.8L3.5 9.2l5.9-.9z"></path></svg><span>觀察名單</span></a>
 
+    <a href="/playbook" class="{{ 'active' if active == 'playbook' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg><span>交易心法</span></a>
+
     <div class="nav-group">資料與排程</div>
     <a href="/data" class="{{ 'active' if active == 'data' }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18M3 12h18M3 19h18"></path></svg><span>資料瀏覽</span></a>
     <a href="/chip-import" class="{{ 'active' if active == 'chip_import' }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="M17 8l-5-5-5 5"></path><path d="M12 3v12"></path></svg><span>分點匯入</span></a>
+    <a href="/stock-import" class="{{ 'active' if active == 'stock_import' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7"></path><rect x="2.5" y="10" width="3" height="6" rx="1" fill="currentColor" stroke="none"></rect></svg><span>K線匯入</span></a>
     <a href="/scheduler" class="{{ 'active' if active == 'scheduler' }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg><span>排程狀態</span></a>
     <a href="/scheduler/runs" class="{{ 'active' if active == 'scheduler_runs' }}">
@@ -601,7 +606,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-6M10 18V7M16 18v-9"></path><line x1="2" y1="20" x2="20" y2="20"></line></svg><span>訊號</span></a>
     <a href="/watchlist" class="{{ 'active' if active == 'watchlist' }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9 6.7 19.6l1-5.8L3.5 9.2l5.9-.9z"></path></svg><span>名單</span></a>
-    <a href="/more" class="{{ 'active' if active in ['more', 'data', 'chip_import', 'scheduler', 'scheduler_runs'] }}">
+    <a href="/more" class="{{ 'active' if active in ['more', 'playbook', 'data', 'chip_import', 'stock_import', 'scheduler', 'scheduler_runs'] }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg><span>更多</span></a>
   </nav>
 <script>

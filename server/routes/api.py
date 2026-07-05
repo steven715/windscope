@@ -16,7 +16,8 @@ router = APIRouter()
 # 可查詢的表白名單：避免任意 table name 注入
 _QUERYABLE_TABLES = {
     "raw_fx", "raw_futures", "raw_chip", "raw_institutional", "raw_index",
-    "daily_metrics", "daily_stock_metrics", "market_holidays",
+    "raw_stock_daily", "daily_metrics", "daily_stock_metrics",
+    "stock_trend_signals", "market_holidays",
 }
 
 _MAX_ROWS = 500
@@ -209,3 +210,42 @@ def query_live(request: Request) -> dict:
     date = datetime.now().strftime("%Y-%m-%d")
     with get_connection(request.app.state.db_path) as conn:
         return get_live_verification(date, conn)
+
+
+@router.get("/stock/{stock_id}/ohlc")
+def query_stock_ohlc(stock_id: str, request: Request, limit: int = 300) -> dict:
+    """個股日K OHLCV（舊→新）。供 K 線圖前端使用；time 為 YYYY-MM-DD。"""
+    limit = max(1, min(limit, _MAX_ROWS))
+    with get_connection(request.app.state.db_path) as conn:
+        rows = conn.execute(
+            "SELECT date, open, high, low, close, volume FROM raw_stock_daily "
+            "WHERE stock_id = ? ORDER BY date DESC LIMIT ?",
+            (stock_id, limit),
+        ).fetchall()
+    bars = [{"time": r[0], "open": r[1], "high": r[2], "low": r[3],
+             "close": r[4], "volume": r[5]} for r in reversed(rows)]
+    return {"stock_id": stock_id, "count": len(bars), "bars": bars}
+
+
+@router.get("/stock/{stock_id}/trend")
+def query_stock_trend(stock_id: str, request: Request) -> dict:
+    """個股最新趨勢訊號（reasons 已解開為 list）。無訊號回 found=false。"""
+    with get_connection(request.app.state.db_path) as conn:
+        row = conn.execute(
+            "SELECT date, big_trend, big_trend_confidence, value_center, bias_pct, "
+            "       small_state, small_turn_up, fundamental_gate, action_hint, "
+            "       position_hint, flat_redirect, reasons, rule_version, adjust_note "
+            "FROM stock_trend_signals WHERE stock_id = ? ORDER BY date DESC LIMIT 1",
+            (stock_id,),
+        ).fetchone()
+    if row is None:
+        return {"stock_id": stock_id, "found": False}
+    return {
+        "stock_id": stock_id, "found": True, "date": row[0],
+        "big_trend": row[1], "big_trend_confidence": row[2],
+        "value_center": row[3], "bias_pct": row[4], "small_state": row[5],
+        "small_turn_up": bool(row[6]), "fundamental_gate": row[7],
+        "action_hint": row[8], "position_hint": row[9], "flat_redirect": row[10],
+        "reasons": json.loads(row[11]) if row[11] else [],
+        "rule_version": row[12], "adjust_note": row[13],
+    }

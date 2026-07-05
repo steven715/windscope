@@ -47,6 +47,10 @@
     <div class="section-title" style="font-size:13px; margin:0 0 8px">籌碼解讀 <span class="muted" style="font-weight:400">原數據 → 判讀(門檻) → 為什麼(觀點)</span></div>
     {{ explain_table(c.explain) }}
     {% endif %}
+    {% if c.trend_explain %}
+    <div class="section-title" style="font-size:13px; margin:14px 0 8px">趨勢解讀 <span class="muted" style="font-weight:400">原數據 → 判讀(門檻) → 為什麼(觀點)</span></div>
+    {{ explain_table(c.trend_explain) }}
+    {% endif %}
     <a class="drill" href="/watchlist/{{ c.stock_id }}">看完整詳情（籌碼K線式）›</a>
   </div>
 </div>
@@ -55,7 +59,10 @@
 {% block content %}
 <div class="page-head">
   <div><h1>觀察名單</h1></div>
-  <button type="button" data-toggle="#add-panel">＋ 新增觀察股</button>
+  <div style="display:flex; gap:8px; align-items:center">
+    <button type="button" class="btn-secondary" onclick="location.reload()" title="重新整理狀態（剛加入的股回補完才會出現訊號）">↻ 重整</button>
+    <button type="button" data-toggle="#add-panel">＋ 新增觀察股</button>
+  </div>
 </div>
 
 <div id="add-panel" class="add-panel">

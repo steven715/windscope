@@ -59,6 +59,20 @@ def client_with_data(tmp_path):
             "INSERT INTO raw_chip (date, stock_id, broker_name, net_volume) "
             "VALUES (?, '2330', '__FOREIGN__', 2000)", (_d,))
     conn.execute("INSERT INTO raw_index (date, open, close) VALUES ('2026-06-11', 42900, 43000)")
+    # 個股日K + 趨勢訊號（spec v2 趨勢層）
+    conn.execute(
+        "INSERT INTO raw_stock_daily (date, stock_id, open, high, low, close, volume) "
+        "VALUES ('2026-06-10','2330',900,910,895,905,1000), "
+        "('2026-06-11','2330',905,915,900,910,1200)"
+    )
+    conn.execute(
+        "INSERT INTO stock_trend_signals (date, stock_id, big_trend, "
+        "big_trend_confidence, value_center, bias_pct, small_state, small_turn_up, "
+        "fundamental_gate, action_hint, position_hint, flat_redirect, reasons, "
+        "rule_version) VALUES ('2026-06-11','2330','UP',0.031,812.4,-0.018,"
+        "'跌破恐慌',1,'UNKNOWN','觀望','可加倉',NULL,?,'t1')",
+        (json.dumps(["年線斜率+3.1%且價在年線上"], ensure_ascii=False),),
+    )
     conn.execute(
         "INSERT INTO market_holidays (date, name, source, fetched_at) "
         "VALUES ('2026-06-19', '端午節', 'twse', '2026-06-01')"
@@ -153,6 +167,44 @@ class TestPagesWithData:
         assert resp.status_code == 303
         assert resp.headers["location"] == "/watchlist"
 
+    def test_stock_detail_shows_trend_and_chart(self, client_with_data):
+        """個股詳情含趨勢解讀（三態+行動+基本面預留）與伺服器自畫K線圖。"""
+        resp = client_with_data.get("/watchlist/2330")
+        assert resp.status_code == 200
+        assert "趨勢解讀" in resp.text          # 新維度區塊標題
+        assert "上升趨勢" in resp.text          # UP 三態判讀
+        assert "觀望" in resp.text              # action_hint
+        assert "基本面" in resp.text            # 預留維度
+        assert "K 線圖" in resp.text            # 圖表區塊
+        assert "k-body" in resp.text            # 伺服器自畫的蠟燭 SVG（fixture 有 2 根日K）
+
+    def test_api_stock_ohlc(self, client_with_data):
+        """/api/stock/{id}/ohlc 回舊→新的日K，time 為 YYYY-MM-DD。"""
+        resp = client_with_data.get("/api/stock/2330/ohlc")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 2
+        assert body["bars"][0]["time"] == "2026-06-10"   # 舊→新
+        assert body["bars"][0]["close"] == 905.0
+
+    def test_api_stock_ohlc_empty(self, client_with_data):
+        """無日K的代號回空 bars。"""
+        body = client_with_data.get("/api/stock/9999/ohlc").json()
+        assert body["count"] == 0 and body["bars"] == []
+
+    def test_api_stock_trend(self, client_with_data):
+        """/api/stock/{id}/trend 回最新趨勢訊號（reasons 已解 list）。"""
+        body = client_with_data.get("/api/stock/2330/trend").json()
+        assert body["found"] is True
+        assert body["big_trend"] == "UP"
+        assert body["action_hint"] == "觀望"
+        assert isinstance(body["reasons"], list) and body["reasons"]
+
+    def test_api_stock_trend_not_found(self, client_with_data):
+        """無趨勢訊號的代號回 found=false。"""
+        body = client_with_data.get("/api/stock/9999/trend").json()
+        assert body["found"] is False
+
     def test_watchlist_scan_sentiment_and_sparkline(self, client_with_data):
         """外資連買的股票 → 偏多徽章 + sparkline <rect> 有渲染。"""
         resp = client_with_data.get("/watchlist")
@@ -168,6 +220,116 @@ class TestPagesWithData:
         bars = _spark_bars([0.2, -0.3, 0.1], 100, 40)
         assert max(b["h"] for b in bars) > 15          # 不被 mx=1 壓扁
         assert bars[0]["up"] is True and bars[1]["up"] is False
+
+    def test_candlestick_geometry(self):
+        """_candlestick：空回 None、漲跌著色、高價 y 較小、全 None 均線不畫。"""
+        from server.routes.pages import _candlestick
+        assert _candlestick([], {}) is None
+        bars = [
+            {"date": "2025-01-01", "open": 10.0, "high": 12.0, "low": 9.0, "close": 11.0},
+            {"date": "2025-01-02", "open": 11.0, "high": 11.5, "low": 8.0, "close": 9.0},
+        ]
+        ch = _candlestick(bars, {"MA20": [10.0, 10.5], "MA240": [None, None]})
+        assert ch["n"] == 2 and len(ch["candles"]) == 2
+        assert ch["candles"][0]["up"] is True and ch["candles"][1]["up"] is False
+        assert ch["candles"][0]["wy1"] < ch["candles"][0]["wy2"]   # high 在上(小 y)
+        labels = {m["label"] for m in ch["ma_lines"]}
+        assert "MA20" in labels and "MA240" not in labels          # 全 None 均線不畫
+        assert "開10" in ch["candles"][0]["title"]
+
+    def test_build_stock_chart_none_when_no_ohlc(self):
+        """無日K → _build_stock_chart 回 None（頁面走空狀態）。"""
+        import sqlite3
+
+        from db.schema import create_all_tables
+        from server.routes.pages import _build_stock_chart
+        conn = sqlite3.connect(":memory:")
+        create_all_tables(conn)
+        assert _build_stock_chart(conn, "2330") is None
+        conn.close()
+
+    def test_build_stock_chart_full_series(self):
+        """~300 根 → 近 120 根蠟燭 + MA20/60/240 三線齊；各線 last 非 None
+        （MA240 暖機是窗前緣的 None 前綴，不會夾在浮點值之間）。"""
+        import sqlite3
+
+        from db.schema import create_all_tables
+        from server.routes.pages import _build_stock_chart
+        conn = sqlite3.connect(":memory:")
+        create_all_tables(conn)
+        for i in range(300):
+            close = 100 + i * 0.5
+            conn.execute(
+                "INSERT INTO raw_stock_daily "
+                "(date, stock_id, open, high, low, close, volume) "
+                "VALUES (?, '2330', ?, ?, ?, ?, 1000)",
+                (f"2025-{i // 28 + 1:02d}-{i % 28 + 1:02d}",
+                 close - 0.3, close + 1, close - 1, close),
+            )
+        conn.commit()
+        ch = _build_stock_chart(conn, "2330")
+        assert ch["n"] == 120 and len(ch["candles"]) == 120
+        labels = {m["label"]: m for m in ch["ma_lines"]}
+        assert {"MA20", "MA60", "MA240"} <= set(labels)
+        assert all(m["last"] is not None for m in labels.values())
+        conn.close()
+
+    def test_stock_import_page_lists_stocks(self, client_with_data):
+        """K線匯入頁 200，列出觀察股與資料來源選擇器。"""
+        resp = client_with_data.get("/stock-import")
+        assert resp.status_code == 200
+        assert "K線匯入" in resp.text
+        assert "2330" in resp.text
+        assert "資料來源" in resp.text          # 來源選擇器
+        assert "全部匯入" in resp.text
+        assert "重整" in resp.text              # 重新整理按鈕
+
+    def test_stock_import_run_single(self, client_with_data, monkeypatch):
+        """觸發單檔回補 → 303 導回，背景任務以該代號被呼叫。"""
+        import integration.stock_history as sh
+        calls = []
+        monkeypatch.setattr(sh, "backfill_and_analyze",
+                            lambda *a, **k: (calls.append(a[0]), (0, None))[1])
+        resp = client_with_data.post(
+            "/stock-import/run", data={"stock_id": "2330", "source": "twse"},
+            follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"].startswith("/stock-import")
+        assert calls == ["2330"]
+
+    def test_stock_import_run_all(self, client_with_data, monkeypatch):
+        """__ALL__ → 對 watchlist 每檔觸發回補。"""
+        import integration.stock_history as sh
+        calls = []
+        monkeypatch.setattr(sh, "backfill_and_analyze",
+                            lambda *a, **k: (calls.append(a[0]), (0, None))[1])
+        resp = client_with_data.post(
+            "/stock-import/run", data={"stock_id": "__ALL__", "source": "twse"},
+            follow_redirects=False)
+        assert resp.status_code == 303
+        assert "2330" in calls
+
+    def test_stock_import_run_unknown_no_task(self, client_with_data, monkeypatch):
+        """非觀察股代號 → 不觸發任何背景任務，導回附提示。"""
+        import integration.stock_history as sh
+        calls = []
+        monkeypatch.setattr(sh, "backfill_and_analyze",
+                            lambda *a, **k: (calls.append(a[0]), (0, None))[1])
+        resp = client_with_data.post(
+            "/stock-import/run", data={"stock_id": "0000", "source": "twse"},
+            follow_redirects=False)
+        assert resp.status_code == 303
+        assert calls == []
+
+    def test_playbook_page(self, client):
+        """交易心法頁 200，含核心心法、四步流程、開盤前三件事。"""
+        resp = client.get("/playbook")
+        assert resp.status_code == 200
+        assert "交易心法" in resp.text
+        assert "望遠鏡" in resp.text and "順大勢" in resp.text     # 心法比喻
+        assert "第四步" in resp.text and "企穩" in resp.text       # 四步流程
+        assert "開盤前三件事" in resp.text                          # 大盤方法論
+        assert "值得觀察 ≠ 進場" in resp.text                       # 貫穿心法
 
     def test_lights_sentiment_na_vs_flat(self):
         """na（資料不可用）與 genuine flat 要區分；空殼回 na/none。"""

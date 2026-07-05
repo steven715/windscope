@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, Request, UploadFile
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
@@ -69,8 +69,10 @@ _TABLE_LABELS = {
     "raw_chip": "分點進出（原始）",
     "raw_institutional": "三大法人（原始）",
     "raw_index": "加權指數日K（原始）",
+    "raw_stock_daily": "個股日K OHLCV（原始）",
     "daily_metrics": "每日衍生指標",
     "daily_stock_metrics": "個股籌碼指標",
+    "stock_trend_signals": "個股趨勢訊號",
     "market_holidays": "休市日曆（國定假日）",
 }
 
@@ -113,11 +115,25 @@ _COLUMN_LABELS = {
     "dealer_sell": "自營商賣出（元）",
     "dealer_net": "自營商買賣超（元）",
     "total_net": "合計買賣超（元）",
-    # raw_index
+    # raw_index / raw_stock_daily
     "open": "開盤",
     "high": "最高",
     "low": "最低",
     "close": "收盤",
+    "volume": "成交量（股）",
+    # stock_trend_signals
+    "big_trend": "趨勢三態",
+    "big_trend_confidence": "年線斜率",
+    "value_center": "月線支點",
+    "bias_pct": "乖離",
+    "small_state": "小勢",
+    "small_turn_up": "MA5轉升",
+    "fundamental_gate": "內功驗證",
+    "action_hint": "行動提示",
+    "position_hint": "加減倉",
+    "flat_redirect": "震盪導向",
+    "reasons": "理由",
+    "rule_version": "規則版本",
     # daily_metrics
     "fx_delta_twd": "台幣升貶（Δ）",
     "fx_delta_cny": "人民幣升貶（Δ）",
@@ -227,6 +243,16 @@ def manifest():
 def service_worker():
     """Service worker（從根路徑提供，scope 涵蓋整個 app）。"""
     return Response(content=_SERVICE_WORKER, media_type="application/javascript")
+
+
+@router.get("/playbook", response_class=HTMLResponse)
+def playbook_page(request: Request):
+    """交易心法：把參考的兩套方法論（開盤前三件事 + 趨勢四步）與比喻心法整理成可自讀頁面。"""
+    return templates.TemplateResponse(request, "playbook.html", {
+        "active": "playbook",
+        "rule_version": settings.SIGNAL_RULE_VERSION,
+        "trend_rule_version": settings.TREND_RULE_VERSION,
+    })
 
 
 @router.get("/more", response_class=HTMLResponse)
@@ -351,6 +377,73 @@ async def chip_import_ocr(image: UploadFile = File(...)):
     if rows is None:
         return JSONResponse({"enabled": True, "error": "辨識失敗，請改用手動填寫"})
     return JSONResponse({"enabled": True, "rows": rows})
+
+
+@router.get("/stock-import", response_class=HTMLResponse)
+def stock_import_page(request: Request, msg: str | None = None):
+    """K線匯入：列出各觀察股的日K狀態＋補救匯入按鈕（auto-backfill 失敗時的救援）。"""
+    from integration.explain import _TREND_LABELS
+
+    db_path = request.app.state.db_path
+    warm_bars = settings.TREND_MA_BIG + settings.TREND_SLOPE_LOOKBACK
+    with get_connection(db_path) as conn:
+        stocks = conn.execute(
+            "SELECT stock_id, stock_name FROM watchlist ORDER BY stock_id"
+        ).fetchall()
+        rows = []
+        for sid, name in stocks:
+            cnt, first, last = conn.execute(
+                "SELECT COUNT(*), MIN(date), MAX(date) FROM raw_stock_daily "
+                "WHERE stock_id = ?", (sid,)
+            ).fetchone()
+            trend = conn.execute(
+                "SELECT big_trend, action_hint, date FROM stock_trend_signals "
+                "WHERE stock_id = ? ORDER BY date DESC LIMIT 1", (sid,)
+            ).fetchone()
+            bar_count = cnt or 0
+            rows.append({
+                "stock_id": sid, "stock_name": name,
+                "bar_count": bar_count, "first_date": first, "last_date": last,
+                "warm": bar_count >= warm_bars,
+                "trend_label": _TREND_LABELS.get(trend[0]) if trend else None,
+                "trend_css": {"UP": "up", "DOWN": "down"}.get(
+                    trend[0] if trend else None, "flat"),
+                "action": trend[1] if trend else None,
+                "trend_date": trend[2] if trend else None,
+            })
+    # 有股票還沒算出趨勢（剛加入回補中，或 0 根）→ 頁面自動更新讓使用者看到進度
+    pending = any(r["trend_label"] is None for r in rows)
+    return templates.TemplateResponse(request, "stock_import.html", {
+        "active": "stock_import", "rows": rows, "msg": msg, "pending": pending,
+        "warm_bars": warm_bars, "backfill_months": settings.TREND_BACKFILL_MONTHS,
+    })
+
+
+@router.post("/stock-import/run")
+def stock_import_run(request: Request, background_tasks: BackgroundTasks,
+                     stock_id: str = Form(...), source: str = Form("twse")):
+    """觸發背景回補：單檔或全部（stock_id=__ALL__），完成後導回 K線匯入頁。"""
+    from integration.stock_history import backfill_and_analyze
+
+    db_path = request.app.state.db_path
+    with get_connection(db_path) as conn:
+        if stock_id == "__ALL__":
+            ids = [r[0] for r in conn.execute(
+                "SELECT stock_id FROM watchlist ORDER BY stock_id").fetchall()]
+        else:
+            ids = [stock_id.strip()] if conn.execute(
+                "SELECT 1 FROM watchlist WHERE stock_id = ?",
+                (stock_id.strip(),)).fetchone() else []
+
+    if not ids:
+        return RedirectResponse(
+            url=f"/stock-import?msg={quote('找不到該觀察股')}", status_code=303)
+    for sid in ids:
+        background_tasks.add_task(backfill_and_analyze, sid, db_path, None, source)
+
+    msg = (f"已在背景開始回補 {len(ids)} 檔（來源：{source}）——"
+           f"每檔約需數十秒（{settings.TREND_BACKFILL_MONTHS} 次請求），稍後重整看根數更新")
+    return RedirectResponse(url=f"/stock-import?msg={quote(msg)}", status_code=303)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -530,6 +623,90 @@ def _spark_bars(vals: list, w: float = 140.0, h: float = 34.0) -> list[dict]:
     return bars
 
 
+def _candlestick(bars: list[dict], mas: dict, w: float = 760.0,
+                 h: float = 320.0) -> dict | None:
+    """OHLC bars(舊→新)＋均線序列 → SVG 幾何（純 Python，模板畫 rect/line/polyline）。
+
+    bars: [{date, open, high, low, close}]；mas: {label: [值...]}，長度與 bars 對齊、
+    暖機不足處 None。回傳 candles / ma 折線 / y軸標籤 / 尺寸；無 bars 回 None。
+    """
+    if not bars:
+        return None
+    pad_l, pad_r, pad_t, pad_b = 6.0, 46.0, 8.0, 8.0   # 右邊留價格軸
+    plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
+    n = len(bars)
+
+    pmin = min(b["low"] for b in bars)
+    pmax = max(b["high"] for b in bars)
+    for series in mas.values():
+        vals = [v for v in series if v is not None]
+        if vals:
+            pmin, pmax = min(pmin, min(vals)), max(pmax, max(vals))
+    span = (pmax - pmin) or 1.0
+
+    def yof(price: float) -> float:
+        return round(pad_t + (pmax - price) / span * plot_h, 1)
+
+    step = plot_w / n
+    cw = max(1.2, step * 0.62)
+    candles = []
+    for i, b in enumerate(bars):
+        cx = pad_l + (i + 0.5) * step
+        body_top = yof(max(b["open"], b["close"]))
+        body_bot = yof(min(b["open"], b["close"]))
+        candles.append({
+            "x": round(cx - cw / 2, 1), "w": round(cw, 1),
+            "by": body_top, "bh": max(1.0, round(body_bot - body_top, 1)),
+            "wx": round(cx, 1), "wy1": yof(b["high"]), "wy2": yof(b["low"]),
+            "up": b["close"] >= b["open"],
+            "title": f"{b['date']} 開{b['open']:.2f} 高{b['high']:.2f} "
+                     f"低{b['low']:.2f} 收{b['close']:.2f}",
+        })
+
+    ma_css = {"MA20": "ma20", "MA60": "ma60", "MA240": "ma240"}
+    ma_lines = []
+    for label, series in mas.items():
+        pts = [f"{round(pad_l + (i + 0.5) * step, 1)},{yof(v)}"
+               for i, v in enumerate(series) if v is not None]
+        if len(pts) >= 2:
+            ma_lines.append({"cls": ma_css.get(label, "ma20"), "label": label,
+                             "last": series[-1], "points": " ".join(pts)})
+
+    ylabels = [{"y": yof(p), "text": f"{p:.1f}"}
+               for p in (pmax, (pmax + pmin) / 2, pmin)]
+    return {"w": w, "h": h, "candles": candles, "ma_lines": ma_lines,
+            "ylabels": ylabels, "x_axis": round(w - pad_r, 1),
+            "first_date": bars[0]["date"], "last_date": bars[-1]["date"], "n": n}
+
+
+def _build_stock_chart(conn, stock_id: str, window: int = 120) -> dict | None:
+    """讀 raw_stock_daily、還原股價後算最近 window 根K棒 + MA20/60/240 疊線的 SVG 幾何。"""
+    from collectors.dividend import load_dividend_factors
+    from integration.price_adjust import back_adjust
+    from integration.trend_signal import _sma
+
+    rows = conn.execute(
+        "SELECT date, open, high, low, close FROM raw_stock_daily "
+        "WHERE stock_id = ? AND open IS NOT NULL AND high IS NOT NULL "
+        "      AND low IS NOT NULL AND close IS NOT NULL ORDER BY date ASC",
+        (stock_id,),
+    ).fetchall()
+    if not rows:
+        return None
+    bars_raw = [{"date": r[0], "open": r[1], "high": r[2], "low": r[3],
+                 "close": r[4]} for r in rows]
+    rows = back_adjust(bars_raw, load_dividend_factors(conn, stock_id))
+    rows = [(b["date"], b["open"], b["high"], b["low"], b["close"]) for b in rows]
+    closes = [r[4] for r in rows]
+    ma = {"MA20": _sma(closes, 20), "MA60": _sma(closes, 60),
+          "MA240": _sma(closes, 240)}
+    n = len(rows)
+    sl = slice(max(0, n - window), n)
+    bars = [{"date": r[0], "open": r[1], "high": r[2], "low": r[3], "close": r[4]}
+            for r in rows[sl]]
+    return _candlestick(bars, {k: v[sl] for k, v in ma.items()})
+
+
 def _stock_lights_sentiment(explain: list[dict]) -> tuple[list[str], str]:
     """從 build_stock_explain 三維度算 (三顆燈[up/down/flat/na], 情緒[bull/bear/none])。"""
     def is_na(d: dict) -> bool:
@@ -556,8 +733,8 @@ def _stock_lights_sentiment(explain: list[dict]) -> tuple[list[str], str]:
     return lights, sentiment
 
 
-def _build_cards(stocks, stock_explain: dict, conn) -> list[dict]:
-    """把每檔 build_stock_explain 整理成掃描列卡片（燈號/情緒/sparkline/排序）。"""
+def _build_cards(stocks, stock_explain: dict, stock_trend: dict, conn) -> list[dict]:
+    """把每檔 build_stock_explain 整理成掃描列卡片（燈號/情緒/sparkline/趨勢解讀/排序）。"""
     cards = []
     for s in stocks:
         ex = stock_explain.get(s[0], [])
@@ -583,6 +760,7 @@ def _build_cards(stocks, stock_explain: dict, conn) -> list[dict]:
             "zone_label": zone.get("verdict", "—"),
             "spark_bars": _spark_bars(spark, 140, 34),
             "explain": ex,
+            "trend_explain": stock_trend.get(s[0], []),
         })
     order = {"bull": 0, "bear": 1, "none": 2}
     cards.sort(key=lambda c: (order[c["sentiment"]], c["stock_id"]))
@@ -594,7 +772,7 @@ def watchlist_page(request: Request):
     """觀察名單（掃描優先 + 亮燈 + 鑽取）：每檔一列摘要，今天有訊號的浮上來。"""
     from datetime import datetime
 
-    from integration.explain import build_stock_explain
+    from integration.explain import build_stock_explain, build_stock_trend_explain
 
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
@@ -608,7 +786,11 @@ def watchlist_page(request: Request):
         asof = (conn.execute("SELECT MAX(date) FROM signals").fetchone()[0]
                 or datetime.now().strftime("%Y-%m-%d"))
         stock_explain = {s[0]: build_stock_explain(asof, s[0], conn) for s in stocks}
-        cards = _build_cards(stocks, stock_explain, conn)
+        # 趨勢獨立於大盤 signals 節奏，用今日為 asof 取最新趨勢（避免 signals job
+        # 落後時，剛回補的趨勢被 MAX(signals.date) 夾掉而顯示「資料不可用」）
+        today = datetime.now().strftime("%Y-%m-%d")
+        stock_trend = {s[0]: build_stock_trend_explain(today, s[0], conn) for s in stocks}
+        cards = _build_cards(stocks, stock_explain, stock_trend, conn)
 
     # 大盤 strip：最新收盤 + 近 10 日漲跌% sparkline（index_rows 為新→舊）
     closes = [r[1] for r in reversed(index_rows)]  # 舊→新
@@ -635,14 +817,19 @@ def watchlist_page(request: Request):
 
 @router.post("/watchlist/add")
 def watchlist_add_route(request: Request,
+                        background_tasks: BackgroundTasks,
                         stock_id: str = Form(...),
                         stock_name: str = Form(...),
                         reason: str = Form("")):
-    """從網頁新增觀察股，完成後導回觀察名單頁。"""
+    """從網頁新增觀察股，並在背景撈歷史K線＋分析當前趨勢，完成後導回觀察名單頁。"""
     from db.watchlist import watchlist_add
+    from integration.stock_history import backfill_and_analyze
 
-    watchlist_add(stock_id.strip(), stock_name.strip(), reason.strip(),
-                  db_path=request.app.state.db_path)
+    sid = stock_id.strip()
+    db_path = request.app.state.db_path
+    watchlist_add(sid, stock_name.strip(), reason.strip(), db_path=db_path)
+    # 撈 ~16 個月歷史K線＋算趨勢：每月一次 HTTP、耗時數十秒，丟背景不擋回應
+    background_tasks.add_task(backfill_and_analyze, sid, db_path)
     return RedirectResponse(url="/watchlist", status_code=303)
 
 
@@ -663,7 +850,7 @@ def stock_detail_page(request: Request, stock_id: str):
     """
     from datetime import datetime
 
-    from integration.explain import build_stock_explain
+    from integration.explain import build_stock_explain, build_stock_trend_explain
 
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
@@ -689,6 +876,13 @@ def stock_detail_page(request: Request, stock_id: str):
         index_rows = conn.execute(
             "SELECT close FROM raw_index ORDER BY date DESC LIMIT 11"
         ).fetchall()
+        # 趨勢獨立於大盤 signals 節奏 → 用今日取最新（與 K線匯入頁一致）
+        trend_explain = build_stock_trend_explain(
+            datetime.now().strftime("%Y-%m-%d"), stock_id, conn)
+        chart = _build_stock_chart(conn, stock_id)
+        ohlc_count = conn.execute(
+            "SELECT COUNT(*) FROM raw_stock_daily WHERE stock_id = ?", (stock_id,)
+        ).fetchone()[0]
 
     lights, sentiment = _stock_lights_sentiment(explain)
     dir_label = {"bull": "↑ 偏多", "bear": "↓ 偏空", "none": "— 中性"}[sentiment]
@@ -720,6 +914,7 @@ def stock_detail_page(request: Request, stock_id: str):
         "index_latest": index_rows[0][0] if index_rows else None,
         "index_change": idx_changes[-1] if idx_changes else None,
         "index_bars": _spark_bars(idx_changes, 300, 52),
+        "trend_explain": trend_explain, "chart": chart, "ohlc_count": ohlc_count,
     })
 
 
