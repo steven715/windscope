@@ -2,8 +2,10 @@
 
 台股開盤前情報系統：常駐 server 每日閉環（收匯率/期貨/籌碼 → 算衍生指標 →
 08:50 產訊號判斷[偏多/偏空/中性＋信心＋理由] → 收盤雙基準三分類驗證、累積命中率）
-＋ server-rendered Web 畫面。**不做**：下單/交易、盤中即時監控（除 `/live` 驗證觀察）、
-歷史回測、ML 模型。專案現況/決策脈絡見 auto-memory（MEMORY.md）與 `docs/`。
+＋ server-rendered Web 畫面。**回測（Layer 5）**：拿趨勢訊號當動作重放歷史還原股價算績效
+（純離線、唯讀，不影響訊號/排程；見 `docs/roadmap.md`、`integration/backtest.py`）。
+**不做**：下單/交易、盤中即時監控（除 `/live` 驗證觀察）、ML 模型。專案現況/決策脈絡見
+auto-memory（MEMORY.md）與 `docs/`。
 
 ---
 

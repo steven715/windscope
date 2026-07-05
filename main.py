@@ -540,6 +540,30 @@ def cmd_backfill_stock(args: argparse.Namespace) -> None:
     _print_trend_result(args.stock_id, n, result)
 
 
+def cmd_backtest(args: argparse.Namespace) -> None:
+    """對單檔回測趨勢策略並存 run（single/scaled/both）。"""
+    from db.connection import get_connection
+    from integration.backtest import BacktestParams, run_and_save
+
+    modes = ["single", "scaled"] if args.mode == "both" else [args.mode]
+    with get_connection() as conn:
+        for mode in modes:
+            result = run_and_save(args.stock_id, conn, BacktestParams(entry_mode=mode))
+            if not result:
+                print(f"{args.stock_id}: 無K線可回測（先 python main.py backfill-stock）")
+                return
+            m = result["metrics"]
+            pf = m["profit_factor"]
+            print(f"[{mode}] {args.stock_id} {result['date_from']}~{result['date_to']} "
+                  f"({result['n_bars']} 根) run_id={result['run_id']}")
+            print(f"  交易 {m['n_trades']} 筆 · 總報酬 {m['total_return'] * 100:+.1f}% "
+                  f"· CAGR {m['cagr'] * 100:+.1f}% · 最大回撤 {m['max_drawdown'] * 100:.1f}% "
+                  f"· Sharpe {m['sharpe']:.2f} · 勝率 {m['win_rate'] * 100:.0f}%")
+            print(f"  盈虧比 {'∞' if pf is None else '%.2f' % pf} "
+                  f"· 期望值/筆 {m['expectancy']:+,.0f} "
+                  f"· 對比買進持有 {m['benchmark_return'] * 100:+.1f}%")
+
+
 def cmd_watchlist(args: argparse.Namespace) -> None:
     """觀察名單管理。"""
     from db.watchlist import watchlist_add, watchlist_list, watchlist_remove
@@ -733,6 +757,16 @@ def main() -> None:
         help="Months of history to backfill (default: settings.TREND_BACKFILL_MONTHS)",
     )
 
+    # backtest（Layer 5：趨勢策略回測，存 backtest_runs/trades/equity）
+    backtest_parser = subparsers.add_parser(
+        "backtest", help="Backtest the trend strategy on a stock's price history",
+    )
+    backtest_parser.add_argument("stock_id", help="Stock ID (e.g. 2330)")
+    backtest_parser.add_argument(
+        "--mode", choices=["single", "scaled", "both"], default="scaled",
+        help="Entry mode: single (all-in/out), scaled (pyramiding), or both",
+    )
+
     # query
     query_parser = subparsers.add_parser(
         "query", help="Query computed metrics"
@@ -813,6 +847,8 @@ def main() -> None:
         cmd_backfill(args)
     elif args.command == "backfill-stock":
         cmd_backfill_stock(args)
+    elif args.command == "backtest":
+        cmd_backtest(args)
     elif args.command == "watchlist":
         cmd_watchlist(args)
     elif args.command == "query":

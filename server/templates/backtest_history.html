@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}歷次回測{% endblock %}
+{% block content %}
+<style>
+  .pos { color: var(--up); } .neg { color: var(--down); }
+  .bt-cmp-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .bt-cmp-label { font: 600 12.5px var(--font); color: var(--text-dim); margin-right: 4px; }
+  .bt-cmp-vs { font: 700 12px var(--mono); color: var(--text-mute); }
+</style>
+
+<div class="page-head">
+  <div>
+    <h1>歷次回測</h1>
+    <div class="sub">每筆 run 逐版本對照，並可挑<b>兩筆比較</b>——調門檻時看「改了什麼、績效怎麼動」。</div>
+  </div>
+  <a href="/backtest" class="btn-secondary">← 回回測</a>
+</div>
+
+{% if runs|length > 1 %}
+<div class="panel bt-cmp" style="margin-bottom:16px">
+  <form method="get" action="/backtest/compare" class="bt-cmp-form">
+    <span class="bt-cmp-label">比較兩筆（只標參數差異＋績效變化）</span>
+    <select name="a">
+      {% for r in runs %}<option value="{{ r.id }}"{% if r.id == cmp_a %} selected{% endif %}>#{{ r.id }} {{ r.stock_id }} {{ r.mode_label }} · {{ '%+.0f'|format(r.total_return * 100) }}%</option>{% endfor %}
+    </select>
+    <span class="bt-cmp-vs">→</span>
+    <select name="b">
+      {% for r in runs %}<option value="{{ r.id }}"{% if r.id == cmp_b %} selected{% endif %}>#{{ r.id }} {{ r.stock_id }} {{ r.mode_label }} · {{ '%+.0f'|format(r.total_return * 100) }}%</option>{% endfor %}
+    </select>
+    <button type="submit" class="btn-run">比較</button>
+  </form>
+</div>
+{% endif %}
+
+{% if runs %}
+<div class="table-wrap">
+  <table class="stack">
+    <thead><tr>
+      <th>時間</th><th>股票</th><th>模式</th><th>區間</th>
+      <th style="text-align:right">交易</th><th style="text-align:right">總報酬</th>
+      <th style="text-align:right">最大回撤</th><th style="text-align:right">Sharpe</th>
+      <th style="text-align:right">勝率</th><th>規則</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for r in runs %}
+    <tr>
+      <td data-label="時間" class="mono muted">{{ r.created_at[:16]|replace('T', ' ') }}</td>
+      <td data-label="股票">{{ r.stock_id }} <span class="muted">{{ r.stock_name }}</span></td>
+      <td data-label="模式">{{ r.mode_label }}</td>
+      <td data-label="區間" class="mono muted">{{ r.date_from }}~{{ r.date_to }}</td>
+      <td data-label="交易" class="mono" style="text-align:right">{{ r.n_trades }}</td>
+      <td data-label="總報酬" class="mono {{ 'pos' if r.total_return >= 0 else 'neg' }}" style="text-align:right">{{ '%+.1f'|format(r.total_return * 100) }}%</td>
+      <td data-label="最大回撤" class="mono neg" style="text-align:right">{{ '%.1f'|format(r.max_drawdown * 100) }}%</td>
+      <td data-label="Sharpe" class="mono" style="text-align:right">{{ '%.2f'|format(r.sharpe) }}</td>
+      <td data-label="勝率" class="mono" style="text-align:right">{{ '%.0f'|format(r.win_rate * 100) }}%</td>
+      <td data-label="規則" class="mono muted">{{ r.trend_rule_version }}/{{ r.backtest_rule_version }}</td>
+      <td data-label="" style="text-align:right"><a href="/backtest?run_id={{ r.id }}" class="btn-run">檢視</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="panel empty">尚無回測紀錄 — 到 <a href="/backtest">回測</a> 執行第一次。</div>
+{% endif %}
+{% endblock %}

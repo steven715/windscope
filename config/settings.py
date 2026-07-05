@@ -95,6 +95,24 @@ TREND_ADJUST_GAP_PCT = 0.11
 # === Verification (Layer 4) ===
 VERIFY_FLAT_BAND_PCT = 0.3          # |漲跌幅| <= 0.3% 視為「平」
 
+# === 回測層（Layer 5，backtest）===
+# 拿個股趨勢訊號當「動作」重放歷史、算績效，用來提煉/驗證策略（非只看單日命中率）。
+# 純離線 f(raw, config)，唯讀不影響既有訊號/排程。調整任一回測參數請 bump
+# BACKTEST_RULE_VERSION，不同參數的回測結果才不會混在一起比較。分批進出場參數的
+# 實務依據見 docs/roadmap.md（海龜金字塔加碼：最多 4 批、遞減注碼 ½⅓⅙）。
+BACKTEST_RULE_VERSION = "b1"
+BACKTEST_INITIAL_CAPITAL = 1_000_000   # 名目起始資金（僅供報酬/權益曲線換算；單檔全額配置）
+BACKTEST_ENTRY_MODE = "scaled"         # "single"=全進全出 / "scaled"=分批進出
+BACKTEST_MAX_UNITS = 3                 # 分批最多幾批（single 模式強制 1）
+BACKTEST_TRANCHE_SIZING = "equal"      # "equal"=均分 / "decreasing"=遞減 (n,n-1,…,1)/Σ = ½⅓⅙…
+BACKTEST_ADD_COOLDOWN_DAYS = 3         # 兩次加碼最小間隔交易日，避免連日加碼
+BACKTEST_FEE_BPS = 14.25               # 手續費：單邊 0.1425%（買賣各收一次）
+BACKTEST_TAX_BPS = 30.0                # 證交稅：賣出 0.3%（個股）；ETF 為 0.1%，回測 ETF 另設
+BACKTEST_ANNUALIZATION_DAYS = 252      # 年化交易日數（Sharpe / CAGR）
+# 回測假設內功閘門一律放行（PASS）：fundamental_gate 無資料源恆 UNKNOWN 會使「關注建倉區」
+# 永不觸發＝永不進場。此為方法論「先拋棄基本面、只測技術面」的明確建模假設（見 roadmap）。
+BACKTEST_ASSUME_GATE_PASS = True
+
 # === Chip 自動來源（FinMind）===
 # 分點明細唯一可自動化的合法來源是 FinMind TaiwanStockTradingDailyReport，
 # 需要 Sponsor 等級的 token（https://finmindtrade.com）。未設定時自動來源停用，

@@ -198,47 +198,59 @@ def _reasons(big: str, slope: float | None, small: str, turn_up: bool,
     return reasons
 
 
-def evaluate(bars: list[dict], params: TrendParams | None = None,
-             fundamental_gate: str = GATE_UNKNOWN) -> dict:
-    """對一段日K（舊→新排序）算最新一根的趨勢訊號，回傳 spec §4 的每日輸出 schema。"""
+def evaluate_series(bars: list[dict], params: TrendParams | None = None,
+                    fundamental_gate: str = GATE_UNKNOWN) -> list[dict]:
+    """對整段日K（舊→新）逐根算趨勢訊號，回傳與 evaluate 同 schema 的每根 dict 列表。
+
+    第 i 根的結果 ＝ 只用 bars[:i+1] 時 evaluate 的輸出（point-in-time，無未來函數），
+    供回測逐 bar 重放 production 訊號。O(n) 單趟（共用 _classify_series 等 helper）。
+    """
     if not bars:
-        raise ValueError("evaluate: bars 不可為空")
+        return []
     p = params or TrendParams()
     n = len(bars)
     closes = [b["close"] for b in bars]
     ma_center = _sma(closes, p.ma_center)
     ma_fast = _sma(closes, p.ma_fast)
-
     states, slopes = _classify_series(bars, p)
-    slope = slopes[-1]
+    warmup = p.ma_big + p.slope_lookback
 
-    # 暖機門檻：年線斜率需 ma_big + slope_lookback 根才成立；不足＝UNKNOWN（非 FLAT）
-    enough_big = n >= p.ma_big + p.slope_lookback and slope is not None
-    big = states[-1] if enough_big else UNKNOWN
+    out: list[dict] = []
+    for i in range(n):
+        slope = slopes[i]
+        # 暖機門檻：年線斜率需 ma_big + slope_lookback 根才成立；不足＝UNKNOWN（非 FLAT）
+        enough_big = (i + 1) >= warmup and slope is not None
+        big = states[i] if enough_big else UNKNOWN
+        center = ma_center[i]
+        bias = ((closes[i] - center) / center) if center else None
+        turn_up = bool(i >= 1 and ma_fast[i] is not None and ma_fast[i - 1] is not None
+                       and ma_fast[i] > ma_fast[i - 1])
+        small = _small_state(bias, p)
+        action, flat_redirect = _route(big, small, turn_up, fundamental_gate)
+        position = _position(big, bias, p)
+        reasons = _reasons(big, slope, small, turn_up, bias, fundamental_gate)
+        out.append({
+            "big_trend": big,
+            "big_trend_confidence": round(slope, 4) if slope is not None else None,
+            "value_center": round(center, 2) if center is not None else None,
+            "bias_pct": round(bias, 4) if bias is not None else None,
+            "small_state": small,
+            "small_turn_up": turn_up,
+            "fundamental_gate": fundamental_gate,
+            "action_hint": action,
+            "position_hint": position,
+            "flat_redirect": flat_redirect,
+            "reasons": reasons,
+        })
+    return out
 
-    center = ma_center[-1]
-    bias = ((closes[-1] - center) / center) if center else None
-    turn_up = bool(n >= 2 and ma_fast[-1] is not None and ma_fast[-2] is not None
-                   and ma_fast[-1] > ma_fast[-2])
 
-    small = _small_state(bias, p)
-    action, flat_redirect = _route(big, small, turn_up, fundamental_gate)
-    position = _position(big, bias, p)
-    reasons = _reasons(big, slope, small, turn_up, bias, fundamental_gate)
-
-    return {
-        "big_trend": big,
-        "big_trend_confidence": round(slope, 4) if slope is not None else None,
-        "value_center": round(center, 2) if center is not None else None,
-        "bias_pct": round(bias, 4) if bias is not None else None,
-        "small_state": small,
-        "small_turn_up": turn_up,
-        "fundamental_gate": fundamental_gate,
-        "action_hint": action,
-        "position_hint": position,
-        "flat_redirect": flat_redirect,
-        "reasons": reasons,
-    }
+def evaluate(bars: list[dict], params: TrendParams | None = None,
+             fundamental_gate: str = GATE_UNKNOWN) -> dict:
+    """對一段日K（舊→新排序）算最新一根的趨勢訊號，回傳 spec §4 的每日輸出 schema。"""
+    if not bars:
+        raise ValueError("evaluate: bars 不可為空")
+    return evaluate_series(bars, params, fundamental_gate)[-1]
 
 
 def _save_trend_signal(conn: sqlite3.Connection, result: dict) -> None:

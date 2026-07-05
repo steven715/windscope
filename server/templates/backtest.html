@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}回測{% endblock %}
+{% block content %}
+<style>
+  .bt-note { line-height: 1.7; }
+  .bt-note b { color: var(--text); }
+  .eq-chart { width: 100%; height: auto; display: block; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px; margin-top: 4px; }
+  .eq-grid { stroke: var(--border-subtle); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .eq-base { stroke: var(--text-mute); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+  .eq-ylabel { fill: var(--text-mute); font: 500 10px var(--mono); }
+  .eq-line { fill: none; stroke: var(--accent); stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+  .eq-bench { fill: none; stroke: var(--text-mute); stroke-width: 1.2; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+  .eq-legend { display: flex; gap: 16px; font: 500 11.5px var(--font); color: var(--text-dim); margin: 8px 2px 0; }
+  .eq-legend i { display: inline-block; width: 14px; height: 0; border-top-width: 2px; border-top-style: solid; vertical-align: middle; margin-right: 5px; }
+  .pos { color: var(--up); } .neg { color: var(--down); }
+  .bt-line { display: flex; flex-wrap: wrap; gap: 6px 20px; font: 500 12.5px var(--font); color: var(--text-dim); margin: 2px 2px 8px; }
+  .bt-line b { color: var(--text); font-weight: 700; }
+  .bt-params { margin: 0 2px 16px; }
+  .bt-params > summary { cursor: pointer; font: 600 12px var(--font); color: var(--text-dim);
+    padding: 5px 0; list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+  .bt-params > summary::-webkit-details-marker { display: none; }
+  .bt-params > summary::before { content: "▸"; font-size: 10px; transition: transform .15s; }
+  .bt-params[open] > summary::before { transform: rotate(90deg); }
+  .bt-params > summary:hover { color: var(--text); }
+  .bt-params-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 28px; margin-top: 6px;
+    padding: 14px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .bt-pg-title { font: 700 11.5px var(--font); color: var(--accent); margin-bottom: 6px; }
+  .bt-row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0;
+    border-bottom: 1px solid var(--border-subtle); font: 500 12px var(--font); }
+  .bt-row span { color: var(--text-dim); }
+  .bt-row b { color: var(--text); font: 600 12px var(--mono); }
+  .bt-params-note { grid-column: 1 / -1; font: 400 11.5px var(--font); color: var(--text-mute); margin-top: 2px; line-height: 1.6; }
+  @media (max-width: 640px) { .bt-params-grid { grid-template-columns: 1fr; } }
+  .bt-cmp-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .bt-cmp-label { font: 600 12.5px var(--font); color: var(--text-dim); margin-right: 4px; }
+  .bt-cmp-vs { font: 700 12px var(--mono); color: var(--text-mute); }
+</style>
+
+<div class="page-head">
+  <div>
+    <h1>回測</h1>
+    <div class="sub">拿<b>個股趨勢訊號</b>當進出場動作、重放歷史還原股價算績效——提煉/驗證策略，非單日命中率。</div>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center">
+    <a href="/backtest/history" class="btn-secondary">歷次回測 / 比較 ›</a>
+    <button type="button" class="btn-secondary" onclick="location.reload()">↻ 重整</button>
+  </div>
+</div>
+
+{% if msg %}<div class="msg-banner">✅ {{ msg }}</div>{% endif %}
+
+<div class="panel" style="margin-bottom:16px">
+  <div class="bt-note dim">
+    <b>建模假設（先拋棄基本面、只測技術面）：</b>內功閘門一律<b>{{ '放行(PASS)' if assume_gate_pass else 'UNKNOWN' }}</b>
+    （否則「關注建倉區」永不觸發＝永不進場）。決策只用當根(含)以前資料、<b>次一根開盤成交</b>（無未來函數）；
+    出場綁<b>大勢轉向</b>（年線趨勢離開 UP），無固定 % 止損。含台股手續費/證交稅。規則版本 {{ backtest_rule_version }}。
+  </div>
+  <form method="post" action="/backtest/run" style="display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:14px">
+    <label style="display:flex; flex-direction:column; gap:4px; font:500 12px var(--font); color:var(--text-dim)">
+      個股
+      <select name="stock_id" required style="min-width:200px">
+        {% for s in stocks %}
+        <option value="{{ s.stock_id }}"{% if not s.warm %} {% endif %}>
+          {{ s.stock_id }} {{ s.stock_name }}（{{ s.bars }} 根{% if not s.warm %}·暖機不足{% endif %}）
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="display:flex; flex-direction:column; gap:4px; font:500 12px var(--font); color:var(--text-dim)">
+      進出場模式
+      <select name="entry_mode" style="min-width:150px">
+        <option value="scaled">分批進出（金字塔）</option>
+        <option value="single">全進全出</option>
+        <option value="both">兩者都跑</option>
+      </select>
+    </label>
+    <button type="submit" class="btn-run">執行回測</button>
+  </form>
+  {% if not stocks %}<div class="dim" style="margin-top:10px">觀察名單為空 — 先到「觀察名單」新增股票並回補K線。</div>{% endif %}
+</div>
+
+{% if selected %}
+<div class="bt-line">
+  <span><b>{{ selected.stock_id }} {{ selected.stock_name }}</b></span>
+  <span>模式 <b>{{ selected.mode_label }}</b>{% if selected.entry_mode == 'scaled' %}（最多 {{ selected.max_units }} 批）{% endif %}</span>
+  <span>區間 <b>{{ selected.date_from }} ~ {{ selected.date_to }}</b>（{{ selected.n_bars }} 根）</span>
+</div>
+
+{% if params %}
+<details class="bt-params" open>
+  <summary>參數快照 · {{ selected.stock_id }} {{ selected.mode_label }}（這次回測凍結的門檻與成本）</summary>
+  <div class="bt-params-grid">
+    <div class="bt-col">
+      <div class="bt-pg-title">趨勢規則 {{ params.trend_rule_version }}（訊號怎麼判）</div>
+      <div class="bt-row"><span>年線（大勢方向）</span><b>{{ params.trend_params.ma_big }}</b></div>
+      <div class="bt-row"><span>月線（價值中樞）</span><b>{{ params.trend_params.ma_center }}</b></div>
+      <div class="bt-row"><span>快線（小勢回升）</span><b>{{ params.trend_params.ma_fast }}</b></div>
+      <div class="bt-row"><span>年線斜率量測窗</span><b>{{ params.trend_params.slope_lookback }}</b></div>
+      <div class="bt-row"><span>走平死區</span><b>{{ params.trend_params.slope_deadband }}</b></div>
+      <div class="bt-row"><span>超買乖離</span><b>{{ '%.0f'|format(params.trend_params.overbought_bias * 100) }}%</b></div>
+      <div class="bt-row"><span>遲滯確認</span><b>{{ params.trend_params.confirm_bars }} 根</b></div>
+    </div>
+    <div class="bt-col">
+      <div class="bt-pg-title">回測規則 {{ params.backtest_rule_version }}（訊號怎麼交易）</div>
+      <div class="bt-row"><span>進出場模式</span><b>{{ '全進全出' if params.entry_mode == 'single' else '分批進出' }}</b></div>
+      <div class="bt-row"><span>分批批數</span><b>{{ params.max_units }} 批 · {{ '均分' if params.tranche_sizing == 'equal' else '遞減' }}</b></div>
+      <div class="bt-row"><span>加碼冷卻</span><b>{{ params.add_cooldown_days }} 交易日</b></div>
+      <div class="bt-row"><span>手續費（單邊）</span><b>{{ '%.4f'|format(params.fee_bps / 100) }}%</b></div>
+      <div class="bt-row"><span>證交稅（賣出）</span><b>{{ '%.2f'|format(params.tax_bps / 100) }}%</b></div>
+      <div class="bt-row"><span>內功閘門</span><b>{{ 'PASS（假設放行）' if params.assume_gate_pass else 'UNKNOWN' }}</b></div>
+      <div class="bt-row"><span>名目資金</span><b>{{ '{:,.0f}'.format(params.initial_capital) }}</b></div>
+    </div>
+    <div class="bt-params-note">出場綁「大勢轉向」（年線趨勢離開 UP），無固定 % 止損；決策只用當根(含)以前資料、次一根開盤成交。調整任一門檻請 bump 對應版本，新舊結果才不會混比。</div>
+  </div>
+</details>
+{% endif %}
+
+<div class="cards">
+  <div class="card">
+    <div class="ct">總報酬</div>
+    <div class="cv {{ 'pos' if selected.total_return >= 0 else 'neg' }}">{{ '%+.1f'|format(selected.total_return * 100) }}%</div>
+    <div class="cfoot">對比買進持有 <b class="{{ 'pos' if selected.benchmark_return >= 0 else 'neg' }}">{{ '%+.1f'|format(selected.benchmark_return * 100) }}%</b></div>
+  </div>
+  <div class="card">
+    <div class="ct">年化報酬 CAGR</div>
+    <div class="cv {{ 'pos' if selected.cagr >= 0 else 'neg' }}">{{ '%+.1f'|format(selected.cagr * 100) }}%</div>
+    <div class="cfoot">最終權益 {{ '{:,.0f}'.format(selected.final_equity) }}</div>
+  </div>
+  <div class="card">
+    <div class="ct">最大回撤</div>
+    <div class="cv neg">{{ '%.1f'|format(selected.max_drawdown * 100) }}%</div>
+    <div class="cfoot">Sharpe {{ '%.2f'|format(selected.sharpe) }}</div>
+  </div>
+  <div class="card">
+    <div class="ct">勝率</div>
+    <div class="cv">{{ '%.0f'|format(selected.win_rate * 100) }}%</div>
+    <div class="cfoot">{{ selected.n_trades }} 筆交易</div>
+  </div>
+  <div class="card">
+    <div class="ct">盈虧比 Profit Factor</div>
+    <div class="cv">{% if selected.profit_factor is none %}∞{% else %}{{ '%.2f'|format(selected.profit_factor) }}{% endif %}</div>
+    <div class="cfoot">期望值/筆 <b class="{{ 'pos' if selected.expectancy >= 0 else 'neg' }}">{{ '{:+,.0f}'.format(selected.expectancy) }}</b></div>
+  </div>
+  <div class="card">
+    <div class="ct">曝險比（在市場時間）</div>
+    <div class="cv">{{ '%.0f'|format(selected.exposure_pct * 100) }}%</div>
+    <div class="cfoot">名目資金 {{ '{:,.0f}'.format(capital) }}</div>
+  </div>
+</div>
+
+{% if chart %}
+<div class="panel" style="margin-bottom:16px">
+  <div class="row-between" style="margin-bottom:4px"><b>權益曲線</b><span class="muted mono">{{ chart.first_date }} ~ {{ chart.last_date }}</span></div>
+  <svg viewBox="0 0 {{ chart.w }} {{ chart.h }}" class="eq-chart">
+    {% for yl in chart.ylabels %}
+    <line class="eq-grid" x1="0" y1="{{ yl.y }}" x2="{{ chart.x_axis }}" y2="{{ yl.y }}"></line>
+    <text class="eq-ylabel" x="{{ chart.x_axis + 4 }}" y="{{ yl.y + 3 }}">{{ yl.text }}</text>
+    {% endfor %}
+    <line class="eq-base" x1="0" y1="{{ chart.base_y }}" x2="{{ chart.x_axis }}" y2="{{ chart.base_y }}"></line>
+    <polyline class="eq-bench" points="{{ chart.bench_points }}"></polyline>
+    <polyline class="eq-line" points="{{ chart.eq_points }}"></polyline>
+  </svg>
+  <div class="eq-legend">
+    <span><i style="border-top-color:var(--accent)"></i>策略權益</span>
+    <span><i style="border-top-color:var(--text-mute); border-top-style:dashed"></i>買進持有（同起點）</span>
+    <span><i style="border-top-color:var(--text-mute); border-top-style:dashed"></i>起始資金 {{ '{:,.0f}'.format(capital) }}</span>
+  </div>
+</div>
+{% endif %}
+
+<div class="table-wrap">
+  <table class="stack">
+    <thead><tr>
+      <th>進場日</th><th style="text-align:right">進場價</th>
+      <th>出場日</th><th style="text-align:right">出場價</th>
+      <th style="text-align:right">批</th><th style="text-align:right">報酬%</th>
+      <th style="text-align:right">損益</th><th style="text-align:right">持有天</th><th>出場原因</th>
+    </tr></thead>
+    <tbody>
+    {% for t in trades %}
+    <tr>
+      <td data-label="進場日" class="mono">{{ t.entry_date }}</td>
+      <td data-label="進場價" class="mono" style="text-align:right">{{ '%.2f'|format(t.entry_price) }}</td>
+      <td data-label="出場日" class="mono">{{ t.exit_date }}</td>
+      <td data-label="出場價" class="mono" style="text-align:right">{{ '%.2f'|format(t.exit_price) }}</td>
+      <td data-label="批" class="mono" style="text-align:right">#{{ t.unit_index + 1 }}</td>
+      <td data-label="報酬%" class="mono {{ 'pos' if t.return_pct >= 0 else 'neg' }}" style="text-align:right">{{ '%+.1f'|format(t.return_pct) }}</td>
+      <td data-label="損益" class="mono {{ 'pos' if t.net_pnl >= 0 else 'neg' }}" style="text-align:right">{{ '{:+,.0f}'.format(t.net_pnl) }}</td>
+      <td data-label="持有天" class="mono muted" style="text-align:right">{{ t.hold_days }}</td>
+      <td data-label="出場原因"><span class="chip chip-{{ 'down' if t.exit_reason == 'trend_exit' else ('flat' if t.exit_reason == 'trim_overbought' else 'neutral') }}">{{ t.reason_label }}</span></td>
+    </tr>
+    {% endfor %}
+    {% if not trades %}
+    <tr><td colspan="9" class="muted" style="text-align:center; padding:22px">此回測沒有任何交易（多半是可用K線不足年線暖機 {{ warm_bars }} 根，或期間趨勢未成立）。</td></tr>
+    {% endif %}
+    </tbody>
+  </table>
+</div>
+<div style="margin-top:16px"><a href="/backtest/history" class="btn-secondary">歷次回測 / 比較兩筆 ›</a></div>
+{% elif has_runs %}
+<div class="panel empty">找不到這筆回測 — 到 <a href="/backtest/history">歷次回測</a> 挑一筆檢視。</div>
+{% else %}
+<div class="panel empty">尚無回測紀錄 — 用上方表單選一檔執行第一次回測。</div>
+{% endif %}
+{% endblock %}

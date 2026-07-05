@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}回測比較{% endblock %}
+{% block content %}
+<style>
+  .pos { color: var(--up); } .neg { color: var(--down); }
+  .cmp-heads { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+  @media (max-width: 640px) { .cmp-heads { grid-template-columns: 1fr; } }
+  .cmp-head .tag-ab { display: inline-block; font: 700 11px var(--mono); padding: 2px 9px;
+    border-radius: 999px; background: var(--neu-tint); color: var(--text-dim); margin-bottom: 8px; }
+  .cmp-head h3 { font: 700 15px var(--font); margin: 0 0 8px; }
+  .cmp-head .meta { font: 500 12px var(--font); color: var(--text-dim); line-height: 1.75; }
+  .cmp-head .meta b { color: var(--text); }
+  .cmp-sec { font: 700 14px var(--font); margin: 22px 2px 10px; }
+  .cmp-warn { line-height: 1.6; }
+</style>
+
+<div class="page-head">
+  <div>
+    <h1>回測比較</h1>
+    <div class="sub">只標出<b>參數差異</b>與<b>績效變化</b>——調門檻時看「改了什麼、結果怎麼動」。</div>
+  </div>
+  <a href="/backtest/history" class="btn-secondary">← 回歷次回測</a>
+</div>
+
+<div class="cmp-heads">
+  {% for run, ab in [(run_a, 'A'), (run_b, 'B')] %}
+  <div class="panel cmp-head">
+    <span class="tag-ab">{{ ab }} · #{{ run.id }}</span>
+    <h3>{{ run.stock_id }} {{ run.stock_name }} · {{ run.mode_label }}</h3>
+    <div class="meta">
+      區間 <b>{{ run.date_from }} ~ {{ run.date_to }}</b>（{{ run.n_bars }} 根）<br>
+      規則 趨勢 <b>{{ run.trend_rule_version }}</b> · 回測 <b>{{ run.backtest_rule_version }}</b>
+      · 交易 <b>{{ run.n_trades }}</b> 筆
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% if not same_stock %}
+<div class="msg-banner cmp-warn" style="background:color-mix(in srgb, var(--warn) 12%, transparent); border-color:color-mix(in srgb, var(--warn) 30%, transparent)">
+  ⚠ 這兩筆是<b>不同股票</b>——績效差異多半來自標的本身，不是策略改動。要驗證「參數怎麼影響績效」，請比同一檔的不同版本。
+</div>
+{% endif %}
+
+<div class="cmp-sec">參數差異{% if param_diffs %}（{{ param_diffs|length }} 項）{% endif %}</div>
+{% if param_diffs %}
+<div class="table-wrap">
+  <table class="stack">
+    <thead><tr><th>參數</th><th style="text-align:right">A</th><th style="text-align:right">B</th></tr></thead>
+    <tbody>
+    {% for d in param_diffs %}
+    <tr>
+      <td data-label="參數">{{ d.label }}</td>
+      <td data-label="A" class="mono muted" style="text-align:right">{{ d.a }}</td>
+      <td data-label="B" class="mono" style="text-align:right">{{ d.b }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="panel empty">兩筆的參數完全相同——績效若有差異只來自標的/區間，不是規則改動。</div>
+{% endif %}
+
+<div class="cmp-sec">績效變化（A → B）</div>
+<div class="table-wrap">
+  <table class="stack">
+    <thead><tr>
+      <th>指標</th><th style="text-align:right">A</th><th style="text-align:right">B</th>
+      <th style="text-align:right">變化</th>
+    </tr></thead>
+    <tbody>
+    {% for m in metric_rows %}
+    <tr>
+      <td data-label="指標">{{ m.label }}</td>
+      <td data-label="A" class="mono muted" style="text-align:right">{{ m.a }}</td>
+      <td data-label="B" class="mono" style="text-align:right">{{ m.b }}</td>
+      <td data-label="變化" class="mono {{ m.css }}" style="text-align:right">{{ m.delta }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="footnote" style="margin-top:10px">綠＝變好、紅＝變壞（回撤越接近 0 算變好；交易次數/曝險/買進持有為中性不上色）。</div>
+{% endblock %}

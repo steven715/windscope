@@ -568,9 +568,6 @@
     <a href="/watchlist" class="{{ 'active' if active == 'watchlist' }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9 6.7 19.6l1-5.8L3.5 9.2l5.9-.9z"></path></svg><span>觀察名單</span></a>
 
-    <a href="/playbook" class="{{ 'active' if active == 'playbook' }}">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg><span>交易心法</span></a>
-
     <div class="nav-group">資料與排程</div>
     <a href="/data" class="{{ 'active' if active == 'data' }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18M3 12h18M3 19h18"></path></svg><span>資料瀏覽</span></a>
@@ -582,6 +579,14 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg><span>排程狀態</span></a>
     <a href="/scheduler/runs" class="{{ 'active' if active == 'scheduler_runs' }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"></path></svg><span>排程紀錄</span></a>
+
+    <div class="nav-group">策略交易</div>
+    <a href="/backtest" class="{{ 'active' if active == 'backtest' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="M7 14l3-4 3 3 5-7"></path></svg><span>回測</span></a>
+    <a href="/backtest/history" class="{{ 'active' if active == 'backtest_history' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"></path><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"></path><path d="M12 7v5l4 2"></path></svg><span>歷史回測</span></a>
+    <a href="/playbook" class="{{ 'active' if active == 'playbook' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg><span>交易心法</span></a>
 
     <div class="foot">
       <div class="status"><span class="dot"></span>排程運行中</div>
@@ -606,7 +611,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-6M10 18V7M16 18v-9"></path><line x1="2" y1="20" x2="20" y2="20"></line></svg><span>訊號</span></a>
     <a href="/watchlist" class="{{ 'active' if active == 'watchlist' }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9 6.7 19.6l1-5.8L3.5 9.2l5.9-.9z"></path></svg><span>名單</span></a>
-    <a href="/more" class="{{ 'active' if active in ['more', 'playbook', 'data', 'chip_import', 'stock_import', 'scheduler', 'scheduler_runs'] }}">
+    <a href="/more" class="{{ 'active' if active in ['more', 'playbook', 'backtest', 'backtest_history', 'data', 'chip_import', 'stock_import', 'scheduler', 'scheduler_runs'] }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg><span>更多</span></a>
   </nav>
 <script>

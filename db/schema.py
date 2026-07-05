@@ -244,6 +244,64 @@ CREATE TABLE IF NOT EXISTS job_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_job_runs_started ON job_runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_runs_job ON job_runs(job_id, started_at DESC);
+
+-- 回測層（Layer 5）：一次 run 一列摘要 + 逐筆交易 + 權益曲線。純離線重算結果，
+-- 唯讀不影響訊號/排程；params_json 記下當次的門檻/成本/rule_version 快照供逐版比較。
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT,
+    stock_id TEXT NOT NULL,
+    entry_mode TEXT,
+    max_units INTEGER,
+    date_from TEXT,
+    date_to TEXT,
+    n_bars INTEGER,
+    n_trades INTEGER,
+    total_return REAL,
+    cagr REAL,
+    max_drawdown REAL,
+    sharpe REAL,
+    win_rate REAL,
+    profit_factor REAL,
+    expectancy REAL,
+    benchmark_return REAL,
+    exposure_pct REAL,
+    final_equity REAL,
+    trend_rule_version TEXT,
+    backtest_rule_version TEXT,
+    params_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_backtest_runs_stock ON backtest_runs(stock_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS backtest_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    stock_id TEXT,
+    entry_date TEXT,
+    entry_price REAL,
+    exit_date TEXT,
+    exit_price REAL,
+    shares REAL,
+    unit_index INTEGER,
+    gross_pnl REAL,
+    fees REAL,
+    tax REAL,
+    net_pnl REAL,
+    return_pct REAL,
+    hold_days INTEGER,
+    exit_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_backtest_trades_run ON backtest_trades(run_id);
+
+CREATE TABLE IF NOT EXISTS backtest_equity (
+    run_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    equity REAL,
+    drawdown REAL,
+    units INTEGER,
+    price REAL,
+    PRIMARY KEY (run_id, date)
+);
 """
 
 

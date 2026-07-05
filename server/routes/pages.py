@@ -707,6 +707,278 @@ def _build_stock_chart(conn, stock_id: str, window: int = 120) -> dict | None:
     return _candlestick(bars, {k: v[sl] for k, v in ma.items()})
 
 
+def _equity_chart(curve: list[dict], capital: float, w: float = 760.0,
+                  h: float = 260.0) -> dict | None:
+    """權益曲線 → SVG 幾何（策略 vs 買進持有基準）。純 Python，模板畫 polyline。"""
+    if not curve:
+        return None
+    pad_l, pad_r, pad_t, pad_b = 6.0, 52.0, 10.0, 8.0
+    plot_w, plot_h = w - pad_l - pad_r, h - pad_t - pad_b
+    n = len(curve)
+    eq = [c["equity"] for c in curve]
+    prices = [c["price"] for c in curve]
+    # 基準：策略首次進場當根起「買進持有還原價」，之前與策略同為平（起點對齊才公平；
+    # first_active 與 backtest._metrics 相同，卡片「對比買進持有」數字才對得上此線）
+    first_active = next((i for i, c in enumerate(curve) if c["units"] > 0), 0)
+    base_price = prices[first_active] or next((p for p in prices if p), 1.0)
+    bench = [capital if i < first_active else capital * (prices[i] / base_price)
+             for i in range(n)]
+    ymin, ymax = min(min(eq), min(bench)), max(max(eq), max(bench))
+    span = (ymax - ymin) or 1.0
+
+    def xof(i: int) -> float:
+        return round(pad_l + (i / (n - 1 or 1)) * plot_w, 1)
+
+    def yof(v: float) -> float:
+        return round(pad_t + (ymax - v) / span * plot_h, 1)
+
+    ylabels = [{"y": yof(v), "text": f"{v / 1000:.0f}k"}
+               for v in (ymax, (ymax + ymin) / 2, ymin)]
+    return {
+        "w": w, "h": h,
+        "eq_points": " ".join(f"{xof(i)},{yof(v)}" for i, v in enumerate(eq)),
+        "bench_points": " ".join(f"{xof(i)},{yof(v)}" for i, v in enumerate(bench)),
+        "ylabels": ylabels, "base_y": yof(capital), "x_axis": round(w - pad_r, 1),
+        "first_date": curve[0]["date"], "last_date": curve[-1]["date"],
+    }
+
+
+# 回測 run / trade 讀取欄位（與 db/schema.py 對齊；用 zip 組 dict 給模板）
+_BT_RUN_COLS = ("id", "created_at", "stock_id", "entry_mode", "max_units",
+                "date_from", "date_to", "n_bars", "n_trades", "total_return",
+                "cagr", "max_drawdown", "sharpe", "win_rate", "profit_factor",
+                "expectancy", "benchmark_return", "exposure_pct", "final_equity",
+                "trend_rule_version", "backtest_rule_version")
+_BT_TRADE_COLS = ("entry_date", "entry_price", "exit_date", "exit_price", "shares",
+                  "unit_index", "gross_pnl", "fees", "tax", "net_pnl", "return_pct",
+                  "hold_days", "exit_reason")
+_BT_MODE_LABELS = {"single": "全進全出", "scaled": "分批進出"}
+_BT_REASON_LABELS = {"trend_exit": "大勢轉向", "trim_overbought": "超買減碼",
+                     "end_of_data": "回測結束平倉"}
+
+
+@router.get("/backtest", response_class=HTMLResponse)
+def backtest_page(request: Request, run_id: int | None = None,
+                  msg: str | None = None):
+    """回測：選股觸發 + 最新/指定 run 的績效、權益曲線、交易明細 + 歷次 run 對照。"""
+    db_path = request.app.state.db_path
+    warm_bars = settings.TREND_MA_BIG + settings.TREND_SLOPE_LOOKBACK
+    with get_connection(db_path) as conn:
+        stocks = [{"stock_id": r[0], "stock_name": r[1], "bars": r[2] or 0,
+                   "warm": (r[2] or 0) >= warm_bars}
+                  for r in conn.execute(
+                      "SELECT w.stock_id, w.stock_name, (SELECT COUNT(*) FROM "
+                      "raw_stock_daily s WHERE s.stock_id = w.stock_id) "
+                      "FROM watchlist w ORDER BY w.stock_id").fetchall()]
+        names = {s["stock_id"]: s["stock_name"] for s in stocks}
+
+        runs = [dict(zip(_BT_RUN_COLS, r)) for r in conn.execute(
+            f"SELECT {', '.join(_BT_RUN_COLS)} FROM backtest_runs "
+            "ORDER BY id DESC LIMIT 30").fetchall()]
+
+        if run_id is None and runs:
+            run_id = runs[0]["id"]
+        selected, chart, trades, params = None, None, [], None
+        if run_id is not None:
+            row = conn.execute(
+                f"SELECT {', '.join(_BT_RUN_COLS)}, params_json FROM backtest_runs "
+                "WHERE id = ?", (run_id,)).fetchone()
+            if row:
+                selected = dict(zip(_BT_RUN_COLS, row))
+                params = json.loads(row[-1]) if row[-1] else None
+                curve = [{"date": r[0], "equity": r[1], "drawdown": r[2],
+                          "units": r[3], "price": r[4]} for r in conn.execute(
+                    "SELECT date, equity, drawdown, units, price FROM backtest_equity "
+                    "WHERE run_id = ? ORDER BY date ASC", (run_id,)).fetchall()]
+                chart = _equity_chart(curve, settings.BACKTEST_INITIAL_CAPITAL)
+                trades = [dict(zip(_BT_TRADE_COLS, r)) for r in conn.execute(
+                    f"SELECT {', '.join(_BT_TRADE_COLS)} FROM backtest_trades "
+                    "WHERE run_id = ? ORDER BY entry_date ASC", (run_id,)).fetchall()]
+
+    if selected:
+        selected["stock_name"] = names.get(selected["stock_id"], selected["stock_id"])
+        selected["mode_label"] = _BT_MODE_LABELS.get(selected["entry_mode"],
+                                                     selected["entry_mode"])
+    for t in trades:
+        t["reason_label"] = _BT_REASON_LABELS.get(t["exit_reason"], t["exit_reason"])
+
+    return templates.TemplateResponse(request, "backtest.html", {
+        "active": "backtest", "stocks": stocks, "has_runs": bool(runs),
+        "selected": selected, "params": params, "chart": chart, "trades": trades,
+        "msg": msg, "warm_bars": warm_bars,
+        "capital": settings.BACKTEST_INITIAL_CAPITAL,
+        "assume_gate_pass": settings.BACKTEST_ASSUME_GATE_PASS,
+        "backtest_rule_version": settings.BACKTEST_RULE_VERSION,
+    })
+
+
+@router.get("/backtest/history", response_class=HTMLResponse)
+def backtest_history_page(request: Request):
+    """歷次回測（逐版本對照）+ 兩筆比較選單。從主回測頁分出來，避免單頁過長。"""
+    db_path = request.app.state.db_path
+    with get_connection(db_path) as conn:
+        runs = [dict(zip(_BT_RUN_COLS, r)) for r in conn.execute(
+            f"SELECT {', '.join(_BT_RUN_COLS)} FROM backtest_runs "
+            "ORDER BY id DESC LIMIT 100").fetchall()]
+        names = {r[0]: r[1] for r in conn.execute(
+            "SELECT stock_id, stock_name FROM watchlist").fetchall()}
+    for r in runs:
+        r["stock_name"] = names.get(r["stock_id"], r["stock_id"])
+        r["mode_label"] = _BT_MODE_LABELS.get(r["entry_mode"], r["entry_mode"])
+    return templates.TemplateResponse(request, "backtest_history.html", {
+        "active": "backtest_history", "runs": runs,
+        "cmp_a": runs[1]["id"] if len(runs) > 1 else (runs[0]["id"] if runs else None),
+        "cmp_b": runs[0]["id"] if runs else None,
+    })
+
+
+@router.post("/backtest/run")
+def backtest_run_route(request: Request, stock_id: str = Form(...),
+                       entry_mode: str = Form("scaled")):
+    """觸發回測（同步，O(n) 很快）：single / scaled / both。完成後導到該 run。"""
+    from integration.backtest import BacktestParams, run_and_save
+
+    db_path = request.app.state.db_path
+    sid = stock_id.strip()
+    if entry_mode not in ("single", "scaled", "both"):
+        entry_mode = "scaled"
+    modes = ["single", "scaled"] if entry_mode == "both" else [entry_mode]
+    last_run_id, n_bars = None, 0
+    with get_connection(db_path) as conn:
+        if not conn.execute("SELECT 1 FROM watchlist WHERE stock_id = ?",
+                            (sid,)).fetchone():
+            return RedirectResponse(url=f"/backtest?msg={quote('找不到該觀察股')}",
+                                    status_code=303)
+        for mode in modes:
+            result = run_and_save(sid, conn, BacktestParams(entry_mode=mode))
+            if result:
+                last_run_id, n_bars = result["run_id"], result["n_bars"]
+
+    if last_run_id is None:
+        return RedirectResponse(
+            url=f"/backtest?msg={quote('無足夠K線可回測，先到 K線匯入 回補歷史')}",
+            status_code=303)
+    label = "／".join(_BT_MODE_LABELS.get(m, m) for m in modes)
+    msg = f"{sid} 回測完成（{n_bars} 根K線 · {label}）"
+    return RedirectResponse(url=f"/backtest?run_id={last_run_id}&msg={quote(msg)}",
+                            status_code=303)
+
+
+def _flat_params(pj: dict) -> list[tuple[str, str]]:
+    """把 params_json 攤平成有序 (標籤, 顯示值) 清單，供兩 run 逐項比對差異。"""
+    tp = pj.get("trend_params", {})
+    return [
+        ("進出場模式", "全進全出" if pj.get("entry_mode") == "single" else "分批進出"),
+        ("分批批數", f'{pj.get("max_units")} 批'),
+        ("批量分配", "均分" if pj.get("tranche_sizing") == "equal" else "遞減"),
+        ("加碼冷卻(交易日)", str(pj.get("add_cooldown_days"))),
+        ("手續費(單邊)", f'{pj.get("fee_bps", 0) / 100:.4f}%'),
+        ("證交稅(賣出)", f'{pj.get("tax_bps", 0) / 100:.2f}%'),
+        ("內功閘門", "PASS(假設放行)" if pj.get("assume_gate_pass") else "UNKNOWN"),
+        ("名目資金", f'{pj.get("initial_capital", 0):,.0f}'),
+        ("趨勢規則版本", str(pj.get("trend_rule_version", ""))),
+        ("回測規則版本", str(pj.get("backtest_rule_version", ""))),
+        ("年線(大勢)", str(tp.get("ma_big"))),
+        ("月線(價值中樞)", str(tp.get("ma_center"))),
+        ("快線(小勢)", str(tp.get("ma_fast"))),
+        ("年線斜率窗", str(tp.get("slope_lookback"))),
+        ("走平死區", str(tp.get("slope_deadband"))),
+        ("超買乖離", str(tp.get("overbought_bias"))),
+        ("遲滯確認(根)", str(tp.get("confirm_bars"))),
+    ]
+
+
+# 兩 run 績效比較欄位：(key, 標籤, 型別, better)。better=1 越大越好、0 中性
+# （max_drawdown 存負值，越接近 0＝越大＝越好，故 better=1）。
+_BT_CMP_METRICS = [
+    ("total_return", "總報酬", "pct", 1),
+    ("cagr", "年化 CAGR", "pct", 1),
+    ("max_drawdown", "最大回撤", "pct", 1),
+    ("sharpe", "Sharpe", "num", 1),
+    ("win_rate", "勝率", "pct", 1),
+    ("profit_factor", "盈虧比", "num", 1),
+    ("expectancy", "期望值/筆", "money", 1),
+    ("n_trades", "交易次數", "int", 0),
+    ("exposure_pct", "曝險比", "pct", 0),
+    ("benchmark_return", "買進持有(基準)", "pct", 0),
+    ("final_equity", "最終權益", "money", 1),
+]
+
+
+def _fmt_metric(kind: str, v) -> str:
+    """單一指標顯示（None＝盈虧比無虧損＝∞）。"""
+    if v is None:
+        return "∞"
+    if kind == "pct":
+        return f"{v * 100:.1f}%"
+    if kind == "money":
+        return f"{v:,.0f}"
+    if kind == "int":
+        return f"{int(v)}"
+    return f"{v:.2f}"
+
+
+def _bt_compare_row(key: str, label: str, kind: str, better: int,
+                    a_row: dict, b_row: dict) -> dict:
+    """組一列 A vs B 比較（值、變化量、變好/變壞的 css）。"""
+    a, b = a_row.get(key), b_row.get(key)
+    row = {"label": label, "a": _fmt_metric(kind, a), "b": _fmt_metric(kind, b),
+           "delta": "—", "css": ""}
+    if a is None or b is None:          # 盈虧比 ∞ → 不算差值
+        return row
+    d = b - a
+    if kind == "pct":
+        row["delta"] = f"{d * 100:+.1f}pp"
+    elif kind == "money":
+        row["delta"] = f"{d:+,.0f}"
+    elif kind == "int":
+        row["delta"] = f"{int(d):+d}"
+    else:
+        row["delta"] = f"{d:+.2f}"
+    if better and d != 0:               # 中性指標(better=0)不上色
+        row["css"] = "pos" if d * better > 0 else "neg"
+    return row
+
+
+@router.get("/backtest/compare", response_class=HTMLResponse)
+def backtest_compare_page(request: Request, a: int, b: int):
+    """比較兩筆回測：只列出參數差異 + 全指標 A→B 變化。"""
+    db_path = request.app.state.db_path
+    with get_connection(db_path) as conn:
+        def _load(rid: int):
+            row = conn.execute(
+                f"SELECT {', '.join(_BT_RUN_COLS)}, params_json FROM backtest_runs "
+                "WHERE id = ?", (rid,)).fetchone()
+            if not row:
+                return None, {}
+            return dict(zip(_BT_RUN_COLS, row)), (json.loads(row[-1]) if row[-1] else {})
+
+        run_a, pa = _load(a)
+        run_b, pb = _load(b)
+        if not run_a or not run_b:
+            return RedirectResponse(url=f"/backtest?msg={quote('找不到要比較的回測')}",
+                                    status_code=303)
+        names = {r[0]: r[1] for r in conn.execute(
+            "SELECT stock_id, stock_name FROM watchlist WHERE stock_id IN (?, ?)",
+            (run_a["stock_id"], run_b["stock_id"])).fetchall()}
+
+    for run in (run_a, run_b):
+        run["stock_name"] = names.get(run["stock_id"], run["stock_id"])
+        run["mode_label"] = _BT_MODE_LABELS.get(run["entry_mode"], run["entry_mode"])
+
+    fa, fb = _flat_params(pa), _flat_params(pb)
+    param_diffs = [{"label": la, "a": va, "b": vb}
+                   for (la, va), (_, vb) in zip(fa, fb) if va != vb]
+    metric_rows = [_bt_compare_row(k, label, kind, better, run_a, run_b)
+                   for k, label, kind, better in _BT_CMP_METRICS]
+
+    return templates.TemplateResponse(request, "backtest_compare.html", {
+        "active": "backtest_history", "run_a": run_a, "run_b": run_b,
+        "param_diffs": param_diffs, "metric_rows": metric_rows,
+        "same_stock": run_a["stock_id"] == run_b["stock_id"],
+    })
+
+
 def _stock_lights_sentiment(explain: list[dict]) -> tuple[list[str], str]:
     """從 build_stock_explain 三維度算 (三顆燈[up/down/flat/na], 情緒[bull/bear/none])。"""
     def is_na(d: dict) -> bool:
