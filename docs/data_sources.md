@@ -90,6 +90,19 @@
 
 ---
 
+### 1.3b 個股每日 OHLCV（趨勢訊號層資料源）
+
+| 項目 | 內容 |
+|------|------|
+| 用途 | 個股趨勢訊號層（spec v2）的原始K線：算 MA240/MA20/MA5、年線斜率、乖離、FLAT 三症狀。存 `raw_stock_daily`。|
+| URL | 同 1.3 `STOCK_DAY`（一次回整月，逐根取 OHLCV）。`collect_stock_ohlc_month()` |
+| 欄位對應 | index：0=日期(民國) 1=成交股數 3=開 4=高 5=低 6=收 |
+| 回補 | 年線暖機需 ~260 根（≈13 個月）→ 逐月往回撈 `TREND_BACKFILL_MONTHS`(預設16) 次。加入觀察名單時自動回補（web 背景任務 / CLI `backfill-stock`），after_close 每日補當月最新根。|
+| 狀態 | ✅ VERIFIED（沿用 1.3 同端點，fixture 驗證 OHLCV 解析）|
+| ⚠️ 限制 | **未還原股價**：除權息當日會有跳空缺口，MA/斜率會被影響。目前可接受（第一版），**TODO**：接還原股價來源（如 FinMind TaiwanStockPriceAdj）。無交易列（價格「--」）自動跳過。|
+
+---
+
 ### 1.4 外資個股買賣超
 
 | 項目 | 內容 |

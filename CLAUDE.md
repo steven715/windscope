@@ -19,7 +19,7 @@
 6. **可調門檻全集中 `config/settings.py`**；調整任何訊號門檻必須 bump `SIGNAL_RULE_VERSION`（否則新舊規則命中率混在一起統計）。
 7. **`/live` 盤中即時驗證唯讀**：不產生新訊號、不寫 DB。
 8. **時區 `Asia/Taipei`**：排程時間與「交易日/夜盤歸屬/前一交易日」等日期語意全依此（Docker 以 `TZ` 設定）。
-9. **不可逆動作先確認**：不要 force-push `master`、不要覆寫或刪除 `data/premarket.db`（線上資料）。
+9. **不可逆動作先確認**：不要 force-push `main`、不要覆寫或刪除 `data/premarket.db`（線上資料）。
 
 ---
 
@@ -82,7 +82,7 @@ FastAPI + uvicorn + Jinja2 ・ APScheduler（取代 crontab）・ pytest。
 
 ## Git
 
-- commit message 中英皆可但要有意義；在 default branch（master）上動手前先開 branch，除非我明說直接進 master。
+- commit message 中英皆可但要有意義；在 default branch（main）上動手前先開 branch，除非我明說直接進 main。
 - commit 只在我要求時做；commit 前 `pytest` 全綠。
 - `.gitignore`：`data/`、`logs/`、`__pycache__/`、`.pytest_cache/`、`*.pyc`。
 
