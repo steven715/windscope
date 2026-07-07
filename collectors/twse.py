@@ -1,10 +1,9 @@
-import json
 import logging
 from datetime import datetime
-from pathlib import Path
 
 from collectors.base import BaseCollector
 from db.connection import get_connection
+from db.watchlist import load_watchlist_seeded
 from utils.http_client import http_get
 
 logger = logging.getLogger(__name__)
@@ -15,8 +14,6 @@ TWSE_STOCK_DAY_URL = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
 TWSE_T86_URL = "https://www.twse.com.tw/rwd/zh/fund/T86"
 TWSE_TWT49U_URL = "https://www.twse.com.tw/rwd/zh/exRight/TWT49U"
 TWSE_MI_5MINS_HIST_URL = "https://www.twse.com.tw/rwd/zh/TAIEX/MI_5MINS_HIST"
-
-WATCHLIST_PATH = Path(__file__).resolve().parent.parent / "config" / "watchlist.json"
 
 
 def _parse_amount(s: str) -> float:
@@ -41,29 +38,12 @@ def _roc_to_iso(roc_date: str) -> str:
     return f"{year:04d}-{int(month):02d}-{int(day):02d}"
 
 
-def _load_watchlist(db_path: str | None = None) -> list[dict]:
-    """讀取觀察名單：以 DB 的 watchlist 表為準（網頁/CLI 增刪即時生效），
-    表不存在或為空時 fallback 到 watchlist.json（初始種子）。"""
-    try:
-        with get_connection(db_path) as conn:
-            rows = conn.execute(
-                "SELECT stock_id, stock_name FROM watchlist ORDER BY stock_id"
-            ).fetchall()
-        if rows:
-            return [{"stock_id": r[0], "stock_name": r[1]} for r in rows]
-    except Exception as e:
-        logger.warning("_load_watchlist: DB read failed (%s), using JSON", e)
-
-    with open(WATCHLIST_PATH, encoding="utf-8") as f:
-        return json.load(f)
-
-
 class TWSECollector(BaseCollector):
     """證交所資料 collector：三大法人、加權指數、個股收盤、外資個股、除息點數。"""
 
     def __init__(self, db_path: str | None = None):
         super().__init__(db_path)
-        self._watchlist = _load_watchlist(db_path)
+        self._watchlist = load_watchlist_seeded(db_path)
 
     # ── collect 方法 ──────────────────────────────────────────────
 

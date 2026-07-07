@@ -219,3 +219,28 @@ class TestSaveBrokerTrading:
         row_dict = {r[0]: r[1] for r in rows}
         assert row_dict["兆豐-嘉義"] == 300
         assert row_dict["凱基-台北"] == 200
+
+
+# -- watchlist loading (shared DB-first accessor) --------------------
+
+
+class TestWatchlistLoading:
+    def test_db_watchlist_takes_precedence(self, tmp_path):
+        """DB watchlist has data -> ChipCollector reads DB, not JSON seed."""
+        db_path = str(tmp_path / "test.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.execute(
+            "INSERT INTO watchlist (stock_id, stock_name) VALUES ('9999', 'X')"
+        )
+        conn.commit()
+        conn.close()
+
+        collector = ChipCollector(db_path=db_path)
+        ids = {s["stock_id"] for s in collector._watchlist}
+        assert ids == {"9999"}
+
+    def test_empty_db_falls_back_to_json(self, chip_collector):
+        """DB watchlist empty -> fall back to config/watchlist.json seed."""
+        ids = {s["stock_id"] for s in chip_collector._watchlist}
+        assert "2330" in ids

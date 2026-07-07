@@ -1,12 +1,37 @@
-"""觀察名單管理：list、add、remove。"""
+"""觀察名單管理：唯一的讀寫入口（list、add、remove、collector 載入）。"""
 
+import json
 import logging
 import sqlite3
 from datetime import date
+from pathlib import Path
 
 from db.connection import get_connection
 
 logger = logging.getLogger(__name__)
+
+# 初始種子檔：只在 DB 的 watchlist 表不存在/為空時當 fallback（見 load_watchlist_seeded）。
+# 執行期真相一律以 DB 表為準——增刪只走本模組的 watchlist_add/remove。
+_SEED_PATH = Path(__file__).resolve().parent.parent / "config" / "watchlist.json"
+
+
+def load_watchlist_seeded(
+    db_path: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict]:
+    """Collector 專用名單載入：DB 的 watchlist 表為準（網頁/CLI 增刪即時生效），
+    表不存在或為空時 fallback 到 config/watchlist.json（初始種子）。
+    回傳 [{"stock_id", "stock_name"}, ...]。"""
+    try:
+        rows = watchlist_list(db_path=db_path, conn=conn)
+        if rows:
+            return [{"stock_id": r["stock_id"], "stock_name": r["stock_name"]}
+                    for r in rows]
+    except Exception as e:
+        logger.warning("load_watchlist_seeded: DB read failed (%s), using JSON seed", e)
+
+    with open(_SEED_PATH, encoding="utf-8") as f:
+        return json.load(f)
 
 
 def watchlist_list(db_path: str | None = None,

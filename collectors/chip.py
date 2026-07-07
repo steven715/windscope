@@ -1,5 +1,4 @@
 import csv
-import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -7,6 +6,7 @@ from pathlib import Path
 from collectors.base import BaseCollector
 from config import settings
 from db.connection import get_connection
+from db.watchlist import load_watchlist_seeded
 from utils.http_client import http_get
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 # 官方 bsr.twse.com.tw 有 CAPTCHA 無法自動化；TWSE TWT43U 實測為自營商彙總表
 # 而非分點明細（2026-06-12 驗證），故不使用。
 FINMIND_BROKER_DATASET = "TaiwanStockTradingDailyReport"
-WATCHLIST_PATH = Path(__file__).resolve().parent.parent / "config" / "watchlist.json"
 
 
 def _parse_amount(s: str) -> int:
@@ -23,18 +22,12 @@ def _parse_amount(s: str) -> int:
     return int(s.strip().replace(",", ""))
 
 
-def _load_watchlist() -> list[dict]:
-    """讀取 watchlist.json。"""
-    with open(WATCHLIST_PATH, encoding="utf-8") as f:
-        return json.load(f)
-
-
 class ChipCollector(BaseCollector):
     """分點籌碼 collector：券商買賣日報 + CSV 手動匯入。"""
 
     def __init__(self, db_path: str | None = None):
         super().__init__(db_path)
-        self._watchlist = _load_watchlist()
+        self._watchlist = load_watchlist_seeded(db_path)
 
     # ── collect 方法 ──────────────────────────────────────────────
 

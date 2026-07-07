@@ -22,6 +22,9 @@ auto-memory（MEMORY.md）與 `docs/`。
 7. **`/live` 盤中即時驗證唯讀**：不產生新訊號、不寫 DB。
 8. **時區 `Asia/Taipei`**：排程時間與「交易日/夜盤歸屬/前一交易日」等日期語意全依此（Docker 以 `TZ` 設定）。
 9. **不可逆動作先確認**：不要 force-push `main`、不要覆寫或刪除 `data/premarket.db`（線上資料）。
+10. **每份設定/狀態只有「單一真相來源」＋單一存取入口**：不允許同一份配置在不同地方各自讀/寫、造成分岔。
+    - watchlist：執行期一律以 **DB 的 `watchlist` 表**為準；`config/watchlist.json` 只是**初始種子**（`init-db` 灌一次、或 DB 表空時 fallback）。所有讀寫只走 `db/watchlist.py`（`watchlist_list`/`watchlist_add`/`watchlist_remove`/`load_watchlist_seeded`）；**collector 不得自己 `open(watchlist.json)`**。
+    - 通則：任何「檔案＋DB 兩種表示」的配置，讀取器要收斂到一個共用 helper、寫入只走一處；發現有第二個讀/寫路徑就是要修的 bug。新增這類配置前先跟我確認入口設計。
 
 ---
 
