@@ -107,6 +107,36 @@ class TestFuturesSpread:
         result = compute_futures_metrics("2026-04-08", fut_db)
         assert result is None
 
+    def test_spot_close_fallback_to_raw_index(self, fut_db):
+        """前日 raw_futures.spot_close 缺 → fallback 用 raw_index.close 算 spread。"""
+        # 前一交易日 raw_futures 無 spot_close，但 raw_index 有加權收盤
+        fut_db.execute(
+            "INSERT INTO raw_index (date, close) VALUES ('2026-04-07', 45000.0)")
+        fut_db.execute(
+            "INSERT INTO raw_futures (date, night_close, night_volume) "
+            "VALUES ('2026-04-08', 45850.0, 10000)")
+        fut_db.commit()
+
+        result = compute_futures_metrics("2026-04-08", fut_db)
+
+        assert result["futures_spread"] == pytest.approx(850.0)
+
+    def test_spot_close_prefers_raw_futures_over_index(self, fut_db):
+        """前日 raw_futures.spot_close 與 raw_index 皆有 → 以 raw_futures 為主。"""
+        fut_db.execute(
+            "INSERT INTO raw_index (date, close) VALUES ('2026-04-07', 40000.0)")
+        fut_db.execute(
+            "INSERT INTO raw_futures (date, spot_close) VALUES ('2026-04-07', 45000.0)")
+        fut_db.execute(
+            "INSERT INTO raw_futures (date, night_close, night_volume) "
+            "VALUES ('2026-04-08', 45850.0, 10000)")
+        fut_db.commit()
+
+        result = compute_futures_metrics("2026-04-08", fut_db)
+
+        # 45850 - 45000(raw_futures)，而非 45850 - 40000(raw_index)
+        assert result["futures_spread"] == pytest.approx(850.0)
+
     def test_spread_uses_prev_day_spot(self, fut_db):
         """回歸：spread = 今日夜盤 − 前一交易日現貨收盤。"""
         fut_db.execute("INSERT INTO raw_futures (date, spot_close) "

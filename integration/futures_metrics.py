@@ -35,8 +35,17 @@ def compute_futures_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
         prev_row = conn.execute(
             "SELECT spot_close FROM raw_futures WHERE date = ?", (prev_date,)
         ).fetchone()
-        if prev_row:
+        if prev_row and prev_row[0] is not None:
             prev_spot = prev_row[0]
+        # Fallback：FMTQIK 偶爾當晚回「無資料」使 raw_futures.spot_close 留 NULL，
+        # 改用同為加權指數收盤、來源更穩且更早（14:30）收到的 raw_index.close，
+        # 避免單一端點失手就整個吃掉隔天的期貨價差票。
+        if prev_spot is None:
+            idx_row = conn.execute(
+                "SELECT close FROM raw_index WHERE date = ?", (prev_date,)
+            ).fetchone()
+            if idx_row and idx_row[0] is not None:
+                prev_spot = idx_row[0]
 
     if night_close is not None and prev_spot is not None:
         futures_spread = round(night_close - prev_spot, 2)
