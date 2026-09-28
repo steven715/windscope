@@ -97,3 +97,17 @@ FastAPI + uvicorn + Jinja2 ・ APScheduler（取代 crontab）・ pytest。
 2. 實作 → `pytest` 全綠 →（較大改動）獨立 reviewer 對抗式審查 → 我審 diff/計畫。
 3. 我要求才 commit；要看實際畫面 → `docker compose up -d --build`。
 4. 學到的「非顯而易見」事實寫進 auto-memory（MEMORY.md），**不要塞進本檔**——本檔只放會持續適用的硬規則。
+
+## Agent skills
+
+### Issue tracker
+
+Issues 追蹤在 GitHub Issues（`steven715/windscope`，用 `gh` CLI）。See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+使用預設五個 triage 標籤：`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`。See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context：根目錄 `CONTEXT.md`＋ `docs/adr/`。See `docs/agents/domain.md`.
