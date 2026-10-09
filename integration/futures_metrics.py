@@ -25,7 +25,7 @@ def compute_futures_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
 
     night_close, night_volume, _spot_close_today, ex_div, _oi_today = row
 
-    prev_date = get_previous_trading_day(date, conn)
+    prev_date = get_previous_trading_day(date)
 
     # 1. futures_spread = 今日夜盤收盤 − 前一交易日現貨收盤（隔夜期貨缺口）。
     #    當日 spot_close 要等收盤後(18:30)才有，而 spread 在 after_night(05:30)
@@ -86,7 +86,7 @@ def compute_futures_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
         ).fetchone()
         if prev_oi_row and prev_oi_row[0] is not None:
             oi_net_foreign = prev_oi_row[0]
-            prev2 = get_previous_trading_day(prev_date, conn)
+            prev2 = get_previous_trading_day(prev_date)
             if prev2:
                 prev2_row = conn.execute(
                     "SELECT oi_net_foreign FROM raw_futures WHERE date = ?", (prev2,)

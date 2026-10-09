@@ -60,7 +60,7 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
      spread, spread_adj, vol_ratio, oi_net, oi_delta) = m
 
     notes = _load_notes()
-    prev = get_previous_trading_day(date, conn)
+    prev = get_previous_trading_day(date)
     rows = []
 
     # 1. 匯率（台幣）：離岸 USDTWD=X 晨對晨（在岸 08:45 牌價開盤前未更新、失真）

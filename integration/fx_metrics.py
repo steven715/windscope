@@ -51,7 +51,7 @@ def compute_fx_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
     # CNY/KRW delta = 當日 08:45 報價 − 前一交易日 16:00 收盤（Yahoo 真實報價，隔夜有效）。
     # TWD delta = 離岸晨對晨（今晨 − 昨晨離岸，取自 intraday_fx）；在岸 08:45 牌價開盤前
     #   ＝前一日收盤、隔夜變動≈0 失真，故 TWD 不走在岸 quote_0845/close_16。
-    prev_day = get_previous_trading_day(date, conn)
+    prev_day = get_previous_trading_day(date)
 
     # 讀當日報價：只要當日有 row（即使值為 NULL）就視為有資料
     today_quotes = {}

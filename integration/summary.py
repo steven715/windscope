@@ -62,7 +62,7 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
      fut_spread, fut_adj, fut_ratio, oi_net, oi_delta) = row
 
     # 顯示基準與指標一致：今日報價 vs「前一交易日」收盤（今日收盤 18:30 才有）。
-    prev_day = get_previous_trading_day(date, conn)
+    prev_day = get_previous_trading_day(date)
 
     # 匯率：CNY/KRW 用今日 08:45 報價 + 前一交易日 16:00 收盤（基準）。
     # TWD 在下方 86 行覆寫成離岸晨對晨（在岸 08:45 牌價開盤前未更新、失真）。

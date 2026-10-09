@@ -96,7 +96,7 @@ def _ensure_prev_index_baseline(date: str, db_path: str | None) -> bool:
     from utils.trading_calendar import get_previous_trading_day
 
     with get_connection(db_path) as conn:
-        prev_day = get_previous_trading_day(date, conn)
+        prev_day = get_previous_trading_day(date)
         if prev_day is None:
             return False
         row = conn.execute(

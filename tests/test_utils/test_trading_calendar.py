@@ -9,58 +9,25 @@ from utils import trading_calendar
 from utils.trading_calendar import (
     get_next_trading_day,
     get_previous_trading_day,
-    get_recent_trading_days,
     is_market_holiday,
     is_trading_day,
     refresh_holiday_cache,
 )
 
 
-@pytest.fixture
-def cal_db():
-    """建立含交易日資料的 in-memory DB。"""
-    conn = sqlite3.connect(":memory:")
-    create_all_tables(conn)
-    for d in [
-        "2026-04-01", "2026-04-02", "2026-04-03",
-        "2026-04-07", "2026-04-08", "2026-04-09",
-    ]:
-        conn.execute("INSERT INTO raw_futures (date) VALUES (?)", (d,))
-    conn.commit()
-    yield conn
-    conn.close()
-
-
 class TestGetPreviousTradingDay:
-    def test_normal(self, cal_db):
-        assert get_previous_trading_day("2026-04-09", cal_db) == "2026-04-08"
+    """僅週末情境（conftest 預設清空休市快取）；日期不代表真實休市日曆。"""
 
-    def test_after_weekend(self, cal_db):
-        assert get_previous_trading_day("2026-04-07", cal_db) == "2026-04-03"
+    def test_normal(self):
+        assert get_previous_trading_day("2026-04-09") == "2026-04-08"
 
-    def test_no_db_history_falls_to_weekday_fallback(self, cal_db):
-        """DB 無更早資料時 fallback 到跳過週末。"""
-        result = get_previous_trading_day("2026-03-01", cal_db)
-        # 2026-03-01 是星期日，fallback 到 02-27（五）
-        assert result == "2026-02-27"
-
-    def test_fallback_skip_weekend_no_db(self):
-        """無 DB 連線時 fallback 跳過週末。"""
+    def test_after_weekend(self):
         # 2026-04-06 是星期一，前一個 weekday 是 04-03 (五)
-        result = get_previous_trading_day("2026-04-06")
-        assert result == "2026-04-03"
+        assert get_previous_trading_day("2026-04-06") == "2026-04-03"
 
-    def test_fallback_from_institutional(self):
-        """raw_futures 無資料但 raw_institutional 有。"""
-        conn = sqlite3.connect(":memory:")
-        create_all_tables(conn)
-        conn.execute(
-            "INSERT INTO raw_institutional (date) VALUES (?)", ("2026-04-08",)
-        )
-        conn.commit()
-        result = get_previous_trading_day("2026-04-09", conn)
-        assert result == "2026-04-08"
-        conn.close()
+    def test_from_sunday(self):
+        # 2026-03-01 是星期日 → 02-27（五）
+        assert get_previous_trading_day("2026-03-01") == "2026-02-27"
 
 
 class TestHolidayAwareness:
@@ -117,58 +84,33 @@ def test_load_holidays_missing_table_returns_empty(tmp_path):
     assert is_trading_day("2026-06-19") is True  # 週五，無休市資料 → 視為交易日
 
 
-class TestPreviousTradingDaySkipsHolidayRow:
-    """回歸測試：raw_futures 混入休市日空殼 row 時，前一交易日不可抓到休市日。
-
-    重現 bug：週一(06-22)的前一交易日應為週四(06-18)，而非端午休市的週五(06-19)
-    —— 即使 raw_futures 有一筆 06-19 的空殼 row（休市日除息預設值寫入造成）。
-    """
+class TestPreviousTradingDaySkipsHoliday:
+    """前一交易日跳過休市日：週一(06-22)的前一交易日為週四(06-18)，非端午(06-19)。"""
 
     @pytest.fixture(autouse=True)
     def _set_holiday(self, monkeypatch):
         monkeypatch.setattr(trading_calendar, "_holiday_cache", {"2026-06-19"})
 
-    @pytest.fixture
-    def db_with_holiday_row(self):
-        conn = sqlite3.connect(":memory:")
-        create_all_tables(conn)
-        # 06-17、06-18 為正常交易日；06-19 為端午休市但有一筆空殼 row（污染）
-        for d in ("2026-06-17", "2026-06-18"):
-            conn.execute("INSERT INTO raw_futures (date) VALUES (?)", (d,))
-        conn.execute(
-            "INSERT INTO raw_futures (date, ex_dividend_points) VALUES "
-            "('2026-06-19', 0.0)"  # 休市日空殼 row（只有除息預設值）
-        )
-        conn.commit()
-        yield conn
-        conn.close()
-
-    def test_previous_skips_holiday_placeholder(self, db_with_holiday_row):
-        # 06-22(週一) → 跳過 06-19(休市空殼) → 06-18(週四)
-        assert get_previous_trading_day(
-            "2026-06-22", db_with_holiday_row) == "2026-06-18"
-
-    def test_recent_skips_holiday_placeholder(self, db_with_holiday_row):
-        # 近 2 交易日不含 06-19
-        assert get_recent_trading_days(
-            "2026-06-22", 2, db_with_holiday_row) == ["2026-06-18", "2026-06-17"]
+    def test_previous_skips_holiday(self):
+        assert get_previous_trading_day("2026-06-22") == "2026-06-18"
 
 
-class TestGetRecentTradingDays:
-    def test_normal(self, cal_db):
-        result = get_recent_trading_days("2026-04-09", 3, cal_db)
-        assert result == ["2026-04-08", "2026-04-07", "2026-04-03"]
+class TestYearCoverageWarning:
+    """休市表無該年資料時記一次 WARNING（每年只一次）。"""
 
-    def test_fewer_than_n(self, cal_db):
-        result = get_recent_trading_days("2026-04-02", 5, cal_db)
-        assert result == ["2026-04-01"]
+    @pytest.fixture(autouse=True)
+    def _reset(self, monkeypatch):
+        monkeypatch.setattr(trading_calendar, "_holiday_cache", {"2026-06-19"})
+        monkeypatch.setattr(trading_calendar, "_warned_years", set())
 
-    def test_no_db_history_falls_to_weekday_fallback(self, cal_db):
-        """DB 無更早資料時 fallback 到跳過週末。"""
-        result = get_recent_trading_days("2026-03-01", 3, cal_db)
-        assert result == ["2026-02-27", "2026-02-26", "2026-02-25"]
+    def test_warns_once_for_uncovered_year(self, caplog):
+        with caplog.at_level("WARNING", logger="utils.trading_calendar"):
+            is_trading_day("2027-01-04")
+            is_trading_day("2027-01-05")
+        msgs = [r for r in caplog.records if "2027" in r.getMessage()]
+        assert len(msgs) == 1
 
-    def test_fallback_no_db(self):
-        """無 DB 時 fallback 跳過週末。"""
-        result = get_recent_trading_days("2026-04-09", 3)
-        assert result == ["2026-04-08", "2026-04-07", "2026-04-06"]
+    def test_no_warning_for_covered_year(self, caplog):
+        with caplog.at_level("WARNING", logger="utils.trading_calendar"):
+            is_trading_day("2026-06-18")
+        assert not caplog.records
