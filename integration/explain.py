@@ -13,7 +13,7 @@ import sqlite3
 from pathlib import Path
 
 from config import settings
-from utils.trading_calendar import get_previous_trading_day
+from integration.premarket_inputs import SPOT_FROM_INDEX, PremarketInputs, load_premarket_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -60,14 +60,12 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
      spread, spread_adj, vol_ratio, oi_net, oi_delta) = m
 
     notes = _load_notes()
-    prev = get_previous_trading_day(date)
+    inp = load_premarket_inputs(date, conn)
     rows = []
 
     # 1. 匯率（台幣）：離岸 USDTWD=X 晨對晨（在岸 08:45 牌價開盤前未更新、失真）
-    from integration.fx_metrics import offshore_twd_morning
-    twd_now = offshore_twd_morning(conn, date)
-    twd_prev = offshore_twd_morning(conn, prev) if prev else None
-    if twd_now is not None and twd_prev is not None:
+    twd_now, twd_prev = inp.twd_offshore_today, inp.twd_offshore_prev
+    if twd_now is not None and twd_prev is not None and fx_delta_twd is not None:
         raw = f"今晨離岸 {twd_now:.3f} vs 昨晨 {twd_prev:.3f} → Δ{fx_delta_twd:+.4f}"
     else:
         raw = f"Δ{fx_delta_twd:+.4f}" if fx_delta_twd is not None else "資料不足"
@@ -97,10 +95,10 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
     rows.append(_row("亞幣同步", raw, verdict, css, notes))
 
     # 3. 期貨價差
-    night = _scalar(conn, "SELECT night_close FROM raw_futures WHERE date=?", (date,))
-    prev_spot = _scalar(conn, "SELECT spot_close FROM raw_futures WHERE date=?", (prev,)) if prev else None
-    if night is not None and prev_spot is not None:
-        raw = f"夜盤{night:.0f} − 前日現貨{prev_spot:.0f} = {spread:+.0f}"
+    night, prev_spot = inp.night_close, inp.prev_spot
+    if night is not None and prev_spot is not None and spread is not None:
+        spot_label = "前日現貨（指數收盤補）" if inp.prev_spot_source == SPOT_FROM_INDEX else "前日現貨"
+        raw = f"夜盤{night:.0f} − {spot_label}{prev_spot:.0f} = {spread:+.0f}"
         if spread_adj is not None and spread_adj != spread:
             raw += f"（扣除息後 {spread_adj:+.0f}）"
     else:
@@ -118,11 +116,7 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
     # 4. 夜盤量比（原數據顯示今夜實際口數 + 近 N 日均量，比單一倍數有感）
     if vol_ratio is not None:
         n = settings.FUTURES_VOLUME_LOOKBACK
-        night_vol = _scalar(conn, "SELECT night_volume FROM raw_futures WHERE date=?", (date,))
-        recent = conn.execute(
-            "SELECT night_volume FROM raw_futures WHERE date < ? AND night_volume IS NOT NULL "
-            "ORDER BY date DESC LIMIT ?", (date, n)).fetchall()
-        avg = sum(r[0] for r in recent) / len(recent) if recent else None
+        night_vol, avg = inp.night_volume, inp.night_volume_avg
         if night_vol is not None and avg:
             raw = f"今夜 {night_vol:,} 口 ｜ 近{n}日均 {avg:,.0f} 口 → {vol_ratio:.2f}倍"
         else:
@@ -153,8 +147,7 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
     rows.append(_row("外資未平倉", raw, verdict, css, notes))
 
     # 6. 美股對照（看異常）
-    sp_now = _scalar(conn, "SELECT sp500_close FROM raw_futures WHERE date=?", (date,))
-    sp_prev = _scalar(conn, "SELECT sp500_close FROM raw_futures WHERE date=?", (prev,)) if prev else None
+    sp_now, sp_prev = inp.sp500_today, inp.sp500_prev
     if sp_now is not None and sp_prev and prev_spot and night is not None:
         sp_chg = (sp_now - sp_prev) / sp_prev * 100
         night_chg = (night - prev_spot) / prev_spot * 100
@@ -170,16 +163,15 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
     rows.append(_row("美股對照（看異常）", raw, verdict, css, notes))
 
     # 7. 日圓避險情緒（獨立的反向風險溫度計，不進亞幣同步/訊號）
-    rows.append(_jpy_risk_gauge(date, conn, prev, notes))
+    rows.append(_jpy_risk_gauge(inp, notes))
 
     return rows
 
 
-def _jpy_risk_gauge(date: str, conn: sqlite3.Connection, prev_day: str | None,
-                    notes: dict) -> dict:
+def _jpy_risk_gauge(inp: PremarketInputs, notes: dict) -> dict:
     """日圓避險溫度計：USD/JPY 今日報價 vs 前一交易日收盤。日圓急升=risk-off=偏空警示。"""
-    now = _scalar(conn, "SELECT quote_0845 FROM raw_fx WHERE date=? AND currency_pair='USD/JPY'", (date,))
-    prev = _scalar(conn, "SELECT close_16 FROM raw_fx WHERE date=? AND currency_pair='USD/JPY'", (prev_day,)) if prev_day else None
+    now = inp.fx_quote_0845.get("USD/JPY")
+    prev = inp.fx_prev_close_16.get("USD/JPY")
 
     if now is None or prev is None:
         return _row("日圓避險情緒", "資料累積中（需 USD/JPY 報價與前日收盤）", "—", "flat", notes)
@@ -233,11 +225,6 @@ def _fx_rhythm(date: str, conn: sqlite3.Connection, fx_delta_twd: float | None,
         verdict = "盤前無明顯節奏"
         css = "flat"
     return _row("匯率節奏", raw, verdict, css, notes)
-
-
-def _scalar(conn, sql, params):
-    r = conn.execute(sql, params).fetchone()
-    return r[0] if r else None
 
 
 # ── 個股籌碼解讀（鏡像大盤 build_explain，供 watchlist 每檔顯示）─────────

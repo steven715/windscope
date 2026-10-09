@@ -228,7 +228,7 @@
 | 更新時間 | 離岸盤近 24h 連續報價；before_open（08:50）收當晨最近 `FX_INTRADAY_BARS` 根 |
 | 狀態 | ✅ VERIFIED（2026-06-30 真實回應驗證，含 `meta.regularMarketPrice`） |
 | ⚠️ 關鍵發現（2026-06-30） | **在岸台銀 08:45 牌價在開盤前未更新＝前一日收盤**：實測 2026-06-16～22 的 `quote_0845` 逐日精準等於前一日 `close_16`，隔夜 delta 結構性≈0，FX 維度等於從未投票（9/9 neutral）。同晨離岸 USDTWD=X 卻已反映夜盤美元變動（如 06-16 在岸 31.485 vs 離岸 ~31.57）。故 **TWD 隔夜 delta 改用離岸「晨對晨」**：`今晨最後一根 − 前一交易日晨間最後一根`（兩者皆 `intraday_fx`，同來源、同時點可比）。在岸 `quote_0845`/`close_16` 仍續收（顯示參考、CNY/KRW 與日圓溫度計仍用），但不再驅動 TWD 投票。 |
-| 備註 | 門檻 `FX_THRESHOLD_TWD` 隨之 0.1→0.05（實測晨對晨 \|delta\| 多落在 0.001–0.128）；屬訊號語意變更，已 bump `SIGNAL_RULE_VERSION` v2→v3。日線 bar（`interval=1d`）會缺日（如 06-26 不出現），故不採「最後一根日線」當前收，改用我們穩定每晨收的 5 分序列。helper：`integration/fx_metrics.offshore_twd_morning()`。**回補限制**：`intraday_fx` 只能即時收（離岸無歷史回補），故歷史 backfill 的 TWD delta 仍為 None（與在岸 `quote_0845` 無法回補同性質，屬正常）。 |
+| 備註 | 門檻 `FX_THRESHOLD_TWD` 隨之 0.1→0.05（實測晨對晨 \|delta\| 多落在 0.001–0.128）；屬訊號語意變更，已 bump `SIGNAL_RULE_VERSION` v2→v3。日線 bar（`interval=1d`）會缺日（如 06-26 不出現），故不採「最後一根日線」當前收，改用我們穩定每晨收的 5 分序列。讀取入口：`integration/premarket_inputs.load_premarket_inputs()`（`twd_offshore_today`/`twd_offshore_prev`）。**回補限制**：`intraday_fx` 只能即時收（離岸無歷史回補），故歷史 backfill 的 TWD delta 仍為 None（與在岸 `quote_0845` 無法回補同性質，屬正常）。 |
 
 ---
 

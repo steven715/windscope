@@ -4,58 +4,29 @@ import logging
 import sqlite3
 from datetime import datetime
 
-from config import settings
-from utils.trading_calendar import get_previous_trading_day
+from integration.premarket_inputs import load_premarket_inputs
 
 logger = logging.getLogger(__name__)
 
 
 def compute_futures_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
     """計算期貨衍生指標，寫入 daily_metrics。回傳結果 dict 或 None（無原始資料）。"""
-    row = conn.execute(
-        "SELECT night_close, night_volume, spot_close, "
-        "       ex_dividend_points, oi_net_foreign "
-        "FROM raw_futures WHERE date = ?",
-        (date,),
-    ).fetchone()
-
-    if row is None:
+    inp = load_premarket_inputs(date, conn)
+    if not inp.has_futures_row:
         logger.warning("compute_futures_metrics: no futures data for %s", date)
         return None
 
-    night_close, night_volume, _spot_close_today, ex_div, _oi_today = row
-
-    prev_date = get_previous_trading_day(date)
-
     # 1. futures_spread = 今日夜盤收盤 − 前一交易日現貨收盤（隔夜期貨缺口）。
-    #    當日 spot_close 要等收盤後(18:30)才有，而 spread 在 after_night(05:30)
-    #    就要算，故基準必取「前一交易日」的 spot_close。
-    prev_spot = None
-    if prev_date:
-        prev_row = conn.execute(
-            "SELECT spot_close FROM raw_futures WHERE date = ?", (prev_date,)
-        ).fetchone()
-        if prev_row and prev_row[0] is not None:
-            prev_spot = prev_row[0]
-        # Fallback：FMTQIK 偶爾當晚回「無資料」使 raw_futures.spot_close 留 NULL，
-        # 改用同為加權指數收盤、來源更穩且更早（14:30）收到的 raw_index.close，
-        # 避免單一端點失手就整個吃掉隔天的期貨價差票。
-        if prev_spot is None:
-            idx_row = conn.execute(
-                "SELECT close FROM raw_index WHERE date = ?", (prev_date,)
-            ).fetchone()
-            if idx_row and idx_row[0] is not None:
-                prev_spot = idx_row[0]
-
-    if night_close is not None and prev_spot is not None:
-        futures_spread = round(night_close - prev_spot, 2)
+    #    基準（含 raw_index fallback）由盤前輸入決定，與解讀／摘要同一份。
+    if inp.night_close is not None and inp.prev_spot is not None:
+        futures_spread = round(inp.night_close - inp.prev_spot, 2)
     else:
         futures_spread = None
 
     # 2. futures_spread_adjusted
     if futures_spread is not None:
-        if ex_div is not None:
-            futures_spread_adjusted = round(futures_spread - ex_div, 2)
+        if inp.ex_dividend_points is not None:
+            futures_spread_adjusted = round(futures_spread - inp.ex_dividend_points, 2)
         else:
             futures_spread_adjusted = futures_spread
     else:
@@ -63,36 +34,17 @@ def compute_futures_metrics(date: str, conn: sqlite3.Connection) -> dict | None:
 
     # 3. futures_volume_ratio
     futures_volume_ratio = None
-    if night_volume is not None:
-        recent = conn.execute(
-            "SELECT night_volume FROM raw_futures "
-            "WHERE date < ? AND night_volume IS NOT NULL "
-            "ORDER BY date DESC LIMIT ?",
-            (date, settings.FUTURES_VOLUME_LOOKBACK),
-        ).fetchall()
-        if recent:
-            avg_volume = sum(r[0] for r in recent) / len(recent)
-            if avg_volume > 0:
-                futures_volume_ratio = round(night_volume / avg_volume, 2)
+    avg_volume = inp.night_volume_avg
+    if inp.night_volume is not None and avg_volume:
+        futures_volume_ratio = round(inp.night_volume / avg_volume, 2)
 
     # 4/5. 外資未平倉：訊號於 08:50 產出時，今日 OI 尚未收（18:30 才收），故採
     #      「前一交易日收盤」的外資未平倉作為訊號時點已知的最新部位；oi_delta 為
     #      其相對「再前一交易日」的增減（最近一場的部位變化，供摘要顯示）。
-    oi_net_foreign = None
+    oi_net_foreign = inp.oi_prev
     oi_delta = None
-    if prev_date:
-        prev_oi_row = conn.execute(
-            "SELECT oi_net_foreign FROM raw_futures WHERE date = ?", (prev_date,)
-        ).fetchone()
-        if prev_oi_row and prev_oi_row[0] is not None:
-            oi_net_foreign = prev_oi_row[0]
-            prev2 = get_previous_trading_day(prev_date)
-            if prev2:
-                prev2_row = conn.execute(
-                    "SELECT oi_net_foreign FROM raw_futures WHERE date = ?", (prev2,)
-                ).fetchone()
-                if prev2_row and prev2_row[0] is not None:
-                    oi_delta = oi_net_foreign - prev2_row[0]
+    if inp.oi_prev is not None and inp.oi_prev2 is not None:
+        oi_delta = inp.oi_prev - inp.oi_prev2
 
     result = {
         "futures_spread": futures_spread,

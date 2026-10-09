@@ -4,7 +4,8 @@ import json
 import logging
 import sqlite3
 
-from utils.trading_calendar import get_previous_trading_day
+from config import settings
+from integration.premarket_inputs import load_premarket_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -61,56 +62,29 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
     (fx_twd, fx_cny, fx_krw, fx_dir, fx_sync, fx_detail_json,
      fut_spread, fut_adj, fut_ratio, oi_net, oi_delta) = row
 
-    # 顯示基準與指標一致：今日報價 vs「前一交易日」收盤（今日收盤 18:30 才有）。
-    prev_day = get_previous_trading_day(date)
+    # 顯示基準與票一致：同一份盤前輸入（前一交易日基準、含 fallback）。
+    inp = load_premarket_inputs(date, conn)
 
-    # 匯率：CNY/KRW 用今日 08:45 報價 + 前一交易日 16:00 收盤（基準）。
-    # TWD 在下方 86 行覆寫成離岸晨對晨（在岸 08:45 牌價開盤前未更新、失真）。
-    fx_rates = {}
-    for pair in ["USD/TWD", "USD/CNY", "USD/KRW"]:
-        today_r = conn.execute(
-            "SELECT quote_0845 FROM raw_fx WHERE date = ? AND currency_pair = ?",
-            (date, pair),
-        ).fetchone()
-        prev_close = None
-        if prev_day:
-            pr = conn.execute(
-                "SELECT close_16 FROM raw_fx WHERE date = ? AND currency_pair = ?",
-                (prev_day, pair),
-            ).fetchone()
-            prev_close = pr[0] if pr else None
-        fx_rates[pair] = {
-            "close_16": prev_close,
-            "quote_0845": today_r[0] if today_r else None,
+    # 匯率：CNY/KRW 用今日 08:45 報價 + 前一交易日 16:00 收盤（基準）；
+    # TWD 用離岸晨對晨（在岸 08:45 牌價開盤前未更新、失真）。
+    fx_rates = {
+        pair: {
+            "close_16": inp.fx_prev_close_16.get(pair),
+            "quote_0845": inp.fx_quote_0845.get(pair),
         }
-
-    # TWD 顯示與 delta 一致：改用離岸晨對晨（在岸 08:45 牌價開盤前未更新、失真）。
-    from integration.fx_metrics import offshore_twd_morning
+        for pair in ("USD/CNY", "USD/KRW")
+    }
     fx_rates["USD/TWD"] = {
-        "close_16": offshore_twd_morning(conn, prev_day) if prev_day else None,
-        "quote_0845": offshore_twd_morning(conn, date),
+        "close_16": inp.twd_offshore_prev,
+        "quote_0845": inp.twd_offshore_today,
     }
 
     # 期貨：今日夜盤收盤 + 前一交易日現貨收盤（基準）
-    today_fut = conn.execute(
-        "SELECT night_close, ex_dividend_points, night_volume FROM raw_futures WHERE date = ?",
-        (date,),
-    ).fetchone()
-    night_close = today_fut[0] if today_fut else None
-    ex_div = today_fut[1] if today_fut else None
-    night_volume = today_fut[2] if today_fut else None
-    # 近 N 日夜盤均量（讓量比有實際數字可對照）
-    _vol_rows = conn.execute(
-        "SELECT night_volume FROM raw_futures WHERE date < ? AND night_volume IS NOT NULL "
-        "ORDER BY date DESC LIMIT 5", (date,),
-    ).fetchall()
-    night_vol_avg = (sum(r[0] for r in _vol_rows) / len(_vol_rows)) if _vol_rows else None
-    spot_close = None
-    if prev_day:
-        ps = conn.execute(
-            "SELECT spot_close FROM raw_futures WHERE date = ?", (prev_day,)
-        ).fetchone()
-        spot_close = ps[0] if ps else None
+    night_close = inp.night_close
+    ex_div = inp.ex_dividend_points
+    night_volume = inp.night_volume
+    night_vol_avg = inp.night_volume_avg
+    spot_close = inp.prev_spot
 
     lines = []
     lines.append("══════════════════════════════════")
@@ -180,7 +154,8 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
     if fut_ratio is not None:
         if night_volume is not None and night_vol_avg:
             lines.append(f"夜盤量比 {fut_ratio:.2f}x"
-                         f"（今夜 {night_volume:,} 口 vs 近5日均 {night_vol_avg:,.0f} 口）")
+                         f"（今夜 {night_volume:,} 口 vs 近{settings.FUTURES_VOLUME_LOOKBACK}日均"
+                         f" {night_vol_avg:,.0f} 口）")
         else:
             lines.append(f"夜盤量比 {fut_ratio:.2f}x")
     else:
