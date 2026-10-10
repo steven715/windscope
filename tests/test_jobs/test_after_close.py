@@ -65,3 +65,36 @@ def test_after_close_partial_failure(memory_db, monkeypatch):
     # 拆出去的步驟不應再出現在 after_close
     for moved in ("twse_stock_close", "chip", "integration_chip", "fx_close"):
         assert moved not in result["results"]
+
+
+def test_collectors_receive_injected_db_path(monkeypatch):
+    """回歸：job 注入 db_path 時，各收集步驟的 collector 也要寫進同一個 DB（舊版用預設正式 DB）。"""
+    import collectors.chip as chip
+    import collectors.fx as fx
+    import collectors.taifex as taifex
+    import collectors.twse as twse
+    from jobs import after_close, after_night, before_open, chip_collect
+
+    seen = []
+
+    class FakeCollector:
+        def __init__(self, db_path=None):
+            seen.append(db_path)
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None  # collect_* 回 None → 步驟 no-data，不寫入
+
+    monkeypatch.setattr(twse, "TWSECollector", FakeCollector)
+    monkeypatch.setattr(taifex, "TAIFEXCollector", FakeCollector)
+    monkeypatch.setattr(fx, "FXCollector", FakeCollector)
+    monkeypatch.setattr(chip, "ChipCollector", FakeCollector)
+
+    db = "/tmp/isolated.db"
+    for fn in (after_close._collect_twse_spot_close, after_close._collect_twse_institutional,
+               after_close._collect_twse_foreign_stock, after_close._collect_twse_ex_dividend,
+               after_close._collect_taifex_oi, after_night._collect_taifex_night,
+               after_night._collect_sp500, chip_collect._collect_twse_stock_close,
+               chip_collect._collect_chip, before_open._collect_fx_intraday):
+        assert fn("2026-04-08", db) is False
+
+    assert seen == [db] * 10

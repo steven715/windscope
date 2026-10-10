@@ -43,13 +43,13 @@ def run_after_night(date: str, db_path: str | None = None) -> dict:
 
     with get_connection(db_path) as conn:
         # 1. TAIFEX: 夜盤收盤價 + 成交量
-        ok, err = run_step("taifex_night", lambda: _collect_taifex_night(target, conn))
+        ok, err = run_step("taifex_night", lambda: _collect_taifex_night(target, db_path))
         results["taifex_night"] = ok
         if err:
             errors.append(err)
 
         # 2. FX (Yahoo Finance): S&P 500 收盤 → raw_futures.sp500_close
-        ok, err = run_step("sp500_close", lambda: _collect_sp500(target, conn))
+        ok, err = run_step("sp500_close", lambda: _collect_sp500(target, db_path))
         results["sp500_close"] = ok
         if err:
             errors.append(err)
@@ -68,11 +68,11 @@ def run_after_night(date: str, db_path: str | None = None) -> dict:
 # ── 內部步驟函式 ─────────────────────────────────────────────────
 
 
-def _collect_taifex_night(date: str, conn: sqlite3.Connection) -> bool:
+def _collect_taifex_night(date: str, db_path: str | None) -> bool:
     """收集夜盤收盤價和成交量。"""
     from collectors.taifex import TAIFEXCollector
 
-    c = TAIFEXCollector()
+    c = TAIFEXCollector(db_path=db_path)
     data = c.collect_night_session(date)
     if data is None:
         return False
@@ -80,11 +80,11 @@ def _collect_taifex_night(date: str, conn: sqlite3.Connection) -> bool:
     return True
 
 
-def _collect_sp500(date: str, conn: sqlite3.Connection) -> bool:
+def _collect_sp500(date: str, db_path: str | None) -> bool:
     """收集 S&P 500 收盤價（Yahoo Finance ^GSPC）。"""
     from collectors.fx import FXCollector
 
-    c = FXCollector()
+    c = FXCollector(db_path=db_path)
     data = c.collect_sp500()
     if data is None:
         return False
