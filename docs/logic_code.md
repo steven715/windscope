@@ -82,7 +82,7 @@ flowchart TD
   X{"對敲旗標=1？"} -->|是| F1["fake_volume：疑似對敲假量，不碰"]
   X -->|否| Y{"隔日沖分點 且 買超？"}
   Y -->|是| F2["day_trade_no_chase：明天九成會賣，不追"]
-  Y -->|否| Z["_classify_stock（連續天數 + 金額 + 價格區間）"]
+  Y -->|否| Z["stock_chip._classify_broker_net（連續天數 + 金額 + 價格區間）"]
   Z --> R1{"連賣 ≥ 3 天？"}
   R1 -->|是| C1["avoid：分點連賣"]
   R1 -->|否| R2{"連買 ≥ 3 天 且 金額 ≥ 5,000萬？"}

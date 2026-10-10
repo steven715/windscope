@@ -160,6 +160,7 @@ class TestPagesWithData:
         assert "台積電" in resp.text
         assert "籌碼綜合判讀" in resp.text
         assert "歷史觀察訊號" in resp.text
+        assert "↑ 偏買" in resp.text  # 籌碼傾向用語（CONTEXT.md）
 
     def test_stock_detail_unknown_redirects(self, client_with_data):
         """未知代號 → 303 轉回觀察名單。"""
@@ -187,6 +188,23 @@ class TestPagesWithData:
         assert body["bars"][0]["time"] == "2026-06-10"   # 舊→新
         assert body["bars"][0]["close"] == 905.0
 
+    def test_api_stock_ohlc_adjusted_matches_chart_series(self, client_with_data):
+        """回歸：API 預設回還原價（與頁面K線圖同一序列）；adjusted=false 回原始價。"""
+        db = client_with_data.app.state.db_path
+        conn = sqlite3.connect(db)
+        conn.execute("INSERT INTO raw_stock_daily (stock_id, date, open, high, low, close, volume) "
+                     "VALUES ('2330', '2026-06-12', 450, 450, 450, 450, 1)")  # 一拆二缺口
+        conn.commit()
+        conn.close()
+
+        adj = client_with_data.get("/api/stock/2330/ohlc").json()
+        raw = client_with_data.get("/api/stock/2330/ohlc?adjusted=false").json()
+        assert adj["adjusted"] is True and raw["adjusted"] is False
+        assert raw["bars"][0]["close"] == 905.0
+        assert adj["bars"][0]["close"] < 905.0           # 缺口前價格被回推
+        assert adj["bars"][-1]["close"] == raw["bars"][-1]["close"] == 450
+        assert adj["adjust_note"] and raw["adjust_note"] is None
+
     def test_api_stock_ohlc_empty(self, client_with_data):
         """無日K的代號回空 bars。"""
         body = client_with_data.get("/api/stock/9999/ohlc").json()
@@ -206,9 +224,9 @@ class TestPagesWithData:
         assert body["found"] is False
 
     def test_watchlist_scan_sentiment_and_sparkline(self, client_with_data):
-        """外資連買的股票 → 偏多徽章 + sparkline <rect> 有渲染。"""
+        """外資連買的股票 → 籌碼傾向「偏買」徽章 + sparkline <rect> 有渲染。"""
         resp = client_with_data.get("/watchlist")
-        assert "偏多" in resp.text
+        assert "偏買" in resp.text
         assert "<rect" in resp.text
 
     def test_spark_bars_empty_zero_and_quiet_percent(self):
@@ -330,35 +348,6 @@ class TestPagesWithData:
         assert "第四步" in resp.text and "企穩" in resp.text       # 四步流程
         assert "開盤前三件事" in resp.text                          # 大盤方法論
         assert "值得觀察 ≠ 進場" in resp.text                       # 貫穿心法
-
-    def test_lights_sentiment_na_vs_flat(self):
-        """na（資料不可用）與 genuine flat 要區分；空殼回 na/none。"""
-        from server.routes.pages import _stock_lights_sentiment
-        na = [{"dim": "外資動向", "css": "flat", "verdict": "資料不可用", "raw": "尚未取得"},
-              {"dim": "主力分點", "css": "flat", "verdict": "資料不可用", "raw": "尚未匯入"},
-              {"dim": "股價位置", "css": "flat", "verdict": "資料不可用", "raw": "尚無"}]
-        lights, sent = _stock_lights_sentiment(na)
-        assert lights == ["na", "na", "na"] and sent == "none"
-
-        mixed = [{"dim": "外資動向", "css": "flat", "verdict": "外資無明顯方向", "raw": "淨買超 5 張"},
-                 {"dim": "主力分點", "css": "flat", "verdict": "資料不可用", "raw": "尚未匯入"},
-                 {"dim": "股價位置", "css": "flat", "verdict": "低檔（月線下方）", "raw": "-5%"}]
-        lights2, _ = _stock_lights_sentiment(mixed)
-        assert lights2 == ["flat", "na", "flat"]       # 真 flat 顯示灰、缺資料顯示空心
-
-    def test_lights_sentiment_bull_bear(self):
-        """外資 up→bull、外資 down→bear。"""
-        from server.routes.pages import _stock_lights_sentiment
-        bull = [{"dim": "外資動向", "css": "up", "verdict": "外資連買 3 天", "raw": "連買 3 天"},
-                {"dim": "主力分點", "css": "flat", "verdict": "資料不可用", "raw": "尚未"},
-                {"dim": "股價位置", "css": "flat", "verdict": "低檔", "raw": "x"}]
-        _, sent = _stock_lights_sentiment(bull)
-        assert sent == "bull"
-        bear = [{"dim": "外資動向", "css": "down", "verdict": "外資連賣 3 天", "raw": "連賣 3 天"},
-                {"dim": "主力分點", "css": "flat", "verdict": "資料不可用", "raw": "尚未"},
-                {"dim": "股價位置", "css": "flat", "verdict": "低檔", "raw": "x"}]
-        _, sent2 = _stock_lights_sentiment(bear)
-        assert sent2 == "bear"
 
     def test_data_page_chinese_labels(self, client_with_data):
         """資料瀏覽下拉選單顯示中文標籤。"""

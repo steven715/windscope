@@ -213,18 +213,24 @@ def query_live(request: Request) -> dict:
 
 
 @router.get("/stock/{stock_id}/ohlc")
-def query_stock_ohlc(stock_id: str, request: Request, limit: int = 300) -> dict:
-    """個股日K OHLCV（舊→新）。供 K 線圖前端使用；time 為 YYYY-MM-DD。"""
+def query_stock_ohlc(stock_id: str, request: Request, limit: int = 300,
+                     adjusted: bool = True) -> dict:
+    """個股日K OHLCV（舊→新，最近 limit 根）。預設為還原價（與頁面K線圖、趨勢訊號同一序列）。
+
+    adjusted=false 回原始成交價；volume 一律為原始股數（不隨還原換算）；排除 OHLC 缺值列。
+    """
+    from integration.price_adjust import adjust_note, load_adjusted_bars, load_bars
+
     limit = max(1, min(limit, _MAX_ROWS))
     with get_connection(request.app.state.db_path) as conn:
-        rows = conn.execute(
-            "SELECT date, open, high, low, close, volume FROM raw_stock_daily "
-            "WHERE stock_id = ? ORDER BY date DESC LIMIT ?",
-            (stock_id, limit),
-        ).fetchall()
-    bars = [{"time": r[0], "open": r[1], "high": r[2], "low": r[3],
-             "close": r[4], "volume": r[5]} for r in reversed(rows)]
-    return {"stock_id": stock_id, "count": len(bars), "bars": bars}
+        if adjusted:
+            bars, events = load_adjusted_bars(stock_id, conn)
+        else:
+            bars, events = load_bars(stock_id, conn), []
+    bars = [{"time": b["date"], "open": b["open"], "high": b["high"], "low": b["low"],
+             "close": b["close"], "volume": b["volume"]} for b in bars[-limit:]]
+    return {"stock_id": stock_id, "count": len(bars), "bars": bars,
+            "adjusted": adjusted, "adjust_note": adjust_note(events)}
 
 
 @router.get("/stock/{stock_id}/trend")

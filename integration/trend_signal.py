@@ -41,7 +41,7 @@ class TrendParams:
     overbought_bias: float = settings.TREND_OVERBOUGHT_BIAS
 
 
-def _sma(values: list[float], n: int) -> list[float | None]:
+def sma(values: list[float], n: int) -> list[float | None]:
     """簡單移動平均：index i = 最近 n 根均值，暖機不足回 None（對應 pandas rolling(n).mean()）。"""
     out: list[float | None] = []
     running = 0.0
@@ -82,8 +82,8 @@ def _classify_series(bars: list[dict], p: TrendParams) -> tuple[list[str], list[
     lows = [b["low"] for b in bars]
     n = len(bars)
 
-    ma_big = _sma(closes, p.ma_big)
-    ma_center = _sma(closes, p.ma_center)
+    ma_big = sma(closes, p.ma_big)
+    ma_center = sma(closes, p.ma_center)
 
     # 年線斜率：ma_big[i] / ma_big[i-L] - 1（兩端皆需暖機完成）
     slopes: list[float | None] = [None] * n
@@ -210,8 +210,8 @@ def evaluate_series(bars: list[dict], params: TrendParams | None = None,
     p = params or TrendParams()
     n = len(bars)
     closes = [b["close"] for b in bars]
-    ma_center = _sma(closes, p.ma_center)
-    ma_fast = _sma(closes, p.ma_fast)
+    ma_center = sma(closes, p.ma_center)
+    ma_fast = sma(closes, p.ma_fast)
     states, slopes = _classify_series(bars, p)
     warmup = p.ma_big + p.slope_lookback
 
@@ -296,27 +296,12 @@ def compute_trend_signal(stock_id: str, conn: sqlite3.Connection,
 
     asof 給定時只取該日（含）以前的K線（供回測/歷史重算）；否則用全部歷史的最新一根。
     """
-    q = ("SELECT date, open, high, low, close, volume "
-         "FROM raw_stock_daily WHERE stock_id = ? AND open IS NOT NULL "
-         "AND high IS NOT NULL AND low IS NOT NULL AND close IS NOT NULL")
-    args: list = [stock_id]
-    if asof:
-        q += " AND date <= ?"
-        args.append(asof)
-    q += " ORDER BY date ASC"
-    rows = conn.execute(q, args).fetchall()
-
-    bars = [{"date": r[0], "open": r[1], "high": r[2], "low": r[3],
-             "close": r[4], "volume": r[5]} for r in rows]
+    # 還原股價：偵測分割/大除權缺口 + 配息比例回推（spec §6.1 需還原股價）
+    from integration.price_adjust import adjust_note, load_adjusted_bars
+    bars, adj_events = load_adjusted_bars(stock_id, conn, asof)
     if not bars:
         logger.info("compute_trend_signal: no OHLC for %s", stock_id)
         return None
-
-    # 還原股價：偵測分割/大除權缺口 + 配息比例回推（spec §6.1 需還原股價）
-    from collectors.dividend import load_dividend_factors
-    from integration.price_adjust import adjust_note, back_adjust_with_events
-    bars, adj_events = back_adjust_with_events(
-        bars, load_dividend_factors(conn, stock_id))
     note = adjust_note(adj_events)
 
     result = evaluate(bars, params)

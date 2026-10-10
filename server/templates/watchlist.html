@@ -35,7 +35,7 @@
      data-search="{{ (c.stock_id ~ ' ' ~ c.stock_name) | lower }}">
   <div class="scan-main" data-toggle>
     <div class="scan-code">{{ c.stock_id }}<span class="added">{{ c.added_date }} 加入</span></div>
-    <div class="scan-name">{{ c.stock_name }}{% if c.sentiment == 'bull' %} <span class="scan-badge bull">偏多</span>{% elif c.sentiment == 'bear' %} <span class="scan-badge bear">偏空</span>{% endif %}</div>
+    <div class="scan-name">{{ c.stock_name }}{% if c.sentiment == 'bull' %} <span class="scan-badge bull">偏買</span>{% elif c.sentiment == 'bear' %} <span class="scan-badge bear">偏賣</span>{% endif %}</div>
     <div class="scan-lights">{% for l in c.lights %}<span class="dot {{ l }}"></span>{% endfor %}</div>
     <span class="scan-zone">{{ c.zone_label }}</span>
     <div class="scan-spark">{{ spark_svg(c.spark_bars, 140, 34) }}{% if c.foreign_raw %}<span class="cap {{ c.foreign_css }}">{{ c.foreign_raw }}</span>{% endif %}</div>
@@ -93,10 +93,10 @@
 {% if cards %}
 <div class="filters">
   <span class="chip-filter{{ ' active' if counts.signal == 0 }}" data-f="all">全部 {{ counts.all }}</span>
-  <span class="chip-filter{{ ' active' if counts.signal > 0 }}" data-f="signal">今天有訊號 {{ counts.signal }}</span>
-  <span class="chip-filter" data-f="bull">偏多 {{ counts.bull }}</span>
-  <span class="chip-filter" data-f="bear">偏空 {{ counts.bear }}</span>
-  <span class="chip-filter" data-f="none">無訊號 {{ counts.none }}</span>
+  <span class="chip-filter{{ ' active' if counts.signal > 0 }}" data-f="signal">今天有傾向 {{ counts.signal }}</span>
+  <span class="chip-filter" data-f="bull">偏買 {{ counts.bull }}</span>
+  <span class="chip-filter" data-f="bear">偏賣 {{ counts.bear }}</span>
+  <span class="chip-filter" data-f="none">無傾向 {{ counts.none }}</span>
   <input id="scan-search" class="search" type="search" placeholder="🔍 搜尋代號 / 名稱">
 </div>
 
@@ -121,7 +121,7 @@
 <div data-scan-section>
   <div class="row-between" style="margin:18px 0 10px">
     <span class="section-title" style="margin:0">其餘觀察</span>
-    <span class="muted">無訊號 · {{ quiet_cards | length }} 檔</span>
+    <span class="muted">無傾向 · {{ quiet_cards | length }} 檔</span>
   </div>
   {% for c in quiet_cards %}{{ scan_row(c) }}{% endfor %}
 </div>

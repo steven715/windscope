@@ -680,30 +680,19 @@ def _candlestick(bars: list[dict], mas: dict, w: float = 760.0,
 
 
 def _build_stock_chart(conn, stock_id: str, window: int = 120) -> dict | None:
-    """讀 raw_stock_daily、還原股價後算最近 window 根K棒 + MA20/60/240 疊線的 SVG 幾何。"""
-    from collectors.dividend import load_dividend_factors
-    from integration.price_adjust import back_adjust
-    from integration.trend_signal import _sma
+    """讀還原股價（load_adjusted_bars）算最近 window 根K棒 + MA20/60/240 疊線的 SVG 幾何。"""
+    from integration.price_adjust import load_adjusted_bars
+    from integration.trend_signal import sma
 
-    rows = conn.execute(
-        "SELECT date, open, high, low, close FROM raw_stock_daily "
-        "WHERE stock_id = ? AND open IS NOT NULL AND high IS NOT NULL "
-        "      AND low IS NOT NULL AND close IS NOT NULL ORDER BY date ASC",
-        (stock_id,),
-    ).fetchall()
-    if not rows:
+    adjusted, _ = load_adjusted_bars(stock_id, conn)
+    if not adjusted:
         return None
-    bars_raw = [{"date": r[0], "open": r[1], "high": r[2], "low": r[3],
-                 "close": r[4]} for r in rows]
-    rows = back_adjust(bars_raw, load_dividend_factors(conn, stock_id))
-    rows = [(b["date"], b["open"], b["high"], b["low"], b["close"]) for b in rows]
-    closes = [r[4] for r in rows]
-    ma = {"MA20": _sma(closes, 20), "MA60": _sma(closes, 60),
-          "MA240": _sma(closes, 240)}
-    n = len(rows)
+    closes = [b["close"] for b in adjusted]
+    ma = {"MA20": sma(closes, 20), "MA60": sma(closes, 60), "MA240": sma(closes, 240)}
+    n = len(adjusted)
     sl = slice(max(0, n - window), n)
-    bars = [{"date": r[0], "open": r[1], "high": r[2], "low": r[3], "close": r[4]}
-            for r in rows[sl]]
+    bars = [{k: b[k] for k in ("date", "open", "high", "low", "close")}
+            for b in adjusted[sl]]
     return _candlestick(bars, {k: v[sl] for k, v in ma.items()})
 
 
@@ -979,41 +968,16 @@ def backtest_compare_page(request: Request, a: int, b: int):
     })
 
 
-def _stock_lights_sentiment(explain: list[dict]) -> tuple[list[str], str]:
-    """從 build_stock_explain 三維度算 (三顆燈[up/down/flat/na], 情緒[bull/bear/none])。"""
-    def is_na(d: dict) -> bool:
-        return ("資料不可用" in (d.get("verdict") or "")
-                or "尚未" in (d.get("raw") or ""))
+def _build_cards(stocks, stock_chip: dict, stock_trend: dict, conn) -> list[dict]:
+    """把每檔籌碼判讀整理成掃描列卡片（燈號/籌碼傾向/sparkline/趨勢解讀/排序）。"""
+    from integration.explain import format_stock_explain
 
-    def light(d: dict) -> str:
-        if not d or is_na(d):
-            return "na"
-        return d["css"] if d.get("css") in ("up", "down") else "flat"
-
-    dims = {d["dim"]: d for d in explain}
-    foreign, broker, zone = (dims.get("外資動向", {}), dims.get("主力分點", {}),
-                             dims.get("股價位置", {}))
-    lights = ([light(foreign), light(broker), light(zone)] if explain
-              else ["na", "na", "na"])
-    fcss, bcss = foreign.get("css"), broker.get("css")
-    if fcss == "up" or (bcss == "up" and fcss != "down"):
-        sentiment = "bull"
-    elif fcss == "down" or bcss == "down":
-        sentiment = "bear"
-    else:
-        sentiment = "none"
-    return lights, sentiment
-
-
-def _build_cards(stocks, stock_explain: dict, stock_trend: dict, conn) -> list[dict]:
-    """把每檔 build_stock_explain 整理成掃描列卡片（燈號/情緒/sparkline/趨勢解讀/排序）。"""
     cards = []
     for s in stocks:
-        ex = stock_explain.get(s[0], [])
-        dims = {d["dim"]: d for d in ex}
-        foreign, broker, zone = (dims.get("外資動向", {}), dims.get("主力分點", {}),
-                                 dims.get("股價位置", {}))
-        lights, sentiment = _stock_lights_sentiment(ex)
+        chip = stock_chip[s[0]]
+        ex = format_stock_explain(chip)
+        foreign, broker, zone = ex
+        lights, sentiment = chip.lights, chip.lean
         spark_rows = conn.execute(
             "SELECT net_volume FROM raw_chip "
             "WHERE stock_id = ? AND broker_name = '__FOREIGN__' "
@@ -1044,7 +1008,8 @@ def watchlist_page(request: Request):
     """觀察名單（掃描優先 + 亮燈 + 鑽取）：每檔一列摘要，今天有訊號的浮上來。"""
     from datetime import datetime
 
-    from integration.explain import build_stock_explain, build_stock_trend_explain
+    from integration.explain import build_stock_trend_explain
+    from integration.stock_chip import load_stock_chip
 
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
@@ -1057,12 +1022,12 @@ def watchlist_page(request: Request):
         ).fetchall()
         asof = (conn.execute("SELECT MAX(date) FROM signals").fetchone()[0]
                 or datetime.now().strftime("%Y-%m-%d"))
-        stock_explain = {s[0]: build_stock_explain(asof, s[0], conn) for s in stocks}
+        stock_chip = {s[0]: load_stock_chip(asof, s[0], conn) for s in stocks}
         # 趨勢獨立於大盤 signals 節奏，用今日為 asof 取最新趨勢（避免 signals job
         # 落後時，剛回補的趨勢被 MAX(signals.date) 夾掉而顯示「資料不可用」）
         today = datetime.now().strftime("%Y-%m-%d")
         stock_trend = {s[0]: build_stock_trend_explain(today, s[0], conn) for s in stocks}
-        cards = _build_cards(stocks, stock_explain, stock_trend, conn)
+        cards = _build_cards(stocks, stock_chip, stock_trend, conn)
 
     # 大盤 strip：最新收盤 + 近 10 日漲跌% sparkline（index_rows 為新→舊）
     closes = [r[1] for r in reversed(index_rows)]  # 舊→新
@@ -1122,7 +1087,8 @@ def stock_detail_page(request: Request, stock_id: str):
     """
     from datetime import datetime
 
-    from integration.explain import build_stock_explain, build_stock_trend_explain
+    from integration.explain import build_stock_trend_explain, format_stock_explain
+    from integration.stock_chip import load_stock_chip
 
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
@@ -1134,7 +1100,8 @@ def stock_detail_page(request: Request, stock_id: str):
             return RedirectResponse(url="/watchlist", status_code=303)
         asof = (conn.execute("SELECT MAX(date) FROM signals").fetchone()[0]
                 or datetime.now().strftime("%Y-%m-%d"))
-        explain = build_stock_explain(asof, stock_id, conn)
+        chip = load_stock_chip(asof, stock_id, conn)
+        explain = format_stock_explain(chip)
         foreign_rows = conn.execute(
             "SELECT net_volume FROM raw_chip "
             "WHERE stock_id = ? AND broker_name = '__FOREIGN__' "
@@ -1156,13 +1123,11 @@ def stock_detail_page(request: Request, stock_id: str):
             "SELECT COUNT(*) FROM raw_stock_daily WHERE stock_id = ?", (stock_id,)
         ).fetchone()[0]
 
-    lights, sentiment = _stock_lights_sentiment(explain)
-    dir_label = {"bull": "↑ 偏多", "bear": "↓ 偏空", "none": "— 中性"}[sentiment]
-    dims = {d["dim"]: d for d in explain}
-    foreign = dims.get("外資動向", {})
-    directional = [d["verdict"] for d in explain
-                   if d.get("css") in ("up", "down")
-                   and "資料不可用" not in (d.get("verdict") or "")]
+    lights, sentiment = chip.lights, chip.lean
+    dir_label = {"bull": "↑ 偏買", "bear": "↓ 偏賣", "none": "— 無傾向"}[sentiment]
+    foreign = explain[0]
+    directional = [d["verdict"] for d, light in zip(explain, lights)
+                   if light in ("up", "down")]
     summary = "；".join(directional) if directional else "三維度目前無明顯方向"
 
     spark = [r[0] for r in reversed(foreign_rows)]
