@@ -26,7 +26,7 @@
 
 ## 承擔的代價（Consequences）
 
-- 部分操作（rolling MA、join、groupby）在 stdlib 較囉嗦。可接受；專案已自行實作 `_sma` 等輔助函式。
+- 部分操作（rolling MA、join、groupby）在 stdlib 較囉嗦。可接受；專案已自行實作 `sma`（`integration/trend_signal.py`）等輔助函式。
 - 失去 pandas 生態的現成工具（讀 CSV、繪圖橋接等），改以標準庫或既有純函式處理。
 
 ## 替代方案（Alternatives considered）

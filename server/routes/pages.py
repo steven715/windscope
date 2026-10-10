@@ -472,26 +472,29 @@ def dashboard(request: Request):
                 "reasons": json.loads(latest[5]) if latest[5] else [],
                 "rule_version": latest[6],
             }
-            m = conn.execute(
+            m = _fetch_one_dict(
+                conn,
                 "SELECT fx_delta_twd, fx_direction, fx_asia_sync, "
                 "       futures_spread_adjusted, futures_volume_ratio, "
                 "       oi_net_foreign, fx_delta_cny, fx_delta_krw, "
                 "       fx_asia_detail, oi_delta "
                 "FROM daily_metrics WHERE date = ?",
                 (signal["date"],),
-            ).fetchone()
+            )
             if m:
-                detail = json.loads(m[8]) if m[8] else {}
+                detail = json.loads(m["fx_asia_detail"]) if m["fx_asia_detail"] else {}
                 fx_pairs = []
-                for label, delta in (("TWD", m[0]), ("CNY", m[6]), ("KRW", m[7])):
+                for label, delta in (("TWD", m["fx_delta_twd"]), ("CNY", m["fx_delta_cny"]),
+                                     ("KRW", m["fx_delta_krw"])):
                     zh, css = _FX_DIR_ZH.get(detail.get(label), ("—", "flat"))
                     fx_pairs.append({"label": label, "delta": delta,
                                      "zh": zh, "css": css})
                 metrics = {
-                    "fx_delta_twd": m[0], "fx_direction": m[1],
-                    "fx_asia_sync": m[2], "spread_adjusted": m[3],
-                    "volume_ratio": m[4], "oi_net": m[5],
-                    "fx_pairs": fx_pairs, "oi_delta": m[9],
+                    "fx_delta_twd": m["fx_delta_twd"], "fx_direction": m["fx_direction"],
+                    "fx_asia_sync": m["fx_asia_sync"],
+                    "spread_adjusted": m["futures_spread_adjusted"],
+                    "volume_ratio": m["futures_volume_ratio"], "oi_net": m["oi_net_foreign"],
+                    "fx_pairs": fx_pairs, "oi_delta": m["oi_delta"],
                 }
             stock_signals = conn.execute(
                 "SELECT stock_id, broker_name, category, reasons "
@@ -968,6 +971,32 @@ def backtest_compare_page(request: Request, a: int, b: int):
     })
 
 
+def _fetch_one_dict(conn, sql: str, params: tuple) -> dict | None:
+    """單列查詢回 {欄位名: 值}（以欄位名取值，免依賴 SELECT 欄位順序）；無列回 None。"""
+    cur = conn.execute(sql, params)
+    row = cur.fetchone()
+    return dict(zip((d[0] for d in cur.description), row)) if row else None
+
+
+def _signals_asof(conn) -> str:
+    """個股籌碼解讀的基準日：最新盤前判斷日（與籌碼觀察同節奏），尚無則今天。"""
+    from datetime import datetime
+
+    return (conn.execute("SELECT MAX(date) FROM signals").fetchone()[0]
+            or datetime.now().strftime("%Y-%m-%d"))
+
+
+def _index_strip(conn) -> tuple[tuple | None, list[float]]:
+    """大盤 strip：回傳 (最新 (date, close) 或 None, 近 10 日漲跌% 舊→新)。"""
+    rows = conn.execute(
+        "SELECT date, close FROM raw_index ORDER BY date DESC LIMIT 11"
+    ).fetchall()
+    closes = [r[1] for r in reversed(rows)]  # 舊→新
+    changes = [round((closes[i] - closes[i - 1]) / closes[i - 1] * 100, 2)
+               for i in range(1, len(closes)) if closes[i - 1] and closes[i]]
+    return (rows[0] if rows else None), changes
+
+
 def _build_cards(stocks, stock_chip: dict, stock_trend: dict, conn) -> list[dict]:
     """把每檔籌碼判讀整理成掃描列卡片（燈號/籌碼傾向/sparkline/趨勢解讀/排序）。"""
     from integration.explain import format_stock_explain
@@ -1013,15 +1042,12 @@ def watchlist_page(request: Request):
 
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
-        index_rows = conn.execute(
-            "SELECT date, close FROM raw_index ORDER BY date DESC LIMIT 11"
-        ).fetchall()
+        index_row, idx_changes = _index_strip(conn)
         stocks = conn.execute(
             "SELECT stock_id, stock_name, added_date, reason "
             "FROM watchlist ORDER BY stock_id"
         ).fetchall()
-        asof = (conn.execute("SELECT MAX(date) FROM signals").fetchone()[0]
-                or datetime.now().strftime("%Y-%m-%d"))
+        asof = _signals_asof(conn)
         stock_chip = {s[0]: load_stock_chip(asof, s[0], conn) for s in stocks}
         # 趨勢獨立於大盤 signals 節奏，用今日為 asof 取最新趨勢（避免 signals job
         # 落後時，剛回補的趨勢被 MAX(signals.date) 夾掉而顯示「資料不可用」）
@@ -1029,12 +1055,8 @@ def watchlist_page(request: Request):
         stock_trend = {s[0]: build_stock_trend_explain(today, s[0], conn) for s in stocks}
         cards = _build_cards(stocks, stock_chip, stock_trend, conn)
 
-    # 大盤 strip：最新收盤 + 近 10 日漲跌% sparkline（index_rows 為新→舊）
-    closes = [r[1] for r in reversed(index_rows)]  # 舊→新
-    idx_changes = [round((closes[i] - closes[i - 1]) / closes[i - 1] * 100, 2)
-                   for i in range(1, len(closes)) if closes[i - 1] and closes[i]]
-    index_latest = ({"close": index_rows[0][1], "date": index_rows[0][0]}
-                    if index_rows else None)
+    index_latest = ({"close": index_row[1], "date": index_row[0]}
+                    if index_row else None)
 
     counts = {
         "all": len(cards),
@@ -1098,9 +1120,7 @@ def stock_detail_page(request: Request, stock_id: str):
         ).fetchone()
         if row is None:
             return RedirectResponse(url="/watchlist", status_code=303)
-        asof = (conn.execute("SELECT MAX(date) FROM signals").fetchone()[0]
-                or datetime.now().strftime("%Y-%m-%d"))
-        chip = load_stock_chip(asof, stock_id, conn)
+        chip = load_stock_chip(_signals_asof(conn), stock_id, conn)
         explain = format_stock_explain(chip)
         foreign_rows = conn.execute(
             "SELECT net_volume FROM raw_chip "
@@ -1112,9 +1132,7 @@ def stock_detail_page(request: Request, stock_id: str):
             "SELECT date, broker_name, category, reasons FROM stock_signals "
             "WHERE stock_id = ? ORDER BY date DESC LIMIT 20", (stock_id,)
         ).fetchall()
-        index_rows = conn.execute(
-            "SELECT close FROM raw_index ORDER BY date DESC LIMIT 11"
-        ).fetchall()
+        index_row, idx_changes = _index_strip(conn)
         # 趨勢獨立於大盤 signals 節奏 → 用今日取最新（與 K線匯入頁一致）
         trend_explain = build_stock_trend_explain(
             datetime.now().strftime("%Y-%m-%d"), stock_id, conn)
@@ -1131,9 +1149,6 @@ def stock_detail_page(request: Request, stock_id: str):
     summary = "；".join(directional) if directional else "三維度目前無明顯方向"
 
     spark = [r[0] for r in reversed(foreign_rows)]
-    closes = [r[0] for r in reversed(index_rows)]  # 舊→新
-    idx_changes = [round((closes[i] - closes[i - 1]) / closes[i - 1] * 100, 2)
-                   for i in range(1, len(closes)) if closes[i - 1] and closes[i]]
 
     signals = [{"date": r[0], "broker_name": r[1], "category": r[2], "reasons": r[3]}
                for r in signal_rows]
@@ -1148,7 +1163,7 @@ def stock_detail_page(request: Request, stock_id: str):
         "foreign_css": foreign.get("css", "flat"),
         "spark_bars": _spark_bars(spark, 520, 104),
         "signals": signals,
-        "index_latest": index_rows[0][0] if index_rows else None,
+        "index_latest": index_row[1] if index_row else None,
         "index_change": idx_changes[-1] if idx_changes else None,
         "index_bars": _spark_bars(idx_changes, 300, 52),
         "trend_explain": trend_explain, "chart": chart, "ohlc_count": ohlc_count,
