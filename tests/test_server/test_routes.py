@@ -188,6 +188,23 @@ class TestPagesWithData:
         assert body["bars"][0]["time"] == "2026-06-10"   # 舊→新
         assert body["bars"][0]["close"] == 905.0
 
+    def test_api_stock_ohlc_adjusted_matches_chart_series(self, client_with_data):
+        """回歸：API 預設回還原價（與頁面K線圖同一序列）；adjusted=false 回原始價。"""
+        db = client_with_data.app.state.db_path
+        conn = sqlite3.connect(db)
+        conn.execute("INSERT INTO raw_stock_daily (stock_id, date, open, high, low, close, volume) "
+                     "VALUES ('2330', '2026-06-12', 450, 450, 450, 450, 1)")  # 一拆二缺口
+        conn.commit()
+        conn.close()
+
+        adj = client_with_data.get("/api/stock/2330/ohlc").json()
+        raw = client_with_data.get("/api/stock/2330/ohlc?adjusted=false").json()
+        assert adj["adjusted"] is True and raw["adjusted"] is False
+        assert raw["bars"][0]["close"] == 905.0
+        assert adj["bars"][0]["close"] < 905.0           # 缺口前價格被回推
+        assert adj["bars"][-1]["close"] == raw["bars"][-1]["close"] == 450
+        assert adj["adjust_note"] and raw["adjust_note"] is None
+
     def test_api_stock_ohlc_empty(self, client_with_data):
         """無日K的代號回空 bars。"""
         body = client_with_data.get("/api/stock/9999/ohlc").json()

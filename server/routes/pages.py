@@ -680,30 +680,19 @@ def _candlestick(bars: list[dict], mas: dict, w: float = 760.0,
 
 
 def _build_stock_chart(conn, stock_id: str, window: int = 120) -> dict | None:
-    """讀 raw_stock_daily、還原股價後算最近 window 根K棒 + MA20/60/240 疊線的 SVG 幾何。"""
-    from collectors.dividend import load_dividend_factors
-    from integration.price_adjust import back_adjust
-    from integration.trend_signal import _sma
+    """讀還原股價（load_adjusted_bars）算最近 window 根K棒 + MA20/60/240 疊線的 SVG 幾何。"""
+    from integration.price_adjust import load_adjusted_bars
+    from integration.trend_signal import sma
 
-    rows = conn.execute(
-        "SELECT date, open, high, low, close FROM raw_stock_daily "
-        "WHERE stock_id = ? AND open IS NOT NULL AND high IS NOT NULL "
-        "      AND low IS NOT NULL AND close IS NOT NULL ORDER BY date ASC",
-        (stock_id,),
-    ).fetchall()
-    if not rows:
+    adjusted, _ = load_adjusted_bars(stock_id, conn)
+    if not adjusted:
         return None
-    bars_raw = [{"date": r[0], "open": r[1], "high": r[2], "low": r[3],
-                 "close": r[4]} for r in rows]
-    rows = back_adjust(bars_raw, load_dividend_factors(conn, stock_id))
-    rows = [(b["date"], b["open"], b["high"], b["low"], b["close"]) for b in rows]
-    closes = [r[4] for r in rows]
-    ma = {"MA20": _sma(closes, 20), "MA60": _sma(closes, 60),
-          "MA240": _sma(closes, 240)}
-    n = len(rows)
+    closes = [b["close"] for b in adjusted]
+    ma = {"MA20": sma(closes, 20), "MA60": sma(closes, 60), "MA240": sma(closes, 240)}
+    n = len(adjusted)
     sl = slice(max(0, n - window), n)
-    bars = [{"date": r[0], "open": r[1], "high": r[2], "low": r[3], "close": r[4]}
-            for r in rows[sl]]
+    bars = [{k: b[k] for k in ("date", "open", "high", "low", "close")}
+            for b in adjusted[sl]]
     return _candlestick(bars, {k: v[sl] for k, v in ma.items()})
 
 

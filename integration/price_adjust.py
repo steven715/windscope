@@ -5,10 +5,14 @@ spec §6.1 要求趨勢層用還原股價。付費還原源（FinMind TaiwanStoc
 1. 分割/大除權：單日收盤變動 > TREND_ADJUST_GAP_PCT（台股 ±10% 漲跌幅限制，>11% 必為
    公司行為）→ factor = close[i]/close[i-1]，把該日之前的價格按比例縮到同一尺度。
 2. 配息（<10%，價格看不出）：用免費 TaiwanStockDividendResult 的 after/before 比例。
-還原價[j] = 原價[j] × （j 之後所有 factor 的累積乘積）。純函數、不寫 DB。
+還原價[j] = 原價[j] × （j 之後所有 factor 的累積乘積）。不寫 DB。
+
+load_adjusted_bars 是「趨勢層眼中的個股價格序列」唯一讀取入口（趨勢訊號、回測、
+K線圖、OHLC API 共用）；load_bars 為其原始價底層；其餘為純函數。
 """
 
 import logging
+import sqlite3
 
 from config import settings
 
@@ -87,3 +91,32 @@ def adjust_note(events: list[dict]) -> str | None:
     last = gaps[-1]
     return (f"已還原公司行為缺口 {len(gaps)} 次"
             f"（最近 {last['date']} ×{last['factor']:.2f}，請核對是否分割/大除權）")
+
+
+def load_bars(stock_id: str, conn: sqlite3.Connection,
+              asof: str | None = None) -> list[dict]:
+    """讀 raw_stock_daily 原始成交價（排除 OHLC 缺值列），舊→新。
+
+    bars = [{date, open, high, low, close, volume}]；asof 給定只取該日（含）以前。
+    """
+    q = ("SELECT date, open, high, low, close, volume "
+         "FROM raw_stock_daily WHERE stock_id = ? AND open IS NOT NULL "
+         "AND high IS NOT NULL AND low IS NOT NULL AND close IS NOT NULL")
+    args: list = [stock_id]
+    if asof:
+        q += " AND date <= ?"
+        args.append(asof)
+    rows = conn.execute(q + " ORDER BY date ASC", args).fetchall()
+    return [{"date": r[0], "open": r[1], "high": r[2], "low": r[3],
+             "close": r[4], "volume": r[5]} for r in rows]
+
+
+def load_adjusted_bars(stock_id: str, conn: sqlite3.Connection,
+                       asof: str | None = None) -> tuple[list[dict], list[dict]]:
+    """讀 K 線並還原，回傳 (bars 舊→新, 還原事件)。asof 給定只取該日以前（回測不看未來）。"""
+    from collectors.dividend import load_dividend_factors
+
+    bars = load_bars(stock_id, conn, asof)
+    if not bars:
+        return [], []
+    return back_adjust_with_events(bars, load_dividend_factors(conn, stock_id))

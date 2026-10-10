@@ -20,7 +20,7 @@ from integration.trend_signal import (
     _hysteresis,
     _position,
     _route,
-    _sma,
+    sma,
     compute_trend_signal,
     evaluate,
 )
@@ -33,12 +33,12 @@ def _bars(closes: list[float]) -> list[dict]:
              "close": c, "volume": 1000} for i, c in enumerate(closes)]
 
 
-# ── 純函式：_sma / _hysteresis ──────────────────────────────────
+# ── 純函式：sma / _hysteresis ──────────────────────────────────
 
 
 class TestPrimitives:
     def test_sma_warmup_then_mean(self):
-        out = _sma([1, 2, 3, 4, 5], 3)
+        out = sma([1, 2, 3, 4, 5], 3)
         assert out[0] is None and out[1] is None
         assert out[2] == 2.0 and out[3] == 3.0 and out[4] == 4.0
 

@@ -261,21 +261,11 @@ def run_and_save(stock_id: str, conn, params: BacktestParams | None = None) -> d
 
     回傳含 run_id 的結果 dict；無K線回 None。（唯讀來源，只寫 backtest_* 表。）
     """
-    rows = conn.execute(
-        "SELECT date, open, high, low, close, volume FROM raw_stock_daily "
-        "WHERE stock_id = ? AND open IS NOT NULL AND high IS NOT NULL "
-        "AND low IS NOT NULL AND close IS NOT NULL ORDER BY date ASC",
-        (stock_id,),
-    ).fetchall()
-    bars = [{"date": r[0], "open": r[1], "high": r[2], "low": r[3], "close": r[4]}
-            for r in rows]
+    from integration.price_adjust import load_adjusted_bars
+    bars, _ = load_adjusted_bars(stock_id, conn)
     if not bars:
         logger.info("run_and_save: no OHLC for %s", stock_id)
         return None
-
-    from collectors.dividend import load_dividend_factors
-    from integration.price_adjust import back_adjust
-    bars = back_adjust(bars, load_dividend_factors(conn, stock_id))
 
     result = run_backtest(bars, params, stock_id=stock_id)
     result["run_id"] = _save_run(conn, result)
