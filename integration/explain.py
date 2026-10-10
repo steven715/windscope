@@ -14,6 +14,13 @@ from pathlib import Path
 
 from config import settings
 from integration.premarket_inputs import SPOT_FROM_INDEX, PremarketInputs, load_premarket_inputs
+from integration.stock_chip import (
+    BrokerReading,
+    ForeignReading,
+    StockChip,
+    ZoneReading,
+    load_stock_chip,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -228,17 +235,8 @@ def _fx_rhythm(date: str, conn: sqlite3.Connection, fx_delta_twd: float | None,
 
 
 # ── 個股籌碼解讀（鏡像大盤 build_explain，供 watchlist 每檔顯示）─────────
-# 維度→原數據(事實)→判讀(綁 signal_engine 既有門檻)→為什麼(觀點，走 explain_notes)。
+# 維度→原數據(事實)→判讀(分類規則在 integration/stock_chip)→為什麼(觀點，走 explain_notes)。
 # 純讀、不寫 DB、不改任何訊號；缺資料的維度優雅顯示「資料不可用」。
-
-# 分類 category → 解讀表 css（多空語意；對敲/隔日沖等警示類走 flat）
-_STOCK_CSS = {
-    "外資連買": "up", "外資大買": "up", "外資連賣": "down", "外資大賣": "down",
-    "bottom_watch": "up", "accumulation": "up",
-    "distribution_warning": "down", "avoid": "down",
-    "fake_volume": "flat", "day_trade_no_chase": "flat",
-}
-
 
 def _fmt_amt(amount: float | None) -> str:
     """金額(元)格式：>=1億用億、>=1萬用萬、否則整數。"""
@@ -251,138 +249,65 @@ def _fmt_amt(amount: float | None) -> str:
     return f"{amount:+,.0f}"
 
 
-def _stock_foreign_row(date, stock_id, conn, notes) -> dict:
-    """外資動向維度（raw_chip __FOREIGN__，復用 signal_engine 連買連賣分類）。"""
-    from integration.signal_engine import _classify_foreign
-
-    rows = conn.execute(
-        "SELECT net_volume FROM raw_chip "
-        "WHERE stock_id = ? AND broker_name = '__FOREIGN__' "
-        "      AND date < ? AND net_volume IS NOT NULL "
-        "ORDER BY date DESC LIMIT 30",
-        (stock_id, date),
-    ).fetchall()
-    if not rows:
+def _stock_foreign_row(f: ForeignReading, notes: dict) -> dict:
+    """外資動向維度。"""
+    if not f.available:
         return _row("外資動向", "尚未取得外資個股買賣超（T86）",
                     "資料不可用", "flat", notes)
-
-    latest_net = rows[0][0]
-    direction = 1 if latest_net > 0 else -1 if latest_net < 0 else 0
-    streak, cum = 0, 0.0
-    if direction != 0:
-        for (net,) in rows:
-            if net is None or net == 0 or (1 if net > 0 else -1) != direction:
-                break
-            streak += 1
-            cum += net
-
-    if streak >= 2:
-        raw = f"連{'買' if direction > 0 else '賣'} {streak} 天，累計 {cum:+,.0f} 張"
+    if f.streak >= settings.FOREIGN_CONSECUTIVE_MIN:
+        raw = f"連{'買' if f.latest_net > 0 else '賣'} {f.streak} 天，累計 {f.cum:+,.0f} 張"
     else:
-        raw = f"前一交易日淨{'買' if latest_net > 0 else '賣'}超 {abs(latest_net):,.0f} 張"
-
-    classified = _classify_foreign(direction, streak, cum, latest_net) if direction else None
-    if classified is None:
+        raw = f"前一交易日淨{'買' if f.latest_net > 0 else '賣'}超 {abs(f.latest_net):,.0f} 張"
+    if f.category is None:
         return _row("外資動向", raw, "外資無明顯方向", "flat", notes)
-    category, reason = classified
-    return _row("外資動向", raw, reason, _STOCK_CSS.get(category, "flat"), notes)
+    return _row("外資動向", raw, f.reason, f.direction, notes)
 
 
-def _stock_broker_row(date, stock_id, conn, notes) -> dict:
-    """主力分點維度（daily_stock_metrics；對敲/隔日沖警示 + 復用 _classify_stock）。"""
-    from integration.signal_engine import _classify_stock
-
-    # 取該股 <= date 最近一個有分點資料的日期（forgiving：剛匯入的也顯示得到）
-    row_date = conn.execute(
-        "SELECT MAX(date) FROM daily_stock_metrics WHERE stock_id = ? AND date <= ?",
-        (stock_id, date),
-    ).fetchone()[0]
-    if row_date is None:
+def _stock_broker_row(b: BrokerReading, date: str, notes: dict) -> dict:
+    """主力分點維度（最顯著的一個分點）。"""
+    if not b.available:
         return _row("主力分點", "尚未匯入分點資料（可用『分點匯入』補）",
                     "資料不可用", "flat", notes)
-
-    rows = conn.execute(
-        "SELECT broker_name, net_amount, consecutive_days, price_zone, "
-        "       both_sides_flag, broker_type "
-        "FROM daily_stock_metrics WHERE stock_id = ? AND date = ?",
-        (stock_id, row_date),
-    ).fetchall()
-
-    # 對每個分點算 (category, reason)，挑最顯著者（有訊號優先，再比 |淨額|）
-    best = None  # (key, broker, net, reason, category)
-    for broker, net, consec, zone, both_sides, btype in rows:
-        if both_sides == 1:
-            cat, reason = "fake_volume", "同分點兩邊都有量，疑似對敲假量，不碰"
-        elif btype == "day_trade" and net is not None and net > 0:
-            cat, reason = "day_trade_no_chase", "隔日沖分點買超，明天多半賣，不追"
-        else:
-            classified = _classify_stock(net, consec, zone)
-            cat, reason = classified if classified else (None, None)
-        key = (1 if cat else 0, abs(net) if net is not None else 0)
-        if best is None or key > best[0]:
-            best = (key, broker, net, reason, cat)
-
-    _, broker, net, reason, cat = best
-    raw = f"{broker} 淨額 {_fmt_amt(net)}"
-    if row_date != date:          # 非當前日的分點：標出資料日期，免得誤以為是最新
-        raw += f"（{row_date}）"
-    if cat is None:
+    raw = f"{b.broker} 淨額 {_fmt_amt(b.net)}"
+    if b.data_date != date:       # 非當前日的分點：標出資料日期，免得誤以為是最新
+        raw += f"（{b.data_date}）"
+    if b.category is None:
         return _row("主力分點", raw, "無明顯分點訊號", "flat", notes)
-    return _row("主力分點", raw, reason, _STOCK_CSS.get(cat, "flat"), notes)
+    return _row("主力分點", raw, b.reason, b.direction, notes)
 
 
 _ZONE_ZH = {"low": "低檔（月線下方）", "consolidation": "盤整（貼近月線）",
             "high": "高檔（月線上方）", "other": "月線上下之間"}
 
 
-def _stock_price_zone_row(date, stock_id, conn, notes) -> dict:
-    """股價位置維度：優先用分點的 daily_stock_metrics；沒有分點時退回 K線趨勢的乖離。
+def _stock_price_zone_row(z: ZoneReading, notes: dict) -> dict:
+    """股價位置維度（分點指標優先，無分點時由 K線還原後乖離補）。"""
+    if not z.available:
+        return _row("股價位置", "尚無股價位置資料（回補K線即可算）", "資料不可用", "flat", notes)
+    if z.from_kline:
+        return _row("股價位置", f"股價 vs 月線 {z.pct:+.1f}%（由K線還原後算）",
+                    _ZONE_ZH.get(z.zone, "—"), "flat", notes)
+    return _row("股價位置", f"股價 vs MA20 {z.pct:+.1f}%",
+                _ZONE_ZH.get(z.zone, z.zone or "—"), "flat", notes)
 
-    股價位置本質＝收盤對月線 MA20 的乖離，一定能從 K線（還原後）算出，故無分點資料時
-    以 stock_trend_signals.bias_pct（還原後對 MA20 乖離）補上。
+
+def format_stock_explain(chip: StockChip) -> list[dict]:
+    """把籌碼判讀排成個股解讀表（外資動向／主力分點／股價位置），鏡像大盤 build_explain。
+
+    每維度回 {dim, raw, verdict, css, why}；觀點走 explain_notes。
     """
-    row = conn.execute(
-        "SELECT price_vs_ma20, price_zone FROM daily_stock_metrics "
-        "WHERE stock_id = ? AND date <= ? AND price_vs_ma20 IS NOT NULL "
-        "ORDER BY date DESC LIMIT 1",
-        (stock_id, date),
-    ).fetchone()
-    if row is not None and row[0] is not None:
-        pct, zone = row
-        return _row("股價位置", f"股價 vs MA20 {pct:+.1f}%",
-                    _ZONE_ZH.get(zone, zone or "—"), "flat", notes)
-
-    # 退回 K線趨勢的乖離（bias_pct 是還原後對 MA20 的乖離，比例）
-    trow = conn.execute(
-        "SELECT bias_pct FROM stock_trend_signals "
-        "WHERE stock_id = ? AND date <= ? AND bias_pct IS NOT NULL "
-        "ORDER BY date DESC LIMIT 1",
-        (stock_id, date),
-    ).fetchone()
-    if trow is not None and trow[0] is not None:
-        from integration.chip_metrics import _classify_price_zone
-
-        pct = trow[0] * 100
-        zone = _classify_price_zone(pct)
-        return _row("股價位置", f"股價 vs 月線 {pct:+.1f}%（由K線還原後算）",
-                    _ZONE_ZH.get(zone, "—"), "flat", notes)
-
-    return _row("股價位置", "尚無股價位置資料（回補K線即可算）", "資料不可用", "flat", notes)
+    notes = _load_notes()
+    return [
+        _stock_foreign_row(chip.foreign, notes),
+        _stock_broker_row(chip.broker, chip.date, notes),
+        _stock_price_zone_row(chip.zone, notes),
+    ]
 
 
 def build_stock_explain(date: str, stock_id: str,
                         conn: sqlite3.Connection) -> list[dict]:
-    """組出個股籌碼解讀表（外資動向／主力分點／股價位置），鏡像大盤 build_explain。
-
-    每維度回 {dim, raw, verdict, css, why}。純讀不寫；判讀復用 signal_engine 門檻、
-    觀點走 explain_notes；缺資料的維度顯示「資料不可用」。
-    """
-    notes = _load_notes()
-    return [
-        _stock_foreign_row(date, stock_id, conn, notes),
-        _stock_broker_row(date, stock_id, conn, notes),
-        _stock_price_zone_row(date, stock_id, conn, notes),
-    ]
+    """組出個股籌碼解讀表（讀 load_stock_chip 再排版）。純讀不寫。"""
+    return format_stock_explain(load_stock_chip(date, stock_id, conn))
 
 
 # ── 個股趨勢解讀（技術面 + 基本面預留）──────────────────────────

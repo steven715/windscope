@@ -9,6 +9,7 @@ import sqlite3
 from datetime import datetime
 
 from config import settings
+from integration.stock_chip import classify_broker, classify_foreign, foreign_streak
 
 logger = logging.getLogger(__name__)
 
@@ -148,21 +149,6 @@ def compute_market_signal(date: str, conn: sqlite3.Connection) -> dict | None:
     return result
 
 
-def _classify_foreign(direction: int, streak: int, cum: float,
-                      latest_net: float) -> tuple[str, str] | None:
-    """外資流向分類。回傳 (category, reason) 或 None。"""
-    buy = direction > 0
-    if streak >= settings.FOREIGN_CONSECUTIVE_MIN and abs(cum) >= settings.FOREIGN_CUM_NET_MIN:
-        if buy:
-            return "外資連買", f"外資連買 {streak} 天（累計 {cum:,.0f} 張），值得觀察，站回月線才進"
-        return "外資連賣", f"外資連賣 {streak} 天（累計 {abs(cum):,.0f} 張），籌碼轉弱"
-    if abs(latest_net) >= settings.FOREIGN_BIG_NET:
-        if buy:
-            return "外資大買", f"外資單日大買 {latest_net:,.0f} 張（反手買，僅觀察，站回月線才進）"
-        return "外資大賣", f"外資單日大賣 {abs(latest_net):,.0f} 張"
-    return None
-
-
 def compute_foreign_stock_signals(date: str, conn: sqlite3.Connection) -> list[dict]:
     """用 T86 每檔外資買賣超（raw_chip __FOREIGN__）產生個股觀察訊號，寫入 stock_signals。
 
@@ -181,32 +167,15 @@ def compute_foreign_stock_signals(date: str, conn: sqlite3.Connection) -> list[d
     now = datetime.now().isoformat()
 
     for (stock_id,) in watch:
-        rows = conn.execute(
-            "SELECT net_volume FROM raw_chip "
-            "WHERE stock_id = ? AND broker_name = '__FOREIGN__' "
-            "      AND date < ? AND net_volume IS NOT NULL "
-            "ORDER BY date DESC LIMIT 30",
-            (stock_id, date),
-        ).fetchall()
-        if not rows:
+        s = foreign_streak(conn, stock_id, date)
+        if s is None:
             continue
-        latest_net = rows[0][0]
+        latest_net, streak, cum = s
         direction = 1 if latest_net > 0 else -1 if latest_net < 0 else 0
         if direction == 0:
             continue
 
-        streak = 0
-        cum = 0.0
-        for (net,) in rows:
-            if net is None or net == 0:
-                break
-            if (1 if net > 0 else -1) == direction:
-                streak += 1
-                cum += net
-            else:
-                break
-
-        classified = _classify_foreign(direction, streak, cum, latest_net)
+        classified = classify_foreign(direction, streak, cum, latest_net)
         if classified is None:
             continue
         category, reason = classified
@@ -230,32 +199,6 @@ def compute_foreign_stock_signals(date: str, conn: sqlite3.Connection) -> list[d
     return results
 
 
-def _classify_stock(net_amount: float | None, consecutive: int | None,
-                    price_zone: str | None) -> tuple[str, str] | None:
-    """個股訊號分類，回傳 (category, reason) 或 None（不產生訊號）。"""
-    consecutive = consecutive or 0
-
-    # 連賣
-    if consecutive <= -settings.STOCK_CONSECUTIVE_MIN:
-        return "avoid", f"分點連賣 {abs(consecutive)} 天"
-
-    # 連買但金額不足或天數不足
-    if consecutive < settings.STOCK_CONSECUTIVE_MIN:
-        return None
-    if net_amount is None or net_amount < settings.STOCK_NET_AMOUNT_MIN:
-        return None
-
-    amount_str = f"{net_amount / 1e8:.2f}億" if net_amount >= 1e8 else f"{net_amount / 1e4:.0f}萬"
-
-    if price_zone == "low":
-        return "bottom_watch", f"低檔連買 {consecutive} 天（{amount_str}），主力摸底"
-    if price_zone == "high":
-        return "distribution_warning", f"高檔連買 {consecutive} 天（{amount_str}），慎防出貨"
-    if price_zone == "consolidation" and consecutive >= settings.STOCK_ACCUMULATION_MIN:
-        return "accumulation", f"盤整區連買 {consecutive} 天（{amount_str}），主力吸籌"
-    return None
-
-
 def compute_stock_signals(date: str, conn: sqlite3.Connection) -> list[dict]:
     """從 daily_stock_metrics 計算個股觀察訊號，寫入 stock_signals。"""
     rows = conn.execute(
@@ -275,17 +218,12 @@ def compute_stock_signals(date: str, conn: sqlite3.Connection) -> list[dict]:
     for (stock_id, broker_name, net_amount, consecutive,
          price_zone, both_sides, broker_type) in rows:
 
-        # 過濾 1：對敲假量，直接標不碰
-        if both_sides == 1:
-            category, reason = "fake_volume", "同分點買賣兩邊都有量，疑似對敲假量，不碰"
-        # 過濾 2：隔日沖分點買超，標不追
-        elif broker_type == "day_trade" and net_amount is not None and net_amount > 0:
-            category, reason = "day_trade_no_chase", "隔日沖分點買超，明天九成會賣，不追"
-        else:
-            classified = _classify_stock(net_amount, consecutive, price_zone)
-            if classified is None:
-                continue
-            category, reason = classified
+        # 對敲 → 隔日沖 → 連買連賣×價位（規則在 integration/stock_chip）
+        classified = classify_broker(net_amount, consecutive, price_zone,
+                                     both_sides, broker_type)
+        if classified is None:
+            continue
+        category, reason = classified
 
         signal = {
             "date": date,
