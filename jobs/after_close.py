@@ -38,31 +38,31 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
 
     with get_connection(db_path) as conn:
         # 1. TWSE: 加權指數收盤價（spot_close）——隔日 after_night 算期貨夜盤缺口的基準
-        ok, err = run_step("twse_spot_close", lambda: _collect_twse_spot_close(date, conn))
+        ok, err = run_step("twse_spot_close", lambda: _collect_twse_spot_close(date, db_path))
         results["twse_spot_close"] = ok
         if err:
             errors.append(err)
 
         # 2. TWSE: 三大法人買賣超
-        ok, err = run_step("twse_institutional", lambda: _collect_twse_institutional(date, conn))
+        ok, err = run_step("twse_institutional", lambda: _collect_twse_institutional(date, db_path))
         results["twse_institutional"] = ok
         if err:
             errors.append(err)
 
         # 3. TWSE: 外資個股買賣超（watchlist）
-        ok, err = run_step("twse_foreign_stock", lambda: _collect_twse_foreign_stock(date, conn))
+        ok, err = run_step("twse_foreign_stock", lambda: _collect_twse_foreign_stock(date, db_path))
         results["twse_foreign_stock"] = ok
         if err:
             errors.append(err)
 
         # 4. TWSE: 除息預估點數
-        ok, err = run_step("twse_ex_dividend", lambda: _collect_twse_ex_dividend(date, conn))
+        ok, err = run_step("twse_ex_dividend", lambda: _collect_twse_ex_dividend(date, db_path))
         results["twse_ex_dividend"] = ok
         if err:
             errors.append(err)
 
         # 5. TAIFEX: 外資期貨未平倉
-        ok, err = run_step("taifex_oi", lambda: _collect_taifex_oi(date, conn))
+        ok, err = run_step("taifex_oi", lambda: _collect_taifex_oi(date, db_path))
         results["taifex_oi"] = ok
         if err:
             errors.append(err)
@@ -82,11 +82,11 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
 # ── 內部步驟函式 ─────────────────────────────────────────────────
 
 
-def _collect_twse_spot_close(date: str, conn: sqlite3.Connection) -> bool:
+def _collect_twse_spot_close(date: str, db_path: str | None) -> bool:
     """收集加權指數收盤價。"""
     from collectors.twse import TWSECollector
 
-    c = TWSECollector()
+    c = TWSECollector(db_path=db_path)
     data = c.collect_spot_close(date)
     if data is None:
         return False
@@ -94,11 +94,11 @@ def _collect_twse_spot_close(date: str, conn: sqlite3.Connection) -> bool:
     return True
 
 
-def _collect_twse_institutional(date: str, conn: sqlite3.Connection) -> bool:
+def _collect_twse_institutional(date: str, db_path: str | None) -> bool:
     """收集三大法人買賣超。"""
     from collectors.twse import TWSECollector
 
-    c = TWSECollector()
+    c = TWSECollector(db_path=db_path)
     data = c.collect_institutional(date)
     if data is None:
         return False
@@ -106,11 +106,11 @@ def _collect_twse_institutional(date: str, conn: sqlite3.Connection) -> bool:
     return True
 
 
-def _collect_twse_foreign_stock(date: str, conn: sqlite3.Connection) -> bool:
+def _collect_twse_foreign_stock(date: str, db_path: str | None) -> bool:
     """收集外資個股買賣超（watchlist）。"""
     from collectors.twse import TWSECollector
 
-    c = TWSECollector()
+    c = TWSECollector(db_path=db_path)
     data = c.collect_foreign_stock(date)
     if data is None:
         return False
@@ -118,11 +118,11 @@ def _collect_twse_foreign_stock(date: str, conn: sqlite3.Connection) -> bool:
     return True
 
 
-def _collect_twse_ex_dividend(date: str, conn: sqlite3.Connection) -> bool:
+def _collect_twse_ex_dividend(date: str, db_path: str | None) -> bool:
     """收集除息預估點數。"""
     from collectors.twse import TWSECollector
 
-    c = TWSECollector()
+    c = TWSECollector(db_path=db_path)
     data = c.collect_ex_dividend_points(date)
     if data is None:
         return False
@@ -130,11 +130,11 @@ def _collect_twse_ex_dividend(date: str, conn: sqlite3.Connection) -> bool:
     return True
 
 
-def _collect_taifex_oi(date: str, conn: sqlite3.Connection) -> bool:
+def _collect_taifex_oi(date: str, db_path: str | None) -> bool:
     """收集外資期貨未平倉。"""
     from collectors.taifex import TAIFEXCollector
 
-    c = TAIFEXCollector()
+    c = TAIFEXCollector(db_path=db_path)
     data = c.collect_oi_foreign(date)
     if data is None:
         return False

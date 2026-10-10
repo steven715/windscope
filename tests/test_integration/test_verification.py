@@ -33,16 +33,10 @@ def _insert_index(conn, date, open_=None, close=None):
     )
 
 
-def _insert_prev_marker(conn, date="2026-06-11"):
-    """讓 get_previous_trading_day 能從 raw_futures 找到前一交易日。"""
-    conn.execute("INSERT INTO raw_futures (date) VALUES (?)", (date,))
-
-
 @pytest.fixture
 def db_ready():
-    """前一日收盤 43000、有前日 marker 的 DB。"""
+    """前一交易日（6/11）收盤 43000 的 DB。"""
     conn = _make_db()
-    _insert_prev_marker(conn, "2026-06-11")
     _insert_index(conn, "2026-06-11", open_=42900.0, close=43000.0)
     return conn
 
@@ -122,10 +116,18 @@ class TestVerifySignal:
     def test_no_prev_close_returns_none(self):
         """前一交易日無 raw_index 收盤 → None。"""
         conn = _make_db()
-        _insert_prev_marker(conn, "2026-06-11")  # 有 marker 但無 index
         _insert_signal(conn)
         _insert_index(conn, "2026-06-12", open_=43300.0, close=43400.0)
         assert verify_signal("2026-06-12", conn) is None
+
+    def test_prev_day_missing_not_stale(self):
+        """回歸 2026-07-17：前一交易日 07-16 漏收 → 不驗證（None），不拿 07-14 收盤比。"""
+        conn = _make_db()
+        conn.execute("INSERT INTO raw_futures (date) VALUES ('2026-07-14')")
+        _insert_index(conn, "2026-07-14", open_=45364.4, close=44737.95)
+        _insert_signal(conn, date="2026-07-17", direction="bearish")
+        _insert_index(conn, "2026-07-17", open_=45234.08, close=42671.27)
+        assert verify_signal("2026-07-17", conn) is None
 
     def test_idempotent_reverify(self, db_ready):
         """重複驗證同一天覆蓋舊值，不會多一筆。"""

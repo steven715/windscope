@@ -142,6 +142,7 @@
 | 更新時間 | 每年初公告整年；本系統 server 啟動時抓一次，之後每月 1 日 06:00 再抓（`refresh_holidays` 排程，非每日情報 job） |
 | 狀態 | ✅ VERIFIED（2026-06-19 真實回應驗證，fixture: `holiday_schedule_2026.json`，27 筆） |
 | 備註 | `Date` 為**民國年 YYYMMDD**（如 `1150619` = 2026-06-19），解析時 `int(date[:3]) + 1911`。**注意：表中混有「交易日通知」**——名稱含「開始交易」或「最後交易」者（如「國曆新年開始交易日」「農曆春節前最後交易日」）是開市日不是休市日，parser 必須排除；其餘（含補假、「市場無交易僅辦理結算交割作業」）皆為休市日。27 筆扣除 3 筆交易日通知 → 24 筆休市日。存入 `market_holidays` 表（PK=date），快取於 `utils/trading_calendar`。|
+| 已知缺口 | **前一交易日只依此表＋週末判斷**（不看哪天有資料）。(1) 颱風等臨時休市若不在表內，會被當交易日 → 其次一交易日缺基準、盤前判斷降級中性（安全但不準）；TWSE 事後是否補列臨時休市未驗證。(2) 某年完全無休市資料（如年初尚未公告）時退回僅排除週末，並記 WARNING（每年一次）。|
 
 ---
 
@@ -227,7 +228,7 @@
 | 更新時間 | 離岸盤近 24h 連續報價；before_open（08:50）收當晨最近 `FX_INTRADAY_BARS` 根 |
 | 狀態 | ✅ VERIFIED（2026-06-30 真實回應驗證，含 `meta.regularMarketPrice`） |
 | ⚠️ 關鍵發現（2026-06-30） | **在岸台銀 08:45 牌價在開盤前未更新＝前一日收盤**：實測 2026-06-16～22 的 `quote_0845` 逐日精準等於前一日 `close_16`，隔夜 delta 結構性≈0，FX 維度等於從未投票（9/9 neutral）。同晨離岸 USDTWD=X 卻已反映夜盤美元變動（如 06-16 在岸 31.485 vs 離岸 ~31.57）。故 **TWD 隔夜 delta 改用離岸「晨對晨」**：`今晨最後一根 − 前一交易日晨間最後一根`（兩者皆 `intraday_fx`，同來源、同時點可比）。在岸 `quote_0845`/`close_16` 仍續收（顯示參考、CNY/KRW 與日圓溫度計仍用），但不再驅動 TWD 投票。 |
-| 備註 | 門檻 `FX_THRESHOLD_TWD` 隨之 0.1→0.05（實測晨對晨 \|delta\| 多落在 0.001–0.128）；屬訊號語意變更，已 bump `SIGNAL_RULE_VERSION` v2→v3。日線 bar（`interval=1d`）會缺日（如 06-26 不出現），故不採「最後一根日線」當前收，改用我們穩定每晨收的 5 分序列。helper：`integration/fx_metrics.offshore_twd_morning()`。**回補限制**：`intraday_fx` 只能即時收（離岸無歷史回補），故歷史 backfill 的 TWD delta 仍為 None（與在岸 `quote_0845` 無法回補同性質，屬正常）。 |
+| 備註 | 門檻 `FX_THRESHOLD_TWD` 隨之 0.1→0.05（實測晨對晨 \|delta\| 多落在 0.001–0.128）；屬訊號語意變更，已 bump `SIGNAL_RULE_VERSION` v2→v3。日線 bar（`interval=1d`）會缺日（如 06-26 不出現），故不採「最後一根日線」當前收，改用我們穩定每晨收的 5 分序列。讀取入口：`integration/premarket_inputs.load_premarket_inputs()`（`twd_offshore_today`/`twd_offshore_prev`）。**回補限制**：`intraday_fx` 只能即時收（離岸無歷史回補），故歷史 backfill 的 TWD delta 仍為 None（與在岸 `quote_0845` 無法回補同性質，屬正常）。 |
 
 ---
 
@@ -340,3 +341,4 @@
 | 2026-06-12 | 補齊三個 STUB：(1) 外資 OI 實測接通（futContractsDateDown，VERIFIED），順帶發現並修正夜盤端點錯誤（futContractsDateDown→futDataDown）；(2) 分點：TWT43U 實測為自營商彙總表非分點、bsr 有 CAPTCHA → 標 BLOCKED，自動來源改接 FinMind（PARTIAL，需 Sponsor token，環境變數 `FINMIND_TOKEN`）；(3) S&P 500 ^GSPC 實測接通（VERIFIED）。|
 | 2026-06-15 | 台銀匯率 CSV 修正：UTF-8 BOM + 台銀改 flcsv 格式（即期買入＝第一個「即期」欄），修正前對 live 資料 100% 失效（見 3.1）。新增 MIS 盤中即時加權指數（1.2c，VERIFIED），供 `/live` 盤中即時驗證觀察。|
 | 2026-06-30 | **TWD 隔夜 delta 改用離岸 USDTWD=X 晨對晨**（新增 3.4）：發現在岸 08:45 牌價開盤前＝前收、delta≈0，FX 維度從未投票。改用 `intraday_fx` 離岸晨對晨，門檻 0.1→0.05，bump `SIGNAL_RULE_VERSION` v2→v3。在岸 `quote_0845`/`close_16` 仍續收（顯示／CNY・KRW／日圓溫度計用）。另修：verify_close 新增 `backfill_unverified` 自癒步驟，補回因指數延遲發布而漏驗的訊號日（如 06-25）。|
+| 2026-10-09 | 交易日曆改為純日曆：`get_previous_trading_day` 移除「從 raw_futures/raw_institutional 有資料的日子推導」捷徑（07-17 因 07-15/16 停機漏收而誤用 07-14 當基準），漏收改由下游當缺料降級；新增 1.6「已知缺口」。|

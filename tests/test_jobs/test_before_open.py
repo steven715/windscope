@@ -78,7 +78,12 @@ def test_before_open_holiday_collects_fx_skips_signal(memory_db, monkeypatch):
         calls.append(name)
         return True, None
 
+    def mock_step_value(name, fn):
+        calls.append(name)
+        return fn(), None
+
     monkeypatch.setattr(before_open, "run_step", mock_step)
+    monkeypatch.setattr(before_open, "run_step_value", mock_step_value)
 
     memory_db.execute(
         "INSERT INTO daily_metrics (date, fx_delta_twd, fx_direction) "
@@ -139,13 +144,14 @@ def test_before_open_trading_no_signal_notifies(memory_db, monkeypatch):
 
     monkeypatch.setattr(before_open, "is_trading_day", lambda d: True)
 
-    def mock_step(name, fn):
-        # 訊號步驟失敗、其餘成功 → signal_produced=False（該有訊號卻沒有）
+    def mock_step_value(name, fn):
+        # 訊號步驟失敗、其餘照跑 → signal_produced=False（該有訊號卻沒有）
         if name == "signal":
-            return False, "signal: no data"
-        return True, None
+            return None, "signal: no data"
+        return fn(), None
 
-    monkeypatch.setattr(before_open, "run_step", mock_step)
+    monkeypatch.setattr(before_open, "run_step", lambda name, fn: (True, None))
+    monkeypatch.setattr(before_open, "run_step_value", mock_step_value)
 
     called = {}
     monkeypatch.setattr(before_open, "notify",
@@ -180,9 +186,11 @@ def test_before_open_signal_produced_no_notify(memory_db, monkeypatch):
 
     monkeypatch.setattr(before_open, "is_trading_day", lambda d: True)
     monkeypatch.setattr(before_open, "run_step", lambda name, fn: (True, None))
-    # signal step ok 後，before_open 會再呼叫 compute_market_signal 取得 signal 物件
-    monkeypatch.setattr(se, "compute_market_signal",
-                        lambda date, conn: {"direction": "bullish", "confidence": 3})
+    # 訊號步驟直接帶回 signal 物件（不再二次呼叫 compute_market_signal）
+    monkeypatch.setattr(
+        before_open, "run_step_value",
+        lambda name, fn: ({"direction": "bullish", "confidence": 3}, None)
+        if name == "signal" else (fn(), None))
     monkeypatch.setattr(se, "format_signal_text", lambda signal: "")
 
     called = {}
@@ -251,3 +259,49 @@ def test_before_open_weekend_emits_no_event(memory_db, monkeypatch):
     assert result["status"] == "skipped"
     assert not [e for e in h.events if e.get("event") == "job_completed"]
     assert "args" not in called
+
+
+def test_before_open_computes_signal_and_summary_once(memory_db, monkeypatch):
+    """回歸：訊號與摘要各只計算一次（舊版 step 成功後又各呼叫一次、寫入路徑跑兩次）。"""
+    from jobs import before_open
+    import integration.signal_engine as se
+    import integration.summary as su
+
+    monkeypatch.setattr(before_open, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(before_open, "notify", lambda title, msg: None)
+    counts = {"signal": 0, "summary": 0}
+
+    def fake_signal(date, conn):
+        counts["signal"] += 1
+        return {"direction": "bullish", "confidence": 3}
+
+    def fake_summary(date, conn):
+        counts["summary"] += 1
+        return "摘要"
+
+    monkeypatch.setattr(se, "compute_market_signal", fake_signal)
+    monkeypatch.setattr(se, "compute_stock_signals", lambda date, conn: None)
+    monkeypatch.setattr(se, "compute_foreign_stock_signals", lambda date, conn: None)
+    monkeypatch.setattr(se, "format_signal_text", lambda signal: "訊號")
+    monkeypatch.setattr(su, "generate_daily_summary", fake_summary)
+
+    # 不 mock run_step（要真的跑步驟函式才驗得出重複呼叫）；FX collector 換成全回 None 的假物件
+    import collectors.fx as fx
+
+    class FakeFX:
+        def __init__(self, db_path=None):
+            pass
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    monkeypatch.setattr(fx, "FXCollector", FakeFX)
+
+    with patch("jobs.before_open.get_connection") as mock_conn:
+        mock_conn.return_value.__enter__ = lambda s: memory_db
+        mock_conn.return_value.__exit__ = lambda s, *a: None
+        result = before_open.run_before_open("2026-04-08")
+
+    assert counts == {"signal": 1, "summary": 1}
+    assert result["summary"] == "摘要\n訊號"
+    assert result["results"]["signal"] is True

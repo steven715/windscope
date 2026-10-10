@@ -31,7 +31,7 @@ def run_chip_collect(date: str, db_path: str | None = None) -> dict:
 
     with get_connection(db_path) as conn:
         # 1. TWSE: 個股收盤價（watchlist）——寫 __PRICE_ONLY__ 列供 MA20/價位計算
-        ok, err = run_step("twse_stock_close", lambda: _collect_twse_stock_close(date, conn))
+        ok, err = run_step("twse_stock_close", lambda: _collect_twse_stock_close(date, db_path))
         results["twse_stock_close"] = ok
         if err:
             errors.append(err)
@@ -39,7 +39,7 @@ def run_chip_collect(date: str, db_path: str | None = None) -> dict:
         # 2. Chip: 分點進出（FinMind）。未設 FINMIND_TOKEN 時整步跳過、不計為失敗
         #    （分點自動源需付費 token；可改用 /chip-import 手動匯入）。
         if settings.FINMIND_TOKEN:
-            ok, err = run_step("chip", lambda: _collect_chip(date, conn))
+            ok, err = run_step("chip", lambda: _collect_chip(date, db_path))
             results["chip"] = ok
             if err:
                 errors.append(err)
@@ -60,11 +60,11 @@ def run_chip_collect(date: str, db_path: str | None = None) -> dict:
 # ── 內部步驟函式 ─────────────────────────────────────────────────
 
 
-def _collect_twse_stock_close(date: str, conn: sqlite3.Connection) -> bool:
+def _collect_twse_stock_close(date: str, db_path: str | None) -> bool:
     """收集個股收盤價（watchlist）。"""
     from collectors.twse import TWSECollector
 
-    c = TWSECollector()
+    c = TWSECollector(db_path=db_path)
     data = c.collect_all_stock_close(date)
     if not data:
         return False
@@ -72,11 +72,11 @@ def _collect_twse_stock_close(date: str, conn: sqlite3.Connection) -> bool:
     return True
 
 
-def _collect_chip(date: str, conn: sqlite3.Connection) -> bool:
+def _collect_chip(date: str, db_path: str | None) -> bool:
     """收集分點進出（FinMind 自動來源，未設 token 時回 False 但不報錯）。"""
     from collectors.chip import ChipCollector
 
-    c = ChipCollector()
+    c = ChipCollector(db_path=db_path)
     data = c.collect_broker_trading(date)
     if data is None:
         return False

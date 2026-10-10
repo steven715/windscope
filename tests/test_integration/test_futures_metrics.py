@@ -265,3 +265,15 @@ class TestFuturesWriteToDb:
         ).fetchone()
         assert row[0] == pytest.approx(-0.15)  # preserved
         assert row[1] == pytest.approx(100.0)
+
+
+def test_spread_none_when_prev_day_missing_not_stale(fut_db):
+    """回歸 2026-07-17：07-15/16 停機漏收，前一交易日 07-16 無基準 → spread 為 None，
+    不可退回 07-14（三天前）的現貨收盤當基準。"""
+    fut_db.execute("INSERT INTO raw_futures (date, spot_close) VALUES ('2026-07-14', 44737.95)")
+    fut_db.execute("INSERT INTO raw_index (date, close) VALUES ('2026-07-14', 44737.95)")
+    fut_db.execute("INSERT INTO raw_futures (date, night_close) VALUES ('2026-07-17', 44715.0)")
+    fut_db.commit()
+    m = compute_futures_metrics("2026-07-17", fut_db)
+    assert m is not None
+    assert m["futures_spread"] is None

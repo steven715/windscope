@@ -75,7 +75,7 @@ def verify_signal(date: str, conn: sqlite3.Connection) -> dict | None:
         return None
     open_price, close_price = index_row
 
-    prev_day = get_previous_trading_day(date, conn)
+    prev_day = get_previous_trading_day(date)
     prev_row = None
     if prev_day:
         prev_row = conn.execute(

@@ -15,8 +15,7 @@ def _setup_db(tmp_path) -> str:
     db_path = str(tmp_path / "test.db")
     conn = sqlite3.connect(db_path)
     create_all_tables(conn)
-    # 前一交易日 marker + 指數收盤
-    conn.execute("INSERT INTO raw_futures (date) VALUES ('2026-06-11')")
+    # 前一交易日（6/11）指數收盤
     conn.execute(
         "INSERT INTO raw_index (date, open, close) VALUES ('2026-06-11', 42900, 43000)"
     )
@@ -90,12 +89,11 @@ def test_skips_non_trading_day(tmp_path):
     assert result["results"] == {}
 
 
-def _db_prev_marker(tmp_path, with_prev_index: bool) -> str:
-    """建立 DB：前一交易日 marker（raw_futures 6/12），可選是否含 raw_index 基準。"""
+def _db_prev_index(tmp_path, with_prev_index: bool) -> str:
+    """建立 DB：可選是否含前一交易日（6/12）的 raw_index 基準。"""
     db_path = str(tmp_path / "b.db")
     conn = sqlite3.connect(db_path)
     create_all_tables(conn)
-    conn.execute("INSERT INTO raw_futures (date) VALUES ('2026-06-12')")
     if with_prev_index:
         conn.execute(
             "INSERT INTO raw_index (date, open, close) "
@@ -109,7 +107,7 @@ def _db_prev_marker(tmp_path, with_prev_index: bool) -> str:
 class TestEnsurePrevBaseline:
     def test_present_skips_backfill(self, tmp_path):
         """前日基準已存在 → 回 True 且不打網路。"""
-        db_path = _db_prev_marker(tmp_path, with_prev_index=True)
+        db_path = _db_prev_index(tmp_path, with_prev_index=True)
         with patch("collectors.twse.TWSECollector.collect_index_ohlc") as m:
             ok = _ensure_prev_index_baseline("2026-06-15", db_path)
         assert ok is True
@@ -117,7 +115,7 @@ class TestEnsurePrevBaseline:
 
     def test_backfills_when_missing(self, tmp_path):
         """前日基準缺失 → 從 MI_5MINS_HIST 補上並寫入 raw_index。"""
-        db_path = _db_prev_marker(tmp_path, with_prev_index=False)
+        db_path = _db_prev_index(tmp_path, with_prev_index=False)
         ohlc = {"open": 43587.0, "high": 44798.0, "low": 43587.0, "close": 44169.04}
         with patch("collectors.twse.TWSECollector.collect_index_ohlc",
                    return_value=ohlc) as m:
@@ -132,7 +130,7 @@ class TestEnsurePrevBaseline:
 
     def test_returns_false_when_backfill_unavailable(self, tmp_path):
         """前日缺失且補不到（假日/無資料）→ 回 False，不報錯。"""
-        db_path = _db_prev_marker(tmp_path, with_prev_index=False)
+        db_path = _db_prev_index(tmp_path, with_prev_index=False)
         with patch("collectors.twse.TWSECollector.collect_index_ohlc",
                    return_value=None):
             ok = _ensure_prev_index_baseline("2026-06-15", db_path)

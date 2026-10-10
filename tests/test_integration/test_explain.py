@@ -97,7 +97,6 @@ def test_jpy_riskoff_flagged():
     conn = sqlite3.connect(":memory:")
     create_all_tables(conn)
     conn.execute("INSERT INTO daily_metrics (date, fx_direction) VALUES ('2026-06-17', 'neutral')")
-    conn.execute("INSERT INTO raw_futures (date, spot_close) VALUES ('2026-06-16', 45000)")  # 讓 prev_day=6/16
     conn.execute("INSERT INTO raw_fx (date, currency_pair, close_16) VALUES ('2026-06-16', 'USD/JPY', 150.0)")
     conn.execute("INSERT INTO raw_fx (date, currency_pair, quote_0845) VALUES ('2026-06-17', 'USD/JPY', 148.5)")
     conn.commit()

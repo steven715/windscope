@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 
 from db.connection import get_connection
-from jobs.helpers import determine_status, run_step
+from jobs.helpers import determine_status, run_step, run_step_value
 from utils.logger import log_event
 from utils.notify import notify
 from utils.trading_calendar import is_trading_day
@@ -60,7 +60,7 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
                 errors.append(err)
 
         # 3b. FX: 盤前 5 分序列（升貶節奏用，Yahoo 離岸報價）
-        ok, err = run_step("fx_intraday", lambda: _collect_fx_intraday(date, conn))
+        ok, err = run_step("fx_intraday", lambda: _collect_fx_intraday(date, db_path))
         results["fx_intraday"] = ok
         if err:
             errors.append(err)
@@ -74,25 +74,20 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
         # 5. Layer 3: 市場訊號 + 個股觀察訊號（休市日跳過，不寫 signals 表）
         signal = None
         if trading:
-            ok, err = run_step("signal", lambda: _compute_signals(date, conn))
-            if ok:
-                from integration.signal_engine import compute_market_signal
-                signal = compute_market_signal(date, conn)
-            results["signal"] = ok
+            signal, err = run_step_value("signal", lambda: _compute_signals(date, conn))
+            results["signal"] = signal is not None
             if err:
                 errors.append(err)
 
         # 6. 產出 daily summary 文字摘要（交易日附訊號區塊；休市日只更新匯率統計）
-        ok, err = run_step("summary", lambda: _generate_summary(date, conn))
-        if ok:
-            from integration.summary import generate_daily_summary
-            summary_text = generate_daily_summary(date, conn)
-            if summary_text and signal:
+        summary_text, err = run_step_value("summary", lambda: _generate_summary(date, conn))
+        if summary_text:
+            if signal:
                 from integration.signal_engine import format_signal_text
                 summary_text = summary_text + "\n" + format_signal_text(signal)
-            if summary_text and not trading:
+            if not trading:
                 summary_text = f"📅 {date} 台股休市，僅更新匯率統計\n" + summary_text
-        results["summary"] = ok
+        results["summary"] = summary_text is not None
         if err:
             errors.append(err)
 
@@ -130,11 +125,11 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
 # ── 內部步驟函式 ─────────────────────────────────────────────────
 
 
-def _collect_fx_intraday(date: str, conn: sqlite3.Connection) -> bool:
+def _collect_fx_intraday(date: str, db_path: str | None) -> bool:
     """收集 USD/TWD 盤前 5 分序列（升貶節奏用）。"""
     from collectors.fx import FXCollector
 
-    c = FXCollector()
+    c = FXCollector(db_path=db_path)
     bars = c.collect_twd_intraday()
     if not bars:
         return False
@@ -150,8 +145,8 @@ def _compute_fx(date: str, conn: sqlite3.Connection) -> bool:
     return result is not None
 
 
-def _compute_signals(date: str, conn: sqlite3.Connection) -> bool:
-    """計算市場訊號與個股觀察訊號。市場訊號算不出來視為失敗。"""
+def _compute_signals(date: str, conn: sqlite3.Connection) -> dict | None:
+    """計算市場訊號與個股觀察訊號，回傳市場訊號（算不出來為 None＝失敗）。"""
     from integration.signal_engine import (
         compute_foreign_stock_signals,
         compute_market_signal,
@@ -161,12 +156,11 @@ def _compute_signals(date: str, conn: sqlite3.Connection) -> bool:
     result = compute_market_signal(date, conn)
     compute_stock_signals(date, conn)          # 分點訊號（需籌碼資料）
     compute_foreign_stock_signals(date, conn)  # 外資流向訊號（用 T86，免費自動）
-    return result is not None
+    return result
 
 
-def _generate_summary(date: str, conn: sqlite3.Connection) -> bool:
-    """產出 daily summary，驗證不報錯即成功。"""
+def _generate_summary(date: str, conn: sqlite3.Connection) -> str | None:
+    """產出 daily summary 文字（無 daily_metrics 為 None＝失敗）。"""
     from integration.summary import generate_daily_summary
 
-    text = generate_daily_summary(date, conn)
-    return text is not None
+    return generate_daily_summary(date, conn)
