@@ -49,7 +49,7 @@ FastAPI + uvicorn + Jinja2 ・ APScheduler（取代 crontab）・ pytest。
 ## 結構（東西該放哪的意圖）
 
 - `collectors/` — Layer1 原始資料（twse/taifex/fx/chip/holiday），繼承 `base.BaseCollector`
-- `integration/` — Layer2 衍生指標（fx/futures/chip_metrics、summary）＋ Layer3 `signal_engine` ＋ Layer4 `verification` ＋ `live_*`
+- `integration/` — Layer2 衍生指標（fx/futures/chip_metrics、summary）＋ Layer3 `premarket_call`（盤前判斷）／`signal_engine`（籌碼觀察）＋ Layer4 `verification` ＋ `live_*`
 - `server/` — `app.py`（工廠）/`scheduler.py`（排程登錄＋執行紀錄）/`routes/`/`templates/`
 - `jobs/` — 各時段 job：`after_night`/`before_open`/`afternoon_fx`/`verify_close`/`after_close`/`refresh_holidays`/`backfill`
 - `db/` — `schema.py`（含 `_migrate_columns`）/`connection.py`；`utils/` — `trading_calendar`/`http_client`/`notify`
@@ -81,7 +81,8 @@ FastAPI + uvicorn + Jinja2 ・ APScheduler（取代 crontab）・ pytest。
 | `integration/chip_metrics` | 金額、連續天數、MA20、price_zone |
 | `utils/trading_calendar` | 週末排除、假日排除、前一/下一交易日 |
 | `jobs/*` | collector 失敗時 graceful degradation、休市/週末略過語意 |
-| `integration/signal_engine` | 兩票合成、加減分、夾限 1–5、rule_version、個股過濾分類 |
+| `integration/premarket_call` | 兩票合成、信心調整（含各維度級別與效果）、夾限 1–5、rule_version |
+| `integration/signal_engine` | 籌碼觀察：個股過濾分類、日期窗口 |
 | `integration/verification` | 三分類門檻邊界、雙基準命中、資料缺失、命中率統計 |
 | `server/*` | 各 route 回 200＋關鍵內容、API 區間查詢、空狀態、排程紀錄寫入/篩選/刪除 |
 

@@ -71,7 +71,7 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
-        # 5. Layer 3: 市場訊號 + 個股觀察訊號（休市日跳過，不寫 signals 表）
+        # 5. Layer 3: 盤前判斷 + 籌碼觀察（休市日跳過，不寫 signals 表）
         signal = None
         if trading:
             signal, err = run_step_value("signal", lambda: _compute_signals(date, conn))
@@ -83,8 +83,8 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
         summary_text, err = run_step_value("summary", lambda: _generate_summary(date, conn))
         if summary_text:
             if signal:
-                from integration.signal_engine import format_signal_text
-                summary_text = summary_text + "\n" + format_signal_text(signal)
+                from integration.summary import format_premarket_call_text
+                summary_text = summary_text + "\n" + format_premarket_call_text(signal)
             if not trading:
                 summary_text = f"📅 {date} 台股休市，僅更新匯率統計\n" + summary_text
         results["summary"] = summary_text is not None
@@ -146,14 +146,14 @@ def _compute_fx(date: str, conn: sqlite3.Connection) -> bool:
 
 
 def _compute_signals(date: str, conn: sqlite3.Connection) -> dict | None:
-    """計算市場訊號與個股觀察訊號，回傳市場訊號（算不出來為 None＝失敗）。"""
+    """計算盤前判斷與籌碼觀察，回傳盤前判斷（算不出來為 None＝失敗）。"""
+    from integration.premarket_call import compute_premarket_call
     from integration.signal_engine import (
         compute_foreign_stock_signals,
-        compute_market_signal,
         compute_stock_signals,
     )
 
-    result = compute_market_signal(date, conn)
+    result = compute_premarket_call(date, conn)
     compute_stock_signals(date, conn)          # 分點訊號（需籌碼資料）
     compute_foreign_stock_signals(date, conn)  # 外資流向訊號（用 T86，免費自動）
     return result

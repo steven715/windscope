@@ -17,6 +17,8 @@ from fastapi.templating import Jinja2Templates
 
 from config import settings
 from db.connection import get_connection
+from integration.premarket_call import DIRECTION_LABELS as _DIRECTION_LABELS
+from integration.premarket_call import load_daily_metrics
 from integration.verification import (
     get_recent_verifications,
     get_verification_stats,
@@ -57,7 +59,6 @@ def _status_zh(status: str | None) -> str:
 templates.env.filters["status_zh"] = _status_zh
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_DIRECTION_LABELS = {"bullish": "↑ 偏多", "bearish": "↓ 偏空", "neutral": "— 中性"}
 _CLASS_LABELS = {"up": "漲", "down": "跌", "flat": "平"}
 # 亞幣方向中文 + 卡片配色（升值對台股偏多→綠/up；貶值→紅/down）
 _FX_DIR_ZH = {"bullish": ("升", "up"), "bearish": ("貶", "down"),
@@ -465,6 +466,7 @@ def dashboard(request: Request):
         metrics = None
         stock_signals = []
         explain = []
+        explain_notice = None
         if latest:
             signal = {
                 "date": latest[0],
@@ -476,37 +478,30 @@ def dashboard(request: Request):
                 "reasons": json.loads(latest[5]) if latest[5] else [],
                 "rule_version": latest[6],
             }
-            m = _fetch_one_dict(
-                conn,
-                "SELECT fx_delta_twd, fx_direction, fx_asia_sync, "
-                "       futures_spread_adjusted, futures_volume_ratio, "
-                "       oi_net_foreign, fx_delta_cny, fx_delta_krw, "
-                "       fx_asia_detail, oi_delta "
-                "FROM daily_metrics WHERE date = ?",
-                (signal["date"],),
-            )
+            m = load_daily_metrics(signal["date"], conn)
             if m:
-                detail = json.loads(m["fx_asia_detail"]) if m["fx_asia_detail"] else {}
+                detail = m.fx_asia_detail or {}
                 fx_pairs = []
-                for label, delta in (("TWD", m["fx_delta_twd"]), ("CNY", m["fx_delta_cny"]),
-                                     ("KRW", m["fx_delta_krw"])):
+                for label, delta in (("TWD", m.fx_delta_twd), ("CNY", m.fx_delta_cny),
+                                     ("KRW", m.fx_delta_krw)):
                     zh, css = _FX_DIR_ZH.get(detail.get(label), ("—", "flat"))
                     fx_pairs.append({"label": label, "delta": delta,
                                      "zh": zh, "css": css})
                 metrics = {
-                    "fx_delta_twd": m["fx_delta_twd"], "fx_direction": m["fx_direction"],
-                    "fx_asia_sync": m["fx_asia_sync"],
-                    "spread_adjusted": m["futures_spread_adjusted"],
-                    "volume_ratio": m["futures_volume_ratio"], "oi_net": m["oi_net_foreign"],
-                    "fx_pairs": fx_pairs, "oi_delta": m["oi_delta"],
+                    "fx_delta_twd": m.fx_delta_twd, "fx_direction": m.fx_direction,
+                    "fx_asia_sync": m.fx_asia_sync,
+                    "spread_adjusted": m.futures_spread_adjusted,
+                    "volume_ratio": m.futures_volume_ratio, "oi_net": m.oi_net_foreign,
+                    "fx_pairs": fx_pairs, "oi_delta": m.oi_delta,
                 }
             stock_signals = conn.execute(
                 "SELECT stock_id, broker_name, category, reasons "
                 "FROM stock_signals WHERE date = ? ORDER BY stock_id",
                 (signal["date"],),
             ).fetchall()
-            from integration.explain import build_explain
+            from integration.explain import build_explain, premarket_drift_notice
             explain = build_explain(signal["date"], conn)
+            explain_notice = premarket_drift_notice(signal["date"], conn)
 
         stats = get_verification_stats(conn)
         recent = get_recent_verifications(conn, last_n=10)
@@ -519,7 +514,7 @@ def dashboard(request: Request):
     return templates.TemplateResponse(request, "dashboard.html", {
         "active": "dashboard", "signal": signal, "metrics": metrics,
         "stock_signals": stock_signals, "stats": stats, "recent": recent,
-        "explain": explain,
+        "explain": explain, "explain_notice": explain_notice,
     })
 
 
@@ -973,13 +968,6 @@ def backtest_compare_page(request: Request, a: int, b: int):
         "param_diffs": param_diffs, "metric_rows": metric_rows,
         "same_stock": run_a["stock_id"] == run_b["stock_id"],
     })
-
-
-def _fetch_one_dict(conn, sql: str, params: tuple) -> dict | None:
-    """單列查詢回 {欄位名: 值}（以欄位名取值，免依賴 SELECT 欄位順序）；無列回 None。"""
-    cur = conn.execute(sql, params)
-    row = cur.fetchone()
-    return dict(zip((d[0] for d in cur.description), row)) if row else None
 
 
 def _signals_asof(conn) -> str:
