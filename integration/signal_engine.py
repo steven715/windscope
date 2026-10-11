@@ -200,16 +200,30 @@ def compute_foreign_stock_signals(date: str, conn: sqlite3.Connection) -> list[d
 
 
 def compute_stock_signals(date: str, conn: sqlite3.Connection) -> list[dict]:
-    """從 daily_stock_metrics 計算個股觀察訊號，寫入 stock_signals。"""
+    """從 daily_stock_metrics 計算 date 的分點籌碼觀察，寫入 stock_signals。
+
+    與外資一致只看 date 之前：每檔取 date 之前最近一個有分點指標的日期
+    （08:50 時 date 當日分點未收／未匯入；重算歷史日也才與當時一致）。
+    """
+    # 先清掉當日舊的分點籌碼觀察（只 INSERT 會殘留已不成立的分類）；外資那列由
+    # compute_foreign_stock_signals 負責
+    conn.execute(
+        "DELETE FROM stock_signals WHERE date = ? AND broker_name != '外資'", (date,)
+    )
     rows = conn.execute(
-        "SELECT stock_id, broker_name, net_amount, consecutive_days, "
-        "       price_zone, both_sides_flag, broker_type "
-        "FROM daily_stock_metrics WHERE date = ?",
+        "SELECT m.stock_id, m.broker_name, m.net_amount, m.consecutive_days, "
+        "       m.price_zone, m.both_sides_flag, m.broker_type "
+        "FROM daily_stock_metrics m "
+        "JOIN (SELECT stock_id, MAX(date) AS d FROM daily_stock_metrics "
+        "      WHERE date < ? GROUP BY stock_id) latest "
+        "  ON m.stock_id = latest.stock_id AND m.date = latest.d "
+        "ORDER BY m.stock_id, m.broker_name",
         (date,),
     ).fetchall()
 
     if not rows:
-        logger.info("compute_stock_signals: no stock metrics for %s", date)
+        conn.commit()
+        logger.info("compute_stock_signals: no stock metrics before %s", date)
         return []
 
     results = []

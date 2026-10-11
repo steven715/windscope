@@ -1342,6 +1342,20 @@ class TestChipImport:
         conn.close()
         assert row == (5000, 1000, 4000)
 
+    def test_post_recomputes_next_trading_day_observation(self, tmp_path):
+        """匯入 D 日分點 → 重算 D 的下一個交易日的籌碼觀察（這份資料影響的那天）。"""
+        db_path, client = self._client(tmp_path)
+        client.post("/chip-import", data={
+            "date": "2026-06-19", "stock_id": "2330", "close_price": "1000",
+            "broker_name": ["兆豐-嘉義", "", ""],
+            "buy": ["5000", "", ""], "sell": ["1000", "", ""],
+        }, follow_redirects=True)
+        conn = sqlite3.connect(db_path)
+        dates = [r[0] for r in conn.execute(
+            "SELECT DISTINCT date FROM stock_signals WHERE broker_name != '外資'")]
+        conn.close()
+        assert dates == ["2026-06-22"]  # 06-19 週五 → 下週一
+
     def test_post_empty_rows(self, tmp_path):
         _, client = self._client(tmp_path)
         resp = client.post("/chip-import", data={

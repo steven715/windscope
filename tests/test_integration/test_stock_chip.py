@@ -89,7 +89,8 @@ def test_explain_and_stock_signals_share_broker_wording(conn):
         "VALUES ('2026-06-18', '2454', '某分點', 80000000, 1, 'high', 1, NULL)")
     conn.commit()
 
-    stored = {r["reasons"] for r in compute_stock_signals("2026-06-18", conn)}
+    # 06-18 的分點影響下一交易日（06-19）的籌碼觀察
+    stored = {r["reasons"] for r in compute_stock_signals("2026-06-19", conn)}
     broker = next(r for r in build_stock_explain("2026-06-18", "2454", conn)
                   if r["dim"] == "主力分點")
     assert stored == {broker["verdict"]}
