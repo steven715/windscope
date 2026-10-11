@@ -4,7 +4,11 @@ import json
 
 import pytest
 
-from integration.summary import generate_daily_summary, _format_amount
+from integration.summary import (
+    _format_amount,
+    format_premarket_call_text,
+    generate_daily_summary,
+)
 
 
 def test_summary_with_full_data(memory_db):
@@ -138,3 +142,15 @@ def test_format_amount_million():
 def test_format_amount_none():
     """金額格式化：None。"""
     assert "資料不可用" == _format_amount(None)
+
+
+def test_format_premarket_call_text():
+    text = format_premarket_call_text({
+        "direction": "bullish", "confidence": 4,
+        "rule_version": "v1",
+        "reasons": ["匯率與期貨同向", "亞幣同步且與訊號同向 +1"],
+    })
+    assert "【訊號判斷】" in text
+    assert "↑ 偏多" in text
+    assert "信心 4/5" in text
+    assert "亞幣同步" in text

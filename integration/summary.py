@@ -1,10 +1,10 @@
 """開盤前情報文字摘要：從 daily_metrics + daily_stock_metrics 產出 human-readable 文字。"""
 
-import json
 import logging
 import sqlite3
 
 from config import settings
+from integration.premarket_call import DIRECTION_LABELS, load_daily_metrics
 from integration.premarket_inputs import load_premarket_inputs
 
 logger = logging.getLogger(__name__)
@@ -45,22 +45,16 @@ def _fx_short_arrow(direction: str | None) -> str:
 
 def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
     """從 daily_metrics + daily_stock_metrics 讀取，格式化成文字摘要。"""
-    # 讀取 daily_metrics
-    row = conn.execute(
-        "SELECT fx_delta_twd, fx_delta_cny, fx_delta_krw, "
-        "       fx_direction, fx_asia_sync, fx_asia_detail, "
-        "       futures_spread, futures_spread_adjusted, "
-        "       futures_volume_ratio, oi_net_foreign, oi_delta "
-        "FROM daily_metrics WHERE date = ?",
-        (date,),
-    ).fetchone()
-
-    if row is None:
+    m = load_daily_metrics(date, conn)
+    if m is None:
         logger.warning("generate_daily_summary: no daily_metrics for %s", date)
         return None
 
-    (fx_twd, fx_cny, fx_krw, fx_dir, fx_sync, fx_detail_json,
-     fut_spread, fut_adj, fut_ratio, oi_net, oi_delta) = row
+    fx_twd, fx_cny, fx_krw = m.fx_delta_twd, m.fx_delta_cny, m.fx_delta_krw
+    fx_sync, fx_detail = m.fx_asia_sync, m.fx_asia_detail
+    fut_spread, fut_adj, fut_ratio = (m.futures_spread, m.futures_spread_adjusted,
+                                      m.futures_volume_ratio)
+    oi_net, oi_delta = m.oi_net_foreign, m.oi_delta
 
     # 顯示基準與票一致：同一份盤前輸入（前一交易日基準、含 fallback）。
     inp = load_premarket_inputs(date, conn)
@@ -122,10 +116,9 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
     if fx_sync is not None:
         sync_label = "是" if fx_sync == 1 else "否"
         detail_str = ""
-        if fx_detail_json:
-            detail = json.loads(fx_detail_json)
+        if fx_detail:
             parts = []
-            for k, v in detail.items():
+            for k, v in fx_detail.items():
                 parts.append(f"{k}{_fx_short_arrow(v)}")
             detail_str = f" ({' '.join(parts)})"
         lines.append(f"亞幣同步：{sync_label}{detail_str}")
@@ -199,4 +192,16 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
     lines.append("")
     lines.append("══════════════════════════════════")
 
+    return "\n".join(lines)
+
+
+def format_premarket_call_text(call: dict) -> str:
+    """把盤前判斷（signals 列 dict）格式化為附加在 daily summary 後的文字區塊。"""
+    label = DIRECTION_LABELS.get(call["direction"], call["direction"])
+    lines = [
+        "【訊號判斷】",
+        f"{label}  信心 {call['confidence']}/5  (規則 {call['rule_version']})",
+    ]
+    for r in call["reasons"]:
+        lines.append(f"  · {r}")
     return "\n".join(lines)

@@ -3,10 +3,7 @@
 import sqlite3
 
 from db.schema import create_all_tables
-from integration.signal_engine import (
-    compute_stock_signals,
-    format_signal_text,
-)
+from integration.signal_engine import compute_stock_signals
 
 
 def _make_db() -> sqlite3.Connection:
@@ -145,16 +142,3 @@ class TestStockSignalsDateWindow:
             "SELECT broker_name FROM stock_signals WHERE date = '2026-06-12'"
         ).fetchall()
         assert rows == [("外資",)]
-
-
-class TestFormatSignalText:
-    def test_contains_direction_and_reasons(self):
-        text = format_signal_text({
-            "direction": "bullish", "confidence": 4,
-            "rule_version": "v1",
-            "reasons": ["匯率與期貨同向", "亞幣同步且與訊號同向 +1"],
-        })
-        assert "【訊號判斷】" in text
-        assert "偏多" in text
-        assert "信心 4/5" in text
-        assert "亞幣同步" in text

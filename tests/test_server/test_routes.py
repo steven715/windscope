@@ -236,21 +236,16 @@ class TestPagesWithData:
         assert "偏買" in resp.text
         assert "<rect" in resp.text
 
-    def test_index_strip_and_fetch_one_dict(self):
-        """_index_strip：最新 (date, close) + 近日漲跌%（舊→新）；空表回 (None, [])。
-        _fetch_one_dict：以欄位名取值，無列回 None。"""
-        from server.routes.pages import _fetch_one_dict, _index_strip
+    def test_index_strip(self):
+        """_index_strip：最新 (date, close) + 近日漲跌%（舊→新）；空表回 (None, [])。"""
+        from server.routes.pages import _index_strip
         conn = sqlite3.connect(":memory:")
         create_all_tables(conn)
         assert _index_strip(conn) == (None, [])
-        assert _fetch_one_dict(conn, "SELECT close FROM raw_index WHERE date = ?", ("x",)) is None
         for d, c in (("2026-06-10", 100.0), ("2026-06-11", 101.0), ("2026-06-12", 99.99)):
             conn.execute("INSERT INTO raw_index (date, close) VALUES (?, ?)", (d, c))
         latest, changes = _index_strip(conn)
         assert latest == ("2026-06-12", 99.99) and changes == [1.0, -1.0]
-        row = _fetch_one_dict(conn, "SELECT close, date FROM raw_index WHERE date = ?",
-                              ("2026-06-11",))
-        assert row == {"close": 101.0, "date": "2026-06-11"}
         conn.close()
 
     def test_spark_bars_empty_zero_and_quiet_percent(self):

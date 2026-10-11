@@ -83,8 +83,8 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
         summary_text, err = run_step_value("summary", lambda: _generate_summary(date, conn))
         if summary_text:
             if signal:
-                from integration.signal_engine import format_signal_text
-                summary_text = summary_text + "\n" + format_signal_text(signal)
+                from integration.summary import format_premarket_call_text
+                summary_text = summary_text + "\n" + format_premarket_call_text(signal)
             if not trading:
                 summary_text = f"📅 {date} 台股休市，僅更新匯率統計\n" + summary_text
         results["summary"] = summary_text is not None

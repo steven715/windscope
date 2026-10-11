@@ -182,7 +182,7 @@ def test_before_open_trading_no_signal_notifies(memory_db, monkeypatch):
 def test_before_open_signal_produced_no_notify(memory_db, monkeypatch):
     """交易日且訊號有產出 → 不呼叫 notify。"""
     from jobs import before_open
-    import integration.signal_engine as se
+    import integration.summary as su
 
     monkeypatch.setattr(before_open, "is_trading_day", lambda d: True)
     monkeypatch.setattr(before_open, "run_step", lambda name, fn: (True, None))
@@ -191,7 +191,7 @@ def test_before_open_signal_produced_no_notify(memory_db, monkeypatch):
         before_open, "run_step_value",
         lambda name, fn: ({"direction": "bullish", "confidence": 3}, None)
         if name == "signal" else (fn(), None))
-    monkeypatch.setattr(se, "format_signal_text", lambda signal: "")
+    monkeypatch.setattr(su, "format_premarket_call_text", lambda signal: "")
 
     called = {}
     monkeypatch.setattr(before_open, "notify",
@@ -283,7 +283,7 @@ def test_before_open_computes_signal_and_summary_once(memory_db, monkeypatch):
     monkeypatch.setattr(pc, "compute_premarket_call", fake_signal)
     monkeypatch.setattr(se, "compute_stock_signals", lambda date, conn: None)
     monkeypatch.setattr(se, "compute_foreign_stock_signals", lambda date, conn: None)
-    monkeypatch.setattr(se, "format_signal_text", lambda signal: "訊號")
+    monkeypatch.setattr(su, "format_premarket_call_text", lambda signal: "訊號")
     monkeypatch.setattr(su, "generate_daily_summary", fake_summary)
 
     # 不 mock run_step（要真的跑步驟函式才驗得出重複呼叫）；FX collector 換成全回 None 的假物件

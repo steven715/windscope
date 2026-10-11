@@ -261,24 +261,20 @@ def _format_amount(amount: float | None) -> str:
 
 def _query_daily(date: str) -> None:
     """查詢 daily_metrics。"""
-    import json
+    from integration.premarket_call import load_daily_metrics
 
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT fx_delta_twd, fx_delta_cny, fx_delta_krw, "
-            "       fx_direction, fx_asia_sync, fx_asia_detail, "
-            "       futures_spread, futures_spread_adjusted, "
-            "       futures_volume_ratio, oi_net_foreign, oi_delta "
-            "FROM daily_metrics WHERE date = ?",
-            (date,),
-        ).fetchone()
+        m = load_daily_metrics(date, conn)
 
-    if not row:
+    if m is None:
         print(f"No daily metrics found for {date}")
         return
 
-    (fx_twd, fx_cny, fx_krw, fx_dir, fx_sync, fx_detail,
-     fut_spread, fut_adj, fut_ratio, oi_net, oi_delta) = row
+    fx_twd, fx_cny, fx_krw, fx_dir = m.fx_delta_twd, m.fx_delta_cny, m.fx_delta_krw, m.fx_direction
+    fx_sync, fx_detail = m.fx_asia_sync, m.fx_asia_detail
+    fut_spread, fut_adj, fut_ratio = (m.futures_spread, m.futures_spread_adjusted,
+                                      m.futures_volume_ratio)
+    oi_net, oi_delta = m.oi_net_foreign, m.oi_delta
 
     print(f"=== {date} Daily Metrics ===")
 
@@ -291,7 +287,7 @@ def _query_daily(date: str) -> None:
     if fx_cny is not None:
         cny_dir = ""
         if fx_detail:
-            detail = json.loads(fx_detail)
+            detail = fx_detail
             cny_dir = f" ({detail.get('CNY', 'N/A')})"
         print(f"  CNY delta:    {fx_cny:+.4f}{cny_dir}")
     else:
@@ -299,7 +295,7 @@ def _query_daily(date: str) -> None:
     if fx_krw is not None:
         krw_dir = ""
         if fx_detail:
-            detail = json.loads(fx_detail)
+            detail = fx_detail
             krw_dir = f" ({detail.get('KRW', 'N/A')})"
         print(f"  KRW delta:    {fx_krw:+.4f}{krw_dir}")
     else:
@@ -309,7 +305,7 @@ def _query_daily(date: str) -> None:
         sync_label = "是" if fx_sync == 1 else "否"
         detail_str = ""
         if fx_detail:
-            detail = json.loads(fx_detail)
+            detail = fx_detail
             parts = [f"{k}:{v}" for k, v in detail.items() if v]
             detail_str = f" ({', '.join(parts)})"
         print(f"  亞幣同步:     {sync_label}{detail_str}")

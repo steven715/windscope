@@ -8,7 +8,6 @@ import sqlite3
 from datetime import datetime
 
 from config import settings
-from integration.premarket_call import DIRECTION_LABELS
 from integration.stock_chip import classify_broker, classify_foreign, foreign_streak
 
 logger = logging.getLogger(__name__)
@@ -131,15 +130,3 @@ def compute_stock_signals(date: str, conn: sqlite3.Connection) -> list[dict]:
     conn.commit()
     logger.info("Stock signals for %s: %d records", date, len(results))
     return results
-
-
-def format_signal_text(signal: dict) -> str:
-    """把市場訊號格式化為可附加在 daily summary 後的文字區塊。"""
-    label = DIRECTION_LABELS.get(signal["direction"], signal["direction"])
-    lines = [
-        "【訊號判斷】",
-        f"{label}  信心 {signal['confidence']}/5  (規則 {signal['rule_version']})",
-    ]
-    for r in signal["reasons"]:
-        lines.append(f"  · {r}")
-    return "\n".join(lines)

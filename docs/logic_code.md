@@ -38,7 +38,9 @@ flowchart LR
 
 ---
 
-## 2. L3 市場訊號 `compute_market_signal`（核心權重）
+## 2. L3 盤前判斷 `integration/premarket_call`（核心權重）
+
+純函式 `evaluate_premarket_call(DailyMetrics)` 算出方向／信心／理由，並給每個信心調整維度「級別＋效果」；`compute_premarket_call` 讀取、評估、寫入 `signals`。解讀（`integration/explain`）的判讀只讀這份級別與效果排版，門檻不重比。
 
 ```mermaid
 flowchart TD
@@ -72,6 +74,7 @@ flowchart TD
 
 - 基礎信心來自合成（3/2/1），加減分後 `max(1, min(5, 信心))`。
 - 每筆訊號記 `rule_version`，理由逐條存進 `reasons`。
+- 解讀面板每個盤前判斷維度另列「效果」：+1／−1，或未計入的原因（匯率票中性、期貨票中性、判斷方向中性、與判斷同向）。
 
 ---
 
