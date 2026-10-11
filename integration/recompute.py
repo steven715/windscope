@@ -7,6 +7,9 @@ functional core：recompute_date(date) = f(raw, config)，同一輸入恆得同�
   L3  stock_signals（籌碼觀察）、signals（盤前判斷）
 
 順序固定：先 L2 指標、再 L3（盤前判斷讀 daily_metrics、籌碼觀察讀籌碼指標）。
+
+注意：第 T 日的籌碼觀察讀「T 之前」的分點指標，單日重算不會一併重算前一日的
+分點指標；要一致請由舊到新重算整段區間。排程 job 不走本模組（見 ADR-0003）。
 """
 
 import logging
@@ -16,10 +19,7 @@ from integration.chip_metrics import compute_chip_metrics
 from integration.futures_metrics import compute_futures_metrics
 from integration.fx_metrics import compute_fx_metrics
 from integration.premarket_call import compute_premarket_call
-from integration.signal_engine import (
-    compute_foreign_stock_signals,
-    compute_stock_signals,
-)
+from integration.chip_observation import refresh_chip_observations
 
 logger = logging.getLogger(__name__)
 
@@ -29,14 +29,13 @@ def recompute_date(date: str, conn: sqlite3.Connection) -> dict:
     fx = compute_fx_metrics(date, conn)
     futures = compute_futures_metrics(date, conn)
     chip = compute_chip_metrics(date, conn)
-    stock_signals = compute_stock_signals(date, conn)
-    foreign_signals = compute_foreign_stock_signals(date, conn)
+    observations = refresh_chip_observations(date, conn)
     signal = compute_premarket_call(date, conn)
 
     logger.info(
-        "recompute_date %s: fx=%s futures=%s chip=%d stock_signals=%d signal=%s",
+        "recompute_date %s: fx=%s futures=%s chip=%d observations=%d signal=%s",
         date, fx is not None, futures is not None,
-        len(chip) if chip else 0, len(stock_signals) if stock_signals else 0,
+        len(chip) if chip else 0, len(observations),
         signal["direction"] if signal else None,
     )
     return {
@@ -44,7 +43,6 @@ def recompute_date(date: str, conn: sqlite3.Connection) -> dict:
         "fx_metrics": fx is not None,
         "futures_metrics": futures is not None,
         "chip_metrics": len(chip) if chip else 0,
-        "stock_signals": len(stock_signals) if stock_signals else 0,
-        "foreign_signals": len(foreign_signals) if foreign_signals else 0,
+        "chip_observations": len(observations),
         "signal": signal,
     }

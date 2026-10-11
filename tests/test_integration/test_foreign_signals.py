@@ -3,7 +3,7 @@
 import sqlite3
 
 from db.schema import create_all_tables
-from integration.signal_engine import compute_foreign_stock_signals
+from integration.chip_observation import refresh_chip_observations
 
 
 def _setup(conn, nets):
@@ -24,11 +24,11 @@ def test_consecutive_buy_signal():
     # 6/11 賣(中斷)、6/12 +3927、6/15 +9646 → 截至 6/15 連買 2 天，累計 13573
     _setup(conn, [("2026-06-11", -4904), ("2026-06-12", 3927), ("2026-06-15", 9646)])
 
-    res = compute_foreign_stock_signals("2026-06-16", conn)
+    res = refresh_chip_observations("2026-06-16", conn)
 
     assert len(res) == 1
     assert res[0]["category"] == "外資連買"
-    assert "連買 2 天" in res[0]["reason"]
+    assert "連買 2 天" in res[0]["reasons"]
     row = conn.execute(
         "SELECT broker_name, category FROM stock_signals "
         "WHERE date='2026-06-16' AND stock_id='2330'").fetchone()
@@ -41,9 +41,9 @@ def test_single_big_buy_signal():
     create_all_tables(conn)
     _setup(conn, [("2026-06-12", -2000), ("2026-06-15", 18230)])  # 反手大買
 
-    res = compute_foreign_stock_signals("2026-06-16", conn)
+    res = refresh_chip_observations("2026-06-16", conn)
     assert res[0]["category"] == "外資大買"
-    assert "18,230" in res[0]["reason"]
+    assert "18,230" in res[0]["reasons"]
 
 
 def test_below_threshold_no_signal():
@@ -52,7 +52,7 @@ def test_below_threshold_no_signal():
     create_all_tables(conn)
     _setup(conn, [("2026-06-12", 500), ("2026-06-15", 800)])  # 累計 1300 < 3000
 
-    assert compute_foreign_stock_signals("2026-06-16", conn) == []
+    assert refresh_chip_observations("2026-06-16", conn) == []
 
 
 def test_stale_signal_removed():
@@ -66,7 +66,7 @@ def test_stale_signal_removed():
                  "VALUES ('2026-06-17', '2330', '外資', '外資連買', '舊的')")
     conn.commit()  # 沒有 __FOREIGN__ 資料 → 本次不該有訊號
 
-    res = compute_foreign_stock_signals("2026-06-17", conn)
+    res = refresh_chip_observations("2026-06-17", conn)
     assert res == []
     cnt = conn.execute("SELECT COUNT(*) FROM stock_signals "
                        "WHERE date='2026-06-17' AND broker_name='外資'").fetchone()[0]
@@ -80,4 +80,4 @@ def test_today_data_excluded():
     # 只有今天(6/16)有資料 → date < 6/16 查無 → 無訊號
     _setup(conn, [("2026-06-16", 50000)])
 
-    assert compute_foreign_stock_signals("2026-06-16", conn) == []
+    assert refresh_chip_observations("2026-06-16", conn) == []

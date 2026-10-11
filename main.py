@@ -476,12 +476,11 @@ def cmd_recompute(args: argparse.Namespace) -> None:
             result = recompute_date(d, conn)
             sig = result["signal"]
             sig_str = (f"{sig['direction']} (信心 {sig['confidence']})"
-                       if sig else "無訊號")
+                       if sig else "無盤前判斷")
             print(f"{d}: fx={result['fx_metrics']} "
                   f"futures={result['futures_metrics']} "
                   f"chip={result['chip_metrics']} "
-                  f"stock_signals={result['stock_signals']} "
-                  f"foreign={result.get('foreign_signals', 0)} → {sig_str}")
+                  f"籌碼觀察={result['chip_observations']} → {sig_str}")
 
 
 def cmd_refresh_holidays(args: argparse.Namespace) -> None:
