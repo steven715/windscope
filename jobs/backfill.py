@@ -7,6 +7,7 @@ from db.connection import get_connection
 from jobs.after_close import run_after_close
 from jobs.after_night import run_after_night
 from jobs.chip_collect import run_chip_collect
+from jobs.helpers import determine_status
 from utils.trading_calendar import iter_trading_days
 
 logger = logging.getLogger(__name__)
@@ -71,15 +72,12 @@ def run_backfill(start_date: str, end_date: str,
             logger.error("Backfill integration failed for %s: %s", date, e)
 
         # 判定狀態
-        values = list(merged_results.values())
-        if all(values):
-            day_status = "completed"
+        day_status = determine_status(merged_results)
+        if day_status == "completed":
             completed += 1
-        elif any(values):
-            day_status = "partial"
+        elif day_status == "partial":
             partial += 1
         else:
-            day_status = "failed"
             failed += 1
 
         details[date] = {

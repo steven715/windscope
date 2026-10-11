@@ -36,10 +36,7 @@ def cmd_collect(args: argparse.Namespace) -> None:
         from collectors.twse import TWSECollector
 
         collector = TWSECollector()
-        success = collector.run(date)
-        # 舊的 institutional-only 模式回傳 dict，取 institutional 結果
-        if isinstance(success, dict):
-            success = success.get("institutional", False)
+        success = collector.run(date).get("institutional", False)
         if success:
             with get_connection() as conn:
                 row = conn.execute(

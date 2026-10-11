@@ -48,7 +48,8 @@ def _parse_hhmm(hhmm: str) -> tuple[int, int]:
 
 
 # ── job 執行函式 ─────────────────────────────────────────────────
-# 簽名統一為 (db_path) -> result|None。通知由 _make_runner 統一處理，此處不發。
+# 簽名統一為 (db_path) -> result|None。每 job 結果通知由 _make_runner 統一處理，此處不發
+# （例外：before_open 的「交易日未產出盤前判斷」告警由該 job 自發、不受通知開關控制）。
 
 
 def _run_after_night(db_path: str | None) -> dict:

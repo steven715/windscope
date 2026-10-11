@@ -13,12 +13,12 @@ def test_chip_collect_skips_non_trading_day():
     assert result["results"] == {}
 
 
-def test_chip_collect_skips_chip_without_token(memory_db, monkeypatch):
+def test_chip_collect_skips_chip_without_token(memory_db, monkeypatch, step_seam):
     """未設 FINMIND_TOKEN → 分點步驟整步略過、不計失敗，可達 completed。"""
     from jobs import chip_collect
     memory_db.execute("INSERT INTO watchlist (stock_id, stock_name) VALUES ('2330', '台積電')")
 
-    monkeypatch.setattr(chip_collect, "run_step", lambda name, fn: (True, None))
+    step_seam(lambda name, fn: (True, None))
     monkeypatch.setattr(chip_collect, "is_trading_day", lambda d: True)
     monkeypatch.setattr(chip_collect.settings, "FINMIND_TOKEN", "")
 
@@ -33,14 +33,13 @@ def test_chip_collect_skips_chip_without_token(memory_db, monkeypatch):
     assert result["status"] == "completed"
 
 
-def test_chip_collect_runs_chip_with_token(memory_db, monkeypatch):
+def test_chip_collect_runs_chip_with_token(memory_db, monkeypatch, step_seam):
     """設了 FINMIND_TOKEN → 個股收盤 + 分點 + 算指標 三步都跑。"""
     from jobs import chip_collect
     memory_db.execute("INSERT INTO watchlist (stock_id, stock_name) VALUES ('2330', '台積電')")
 
     calls = []
-    monkeypatch.setattr(chip_collect, "run_step",
-                        lambda name, fn: calls.append(name) or (True, None))
+    step_seam(lambda name, fn: calls.append(name) or (True, None))
     monkeypatch.setattr(chip_collect, "is_trading_day", lambda d: True)
     monkeypatch.setattr(chip_collect.settings, "FINMIND_TOKEN", "test-token")
 
@@ -53,13 +52,12 @@ def test_chip_collect_runs_chip_with_token(memory_db, monkeypatch):
     assert result["status"] == "completed"
 
 
-def test_chip_collect_skips_stock_steps_when_watchlist_empty(memory_db, monkeypatch):
+def test_chip_collect_skips_stock_steps_when_watchlist_empty(memory_db, monkeypatch, step_seam):
     """觀察名單為空 → 個股收盤與分點略過、不計失敗，可達 completed。"""
     from jobs import chip_collect
 
     calls = []
-    monkeypatch.setattr(chip_collect, "run_step",
-                        lambda name, fn: calls.append(name) or (True, None))
+    step_seam(lambda name, fn: calls.append(name) or (True, None))
     monkeypatch.setattr(chip_collect, "is_trading_day", lambda d: True)
     monkeypatch.setattr(chip_collect.settings, "FINMIND_TOKEN", "test-token")
 

@@ -5,7 +5,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 from db.connection import get_connection
-from jobs.helpers import determine_status, run_step
+from jobs.helpers import JobRun
 from utils.trading_calendar import get_next_trading_day, is_trading_day
 
 logger = logging.getLogger(__name__)
@@ -23,73 +23,39 @@ def run_after_night(date: str, db_path: str | None = None) -> dict:
 
     回傳格式同 after_close，date 為實際歸屬的交易日。
     """
-    logger.info("run_after_night: triggered on %s", date)
-
     # 今晨 05:00 收的夜盤，需「前一日曆日」是交易日（前一日 15:00 才會開夜盤）。
     # 週日(前日週六)、週一(前日週日)觸發都無夜盤可收。
     prev_cal = (datetime.strptime(date, "%Y-%m-%d") - timedelta(days=1)
                 ).strftime("%Y-%m-%d")
     if not is_trading_day(prev_cal):
-        logger.info("run_after_night: %s 前一日非交易日，今晨無夜盤，skipping", date)
-        return {"date": date, "status": "skipped", "results": {}, "errors": []}
+        return JobRun.skipped("after_night", date, "前一日非交易日，今晨無夜盤")
 
     # 夜盤歸屬：觸發日為交易日則歸當日，否則歸下一個交易日（週六→下週一）
     target = date if is_trading_day(date) else get_next_trading_day(date)
     if target != date:
         logger.info("run_after_night: %s 非交易日，夜盤歸屬下一交易日 %s", date, target)
 
-    results = {}
-    errors = []
+    from collectors.fx import FXCollector
+    from collectors.taifex import TAIFEXCollector
+
+    job = JobRun("after_night", target)
+    taifex = TAIFEXCollector(db_path=db_path)
+    fx = FXCollector(db_path=db_path)
 
     with get_connection(db_path) as conn:
         # 1. TAIFEX: 夜盤收盤價 + 成交量
-        ok, err = run_step("taifex_night", lambda: _collect_taifex_night(target, db_path))
-        results["taifex_night"] = ok
-        if err:
-            errors.append(err)
-
+        job.collect("taifex_night", lambda: taifex.collect_night_session(target),
+                    lambda d: taifex.save_night_session(target, d))
         # 2. FX (Yahoo Finance): S&P 500 收盤 → raw_futures.sp500_close
-        ok, err = run_step("sp500_close", lambda: _collect_sp500(target, db_path))
-        results["sp500_close"] = ok
-        if err:
-            errors.append(err)
-
+        job.collect("sp500_close", fx.collect_sp500,
+                    lambda d: fx.save_sp500(target, d["close"]))
         # 3. Integration: compute_futures_metrics
-        ok, err = run_step("integration_futures", lambda: _compute_futures(target, conn))
-        results["integration_futures"] = ok
-        if err:
-            errors.append(err)
+        job.step("integration_futures", lambda: _compute_futures(target, conn))
 
-    status = determine_status(results)
-    logger.info("run_after_night: %s (target=%s) status=%s", date, target, status)
-    return {"date": target, "status": status, "results": results, "errors": errors}
+    return job.finish(trigger_date=date)
 
 
 # ── 內部步驟函式 ─────────────────────────────────────────────────
-
-
-def _collect_taifex_night(date: str, db_path: str | None) -> bool:
-    """收集夜盤收盤價和成交量。"""
-    from collectors.taifex import TAIFEXCollector
-
-    c = TAIFEXCollector(db_path=db_path)
-    data = c.collect_night_session(date)
-    if data is None:
-        return False
-    c.save_night_session(date, data)
-    return True
-
-
-def _collect_sp500(date: str, db_path: str | None) -> bool:
-    """收集 S&P 500 收盤價（Yahoo Finance ^GSPC）。"""
-    from collectors.fx import FXCollector
-
-    c = FXCollector(db_path=db_path)
-    data = c.collect_sp500()
-    if data is None:
-        return False
-    c.save_sp500(date, data["close"])
-    return True
 
 
 def _compute_futures(date: str, conn: sqlite3.Connection) -> bool:

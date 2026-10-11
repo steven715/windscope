@@ -36,14 +36,14 @@ def test_before_open_skips_non_trading_day():
     assert result["summary"] is None
 
 
-def test_before_open_full_success(memory_db, monkeypatch):
+def test_before_open_full_success(memory_db, monkeypatch, step_seam):
     """所有步驟成功時，status = completed，有 summary。"""
     from jobs import before_open
 
     def mock_step(name, fn):
         return True, None
 
-    monkeypatch.setattr(before_open, "run_step", mock_step)
+    step_seam(mock_step)
     monkeypatch.setattr(before_open, "is_trading_day", lambda d: True)
 
     # 為 summary 準備資料
@@ -65,7 +65,7 @@ def test_before_open_full_success(memory_db, monkeypatch):
     assert "開盤前情報" in result["summary"]
 
 
-def test_before_open_holiday_collects_fx_skips_signal(memory_db, monkeypatch):
+def test_before_open_holiday_collects_fx_skips_signal(memory_db, monkeypatch, step_seam):
     """平日休市（端午節）：匯率步驟照跑，訊號步驟跳過、不寫 signals 表。"""
     from jobs import before_open
 
@@ -82,8 +82,7 @@ def test_before_open_holiday_collects_fx_skips_signal(memory_db, monkeypatch):
         calls.append(name)
         return fn(), None
 
-    monkeypatch.setattr(before_open, "run_step", mock_step)
-    monkeypatch.setattr(before_open, "run_step_value", mock_step_value)
+    step_seam(mock_step, mock_step_value)
 
     memory_db.execute(
         "INSERT INTO daily_metrics (date, fx_delta_twd, fx_direction) "
@@ -138,7 +137,7 @@ def test_before_open_summary_shows_na_for_null(memory_db, monkeypatch):
     assert "資料不可用" in summary
 
 
-def test_before_open_trading_no_signal_notifies(memory_db, monkeypatch):
+def test_before_open_trading_no_signal_notifies(memory_db, monkeypatch, step_seam):
     """交易日但訊號沒產出 → 發 job_completed(signal_produced=False) 且呼叫 notify。"""
     from jobs import before_open
 
@@ -150,8 +149,7 @@ def test_before_open_trading_no_signal_notifies(memory_db, monkeypatch):
             return None, "signal: no data"
         return fn(), None
 
-    monkeypatch.setattr(before_open, "run_step", lambda name, fn: (True, None))
-    monkeypatch.setattr(before_open, "run_step_value", mock_step_value)
+    step_seam(lambda name, fn: (True, None), mock_step_value)
 
     called = {}
     monkeypatch.setattr(before_open, "notify",
@@ -179,18 +177,16 @@ def test_before_open_trading_no_signal_notifies(memory_db, monkeypatch):
     assert "args" in called  # notify 被呼叫
 
 
-def test_before_open_signal_produced_no_notify(memory_db, monkeypatch):
+def test_before_open_signal_produced_no_notify(memory_db, monkeypatch, step_seam):
     """交易日且訊號有產出 → 不呼叫 notify。"""
     from jobs import before_open
     import integration.summary as su
 
     monkeypatch.setattr(before_open, "is_trading_day", lambda d: True)
-    monkeypatch.setattr(before_open, "run_step", lambda name, fn: (True, None))
     # 訊號步驟直接帶回 signal 物件（不再二次呼叫 compute_premarket_call）
-    monkeypatch.setattr(
-        before_open, "run_step_value",
-        lambda name, fn: ({"direction": "bullish", "confidence": 3}, None)
-        if name == "signal" else (fn(), None))
+    step_seam(lambda name, fn: (True, None),
+              lambda name, fn: ({"direction": "bullish", "confidence": 3}, None)
+              if name == "signal" else (fn(), None))
     monkeypatch.setattr(su, "format_premarket_call_text", lambda signal: "")
 
     called = {}
@@ -210,12 +206,12 @@ def test_before_open_signal_produced_no_notify(memory_db, monkeypatch):
     assert "args" not in called
 
 
-def test_before_open_holiday_no_notify(memory_db, monkeypatch):
+def test_before_open_holiday_no_notify(memory_db, monkeypatch, step_seam):
     """平日休市（非交易日）→ 發 job_completed 但不 notify（非交易日不該有訊號）。"""
     from jobs import before_open
 
     monkeypatch.setattr(before_open, "is_trading_day", lambda d: False)
-    monkeypatch.setattr(before_open, "run_step", lambda name, fn: (True, None))
+    step_seam(lambda name, fn: (True, None))
 
     called = {}
     monkeypatch.setattr(before_open, "notify",
