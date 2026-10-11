@@ -160,7 +160,7 @@ class TestPagesWithData:
         assert "台積電" in resp.text
         assert "籌碼綜合判讀" in resp.text
         assert "歷史觀察訊號" in resp.text
-        assert "↑ 偏買" in resp.text  # 籌碼傾向用語（CONTEXT.md）
+        assert "↑ 偏買" in resp.text  # 籌碼傾向用語（GLOSSARY.md）
 
     def test_stock_detail_unknown_redirects(self, client_with_data):
         """未知代號 → 303 轉回觀察名單。"""

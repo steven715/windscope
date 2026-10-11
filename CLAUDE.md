@@ -110,4 +110,4 @@ Issues 追蹤在 GitHub Issues（`steven715/windscope`，用 `gh` CLI）。See `
 
 ### Domain docs
 
-Single-context：根目錄 `CONTEXT.md`＋ `docs/adr/`。See `docs/agents/domain.md`.
+Single-context：根目錄 `GLOSSARY.md`＋ `docs/adr/`。See `docs/agents/domain.md`.
