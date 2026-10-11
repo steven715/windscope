@@ -146,14 +146,14 @@ def _compute_fx(date: str, conn: sqlite3.Connection) -> bool:
 
 
 def _compute_signals(date: str, conn: sqlite3.Connection) -> dict | None:
-    """計算市場訊號與個股觀察訊號，回傳市場訊號（算不出來為 None＝失敗）。"""
+    """計算盤前判斷與籌碼觀察，回傳盤前判斷（算不出來為 None＝失敗）。"""
+    from integration.premarket_call import compute_premarket_call
     from integration.signal_engine import (
         compute_foreign_stock_signals,
-        compute_market_signal,
         compute_stock_signals,
     )
 
-    result = compute_market_signal(date, conn)
+    result = compute_premarket_call(date, conn)
     compute_stock_signals(date, conn)          # 分點訊號（需籌碼資料）
     compute_foreign_stock_signals(date, conn)  # 外資流向訊號（用 T86，免費自動）
     return result

@@ -186,7 +186,7 @@ def test_before_open_signal_produced_no_notify(memory_db, monkeypatch):
 
     monkeypatch.setattr(before_open, "is_trading_day", lambda d: True)
     monkeypatch.setattr(before_open, "run_step", lambda name, fn: (True, None))
-    # 訊號步驟直接帶回 signal 物件（不再二次呼叫 compute_market_signal）
+    # 訊號步驟直接帶回 signal 物件（不再二次呼叫 compute_premarket_call）
     monkeypatch.setattr(
         before_open, "run_step_value",
         lambda name, fn: ({"direction": "bullish", "confidence": 3}, None)
@@ -264,6 +264,7 @@ def test_before_open_weekend_emits_no_event(memory_db, monkeypatch):
 def test_before_open_computes_signal_and_summary_once(memory_db, monkeypatch):
     """回歸：訊號與摘要各只計算一次（舊版 step 成功後又各呼叫一次、寫入路徑跑兩次）。"""
     from jobs import before_open
+    import integration.premarket_call as pc
     import integration.signal_engine as se
     import integration.summary as su
 
@@ -279,7 +280,7 @@ def test_before_open_computes_signal_and_summary_once(memory_db, monkeypatch):
         counts["summary"] += 1
         return "摘要"
 
-    monkeypatch.setattr(se, "compute_market_signal", fake_signal)
+    monkeypatch.setattr(pc, "compute_premarket_call", fake_signal)
     monkeypatch.setattr(se, "compute_stock_signals", lambda date, conn: None)
     monkeypatch.setattr(se, "compute_foreign_stock_signals", lambda date, conn: None)
     monkeypatch.setattr(se, "format_signal_text", lambda signal: "訊號")

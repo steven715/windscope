@@ -15,9 +15,9 @@ import sqlite3
 from integration.chip_metrics import compute_chip_metrics
 from integration.futures_metrics import compute_futures_metrics
 from integration.fx_metrics import compute_fx_metrics
+from integration.premarket_call import compute_premarket_call
 from integration.signal_engine import (
     compute_foreign_stock_signals,
-    compute_market_signal,
     compute_stock_signals,
 )
 
@@ -31,7 +31,7 @@ def recompute_date(date: str, conn: sqlite3.Connection) -> dict:
     chip = compute_chip_metrics(date, conn)
     stock_signals = compute_stock_signals(date, conn)
     foreign_signals = compute_foreign_stock_signals(date, conn)
-    signal = compute_market_signal(date, conn)
+    signal = compute_premarket_call(date, conn)
 
     logger.info(
         "recompute_date %s: fx=%s futures=%s chip=%d stock_signals=%d signal=%s",
