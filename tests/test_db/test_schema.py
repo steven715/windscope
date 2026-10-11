@@ -2,7 +2,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from db.schema import create_all_tables, import_broker_tags, import_watchlist
+from db.schema import create_all_tables, import_broker_tags
 
 
 class TestCreateAllTables:
@@ -32,21 +32,6 @@ class TestCreateAllTables:
             "stock_dividends",
         }
         assert expected.issubset(table_names)
-
-    def test_import_watchlist_seeds_stock_info(self, memory_db, tmp_path):
-        """匯入 watchlist 時同步建立 stock_info。"""
-        stocks = [{"stock_id": "2330", "stock_name": "台積電",
-                   "added_date": "2026-04-08", "reason": "權值股"}]
-        json_path = tmp_path / "watchlist.json"
-        json_path.write_text(json.dumps(stocks, ensure_ascii=False), encoding="utf-8")
-
-        from db.schema import import_watchlist
-        import_watchlist(memory_db, str(json_path))
-
-        row = memory_db.execute(
-            "SELECT stock_name FROM stock_info WHERE stock_id = '2330'"
-        ).fetchone()
-        assert row[0] == "台積電"
 
     def test_upsert_stock_info_skips_empty_name(self, memory_db):
         """空名稱不應覆蓋既有的股名。"""
@@ -183,50 +168,5 @@ class TestImportBrokerTags:
 
         row = memory_db.execute(
             "SELECT notes FROM broker_tags WHERE broker_name = '測試券商'"
-        ).fetchone()
-        assert row[0] == "v2"
-
-
-class TestImportWatchlist:
-    def test_import_watchlist(self, memory_db, tmp_path):
-        """import_watchlist 能正確匯入 JSON 資料。"""
-        stocks = [
-            {
-                "stock_id": "2330",
-                "stock_name": "台積電",
-                "added_date": "2026-04-08",
-                "reason": "權值股",
-            }
-        ]
-        json_path = tmp_path / "watchlist.json"
-        json_path.write_text(json.dumps(stocks, ensure_ascii=False), encoding="utf-8")
-
-        count = import_watchlist(memory_db, str(json_path))
-        assert count == 1
-
-        rows = memory_db.execute("SELECT * FROM watchlist").fetchall()
-        assert len(rows) == 1
-
-    def test_import_watchlist_idempotent(self, memory_db, tmp_path):
-        """重複匯入是冪等的。"""
-        stocks = [
-            {
-                "stock_id": "2330",
-                "stock_name": "台積電",
-                "added_date": "2026-04-08",
-                "reason": "v1",
-            }
-        ]
-        json_path = tmp_path / "watchlist.json"
-        json_path.write_text(json.dumps(stocks, ensure_ascii=False), encoding="utf-8")
-
-        import_watchlist(memory_db, str(json_path))
-
-        stocks[0]["reason"] = "v2"
-        json_path.write_text(json.dumps(stocks, ensure_ascii=False), encoding="utf-8")
-        import_watchlist(memory_db, str(json_path))
-
-        row = memory_db.execute(
-            "SELECT reason FROM watchlist WHERE stock_id = '2330'"
         ).fetchone()
         assert row[0] == "v2"

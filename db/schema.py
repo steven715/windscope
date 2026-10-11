@@ -367,33 +367,6 @@ def import_broker_tags(
     return len(tags)
 
 
-def import_watchlist(
-    conn: sqlite3.Connection, json_path: str | None = None
-) -> int:
-    """從 watchlist.json 匯入觀察名單，回傳匯入筆數。"""
-    json_path = json_path or str(
-        Path(__file__).resolve().parent.parent / "config" / "watchlist.json"
-    )
-    with open(json_path, encoding="utf-8") as f:
-        stocks = json.load(f)
-
-    for stock in stocks:
-        conn.execute(
-            "INSERT OR REPLACE INTO watchlist (stock_id, stock_name, added_date, reason) "
-            "VALUES (?, ?, ?, ?)",
-            (
-                stock["stock_id"],
-                stock["stock_name"],
-                stock["added_date"],
-                stock["reason"],
-            ),
-        )
-        upsert_stock_info(conn, stock["stock_id"], stock["stock_name"])
-    conn.commit()
-    logger.info("Imported %d watchlist entries", len(stocks))
-    return len(stocks)
-
-
 def upsert_stock_info(conn: sqlite3.Connection, stock_id: str,
                       stock_name: str | None) -> None:
     """更新股票資訊表。stock_name 為空時不覆蓋既有名稱。"""

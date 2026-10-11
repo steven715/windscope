@@ -9,6 +9,7 @@ import logging
 import sqlite3
 
 from db.connection import get_connection
+from db.watchlist import watchlist_list
 from jobs.helpers import determine_status, run_step
 from utils.trading_calendar import is_trading_day
 
@@ -68,11 +69,15 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
             errors.append(err)
 
         # 6. 個股日K + 趨勢訊號：更新 watchlist 當月日K並重算趨勢（spec v2 趨勢層）
-        ok, err = run_step("stock_trends",
-                           lambda: _refresh_stock_trends(date, conn, db_path))
-        results["stock_trends"] = ok
-        if err:
-            errors.append(err)
+        #    觀察名單為空 → 整步略過、不計失敗
+        if watchlist_list(conn=conn):
+            ok, err = run_step("stock_trends",
+                               lambda: _refresh_stock_trends(date, conn, db_path))
+            results["stock_trends"] = ok
+            if err:
+                errors.append(err)
+        else:
+            logger.info("after_close: 觀察名單為空，個股日K與趨勢略過")
 
     status = determine_status(results)
     logger.info("run_after_close: %s status=%s", date, status)
@@ -148,13 +153,13 @@ def _refresh_stock_trends(date: str, conn: sqlite3.Connection,
     from collectors.twse import TWSECollector
     from integration.trend_signal import compute_trend_signal
 
-    watch = conn.execute("SELECT stock_id FROM watchlist ORDER BY stock_id").fetchall()
+    watch = [w["stock_id"] for w in watchlist_list(conn=conn)]
     if not watch:
         return False
 
     collector = TWSECollector(db_path=db_path)
     any_ok = False
-    for (stock_id,) in watch:
+    for stock_id in watch:
         try:
             bars = collector.collect_stock_ohlc_month(date, stock_id)
             if bars:

@@ -4,6 +4,7 @@ import logging
 import sqlite3
 
 from config import settings
+from db.watchlist import watchlist_list
 from integration.premarket_call import DIRECTION_LABELS, load_daily_metrics
 from integration.premarket_inputs import load_premarket_inputs
 
@@ -166,15 +167,12 @@ def generate_daily_summary(date: str, conn: sqlite3.Connection) -> str | None:
     # === 籌碼觀察 ===
     lines.append("【籌碼觀察】")
 
-    # 從 watchlist 取得觀察名單
-    watchlist = conn.execute(
-        "SELECT stock_id, stock_name FROM watchlist ORDER BY stock_id"
-    ).fetchall()
+    watchlist = watchlist_list(conn=conn)
 
     if not watchlist:
         lines.append("  （觀察名單為空）")
     else:
-        for stock_id, stock_name in watchlist:
+        for stock_id, stock_name in ((w["stock_id"], w["stock_name"]) for w in watchlist):
             lines.append(f"{stock_name}({stock_id})")
 
             # 個股觀察訊號（含外資流向、分點）——這才是判斷結果

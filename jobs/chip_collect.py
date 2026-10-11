@@ -12,6 +12,7 @@ import sqlite3
 
 from config import settings
 from db.connection import get_connection
+from db.watchlist import watchlist_list
 from jobs.helpers import determine_status, run_step
 from utils.trading_calendar import is_trading_day
 
@@ -30,21 +31,26 @@ def run_chip_collect(date: str, db_path: str | None = None) -> dict:
     errors = []
 
     with get_connection(db_path) as conn:
-        # 1. TWSE: 個股收盤價（watchlist）——寫 __PRICE_ONLY__ 列供 MA20/價位計算
-        ok, err = run_step("twse_stock_close", lambda: _collect_twse_stock_close(date, db_path))
-        results["twse_stock_close"] = ok
-        if err:
-            errors.append(err)
-
-        # 2. Chip: 分點進出（FinMind）。未設 FINMIND_TOKEN 時整步跳過、不計為失敗
-        #    （分點自動源需付費 token；可改用 /chip-import 手動匯入）。
-        if settings.FINMIND_TOKEN:
-            ok, err = run_step("chip", lambda: _collect_chip(date, db_path))
-            results["chip"] = ok
+        # 觀察名單為空 → 個股收盤與分點整步略過、不計失敗（沒有股票可收）
+        if watchlist_list(conn=conn):
+            # 1. TWSE: 個股收盤價（watchlist）——寫 __PRICE_ONLY__ 列供 MA20/價位計算
+            ok, err = run_step("twse_stock_close",
+                               lambda: _collect_twse_stock_close(date, db_path))
+            results["twse_stock_close"] = ok
             if err:
                 errors.append(err)
+
+            # 2. Chip: 分點進出（FinMind）。未設 FINMIND_TOKEN 時整步跳過、不計為失敗
+            #    （分點自動源需付費 token；可改用 /chip-import 手動匯入）。
+            if settings.FINMIND_TOKEN:
+                ok, err = run_step("chip", lambda: _collect_chip(date, db_path))
+                results["chip"] = ok
+                if err:
+                    errors.append(err)
+            else:
+                logger.info("chip_collect: 未設 FINMIND_TOKEN，分點自動收集略過（可用 /chip-import 手動匯入）")
         else:
-            logger.info("chip_collect: 未設 FINMIND_TOKEN，分點自動收集略過（可用 /chip-import 手動匯入）")
+            logger.info("chip_collect: 觀察名單為空，個股收盤與分點略過")
 
         # 3. Integration: compute_chip_metrics → daily_stock_metrics
         ok, err = run_step("integration_chip", lambda: _compute_chip(date, conn))

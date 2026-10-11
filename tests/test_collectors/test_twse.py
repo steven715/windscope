@@ -483,10 +483,19 @@ class TestWatchlistLoading:
         ids = {s["stock_id"] for s in collector._watchlist}
         assert ids == {"9999"}
 
-    def test_empty_db_falls_back_to_json(self, twse_collector):
-        """DB watchlist 為空時 fallback 到 watchlist.json（種子）。"""
-        ids = {s["stock_id"] for s in twse_collector._watchlist}
-        assert "2330" in ids  # 來自 config/watchlist.json
+    def test_empty_db_means_empty_watchlist(self, tmp_path):
+        """DB watchlist 為空 → 觀察名單為空（不退回種子檔）。"""
+        db_path = str(tmp_path / "empty.db")
+        conn = sqlite3.connect(db_path)
+        create_all_tables(conn)
+        conn.close()
+        assert TWSECollector(db_path=db_path)._watchlist == []
+
+    def test_watchlist_read_failure_is_empty_not_crash(self, tmp_path):
+        """watchlist 表不存在（讀取失敗）→ 記 log、空名單，collector 不掛。"""
+        db_path = str(tmp_path / "bare.db")
+        sqlite3.connect(db_path).close()
+        assert TWSECollector(db_path=db_path)._watchlist == []
 
     def test_t86_upserts_stock_info(self, twse_collector):
         """save_foreign_stock 順手把 T86 的股名寫進 stock_info。"""

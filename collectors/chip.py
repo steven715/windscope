@@ -3,10 +3,9 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from collectors.base import BaseCollector
+from collectors.base import BaseCollector, load_watchlist
 from config import settings
 from db.connection import get_connection
-from db.watchlist import load_watchlist_seeded
 from utils.http_client import http_get
 
 logger = logging.getLogger(__name__)
@@ -27,7 +26,7 @@ class ChipCollector(BaseCollector):
 
     def __init__(self, db_path: str | None = None):
         super().__init__(db_path)
-        self._watchlist = load_watchlist_seeded(db_path)
+        self._watchlist = load_watchlist(db_path)
 
     # ── collect 方法 ──────────────────────────────────────────────
 
