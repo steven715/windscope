@@ -465,6 +465,7 @@ def dashboard(request: Request):
         metrics = None
         stock_signals = []
         explain = []
+        explain_notice = None
         if latest:
             signal = {
                 "date": latest[0],
@@ -505,8 +506,9 @@ def dashboard(request: Request):
                 "FROM stock_signals WHERE date = ? ORDER BY stock_id",
                 (signal["date"],),
             ).fetchall()
-            from integration.explain import build_explain
+            from integration.explain import build_explain, premarket_drift_notice
             explain = build_explain(signal["date"], conn)
+            explain_notice = premarket_drift_notice(signal["date"], conn)
 
         stats = get_verification_stats(conn)
         recent = get_recent_verifications(conn, last_n=10)
@@ -519,7 +521,7 @@ def dashboard(request: Request):
     return templates.TemplateResponse(request, "dashboard.html", {
         "active": "dashboard", "signal": signal, "metrics": metrics,
         "stock_signals": stock_signals, "stats": stats, "recent": recent,
-        "explain": explain,
+        "explain": explain, "explain_notice": explain_notice,
     })
 
 

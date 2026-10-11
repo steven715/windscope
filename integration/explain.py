@@ -1,8 +1,9 @@
 """盤前解讀層：把每個指標的「原數據 + 判讀 + 為什麼」組成一張表，供學習用面板顯示。
-純函數，只讀 raw_* 與 daily_metrics，不寫 DB。
+純函數，只讀 raw_*、daily_metrics 與 signals，不寫 DB。
 
 分層原則（見使用者要求）：
-- 原數據 = 事實；判讀 = 系統立場（綁 settings 門檻 + rule_version，本檔內定）。
+- 原數據 = 事實；判讀 = 依門檻得出的級別措辭（詮釋）。盤前判斷維度的級別與
+  對票／信心的實際效果（effect）取自 integration/premarket_call，門檻不在本檔重比。
 - 「為什麼」= 詮釋/評註，**外部化在 config/explain_notes.json**、標來源、可放自己的觀點，
   與判斷邏輯完全分離。改觀點只改 JSON，不動程式、不影響任何訊號。
 """
@@ -13,6 +14,16 @@ import sqlite3
 from pathlib import Path
 
 from config import settings
+from integration.premarket_call import (
+    DIRECTION_LABELS,
+    SKIP_ALIGNED,
+    SKIP_DIRECTION_NEUTRAL,
+    SKIP_FUTURES_VOTE_NEUTRAL,
+    SKIP_FX_VOTE_NEUTRAL,
+    Adjustment,
+    evaluate_premarket_call,
+    load_daily_metrics,
+)
 from integration.premarket_inputs import SPOT_FROM_INDEX, PremarketInputs, load_premarket_inputs
 from integration.stock_chip import (
     BrokerReading,
@@ -46,25 +57,49 @@ def _note(notes: dict, dim: str) -> tuple[str, str]:
     return e.get("note", ""), e.get("source", "")
 
 
-def _row(dim, raw, verdict, css, notes):
+def _row(dim, raw, verdict, css, notes, effect=None):
     why, why_source = _note(notes, dim)
     return {"dim": dim, "raw": raw, "verdict": verdict, "css": css,
-            "why": why, "why_source": why_source}
+            "effect": effect, "why": why, "why_source": why_source}
+
+
+_SKIP_ZH = {
+    SKIP_FX_VOTE_NEUTRAL: "匯率票中性",
+    SKIP_FUTURES_VOTE_NEUTRAL: "期貨票中性",
+    SKIP_DIRECTION_NEUTRAL: "判斷方向中性",
+    SKIP_ALIGNED: "與判斷同向",
+}
+
+
+def _effect_text(adj: Adjustment) -> str | None:
+    """信心調整的實際效果文字：+1／-1／未計入（原因）；無級別或級別本不調整回 None。"""
+    if adj.effect > 0:
+        return f"信心 +{adj.effect}"
+    if adj.effect < 0:
+        return f"信心 {adj.effect}"
+    if adj.skip:
+        return f"未計入：{_SKIP_ZH[adj.skip]}"
+    return None
+
+
+def _vote_text(name: str, vote: str) -> str:
+    return f"{name} {DIRECTION_LABELS[vote]}"
 
 
 def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
-    """組出 date 的盤前解讀表。回傳每維度 {dim, raw, verdict, css, why} 的 list。"""
-    m = conn.execute(
-        "SELECT fx_delta_twd, fx_direction, fx_asia_detail, fx_asia_sync, "
-        "       futures_spread, futures_spread_adjusted, futures_volume_ratio, "
-        "       oi_net_foreign, oi_delta "
-        "FROM daily_metrics WHERE date = ?",
-        (date,),
-    ).fetchone()
-    if m is None:
+    """組出 date 的盤前解讀表。回傳每維度 {dim, raw, verdict, css, effect, why} 的 list。
+
+    盤前判斷的維度（匯率、亞幣同步、期貨價差、夜盤量比、外資未平倉）的級別與效果
+    取自 premarket_call，本檔只負責措辭；effect＝該維度對票或信心的實際效果。
+    """
+    metrics = load_daily_metrics(date, conn)
+    if metrics is None:
         return []
-    (fx_delta_twd, fx_direction, asia_json, asia_sync,
-     spread, spread_adj, vol_ratio, oi_net, oi_delta) = m
+    call = evaluate_premarket_call(metrics)
+    fx_delta_twd, fx_direction = metrics.fx_delta_twd, metrics.fx_direction
+    spread, spread_adj = metrics.futures_spread, metrics.futures_spread_adjusted
+    vol_ratio = metrics.futures_volume_ratio
+    oi_net, oi_delta = metrics.oi_net_foreign, metrics.oi_delta
 
     notes = _load_notes()
     inp = load_premarket_inputs(date, conn)
@@ -81,25 +116,35 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
         "bearish": ("貶值（外資匯出，今天別衝）", "down"),
         "neutral": ("平盤（回到個股籌碼判斷）", "flat"),
     }.get(fx_direction, ("資料不足", "flat"))
-    rows.append(_row("匯率（台幣）", raw, verdict, css, notes))
+    rows.append(_row("匯率（台幣）", raw, verdict, css, notes,
+                     _vote_text("匯率票", call.fx_vote)))
 
     # 1b. 匯率節奏（跳空 + 緩步/急拉，用盤前 5 分序列）
     rows.append(_fx_rhythm(date, conn, fx_delta_twd, notes))
 
     # 2. 亞幣同步
-    detail = json.loads(asia_json) if asia_json else {}
+    # 亞幣同步與韓元背離是兩個信心調整，原數據同一行 → 一列、兩個效果都列
+    detail = metrics.fx_asia_detail or {}
     raw = (f"台幣{_ASIA_ZH.get(detail.get('TWD'))}／"
            f"人民幣{_ASIA_ZH.get(detail.get('CNY'))}／"
            f"韓元{_ASIA_ZH.get(detail.get('KRW'))}")
-    if detail.get("TWD") == "bearish" and detail.get("CNY") == "bearish" and detail.get("KRW") == "bullish":
+    asia, krw = call.asia_sync, call.krw_divergence
+    if krw.level == "divergence":
         verdict, css = "警示：台幣人民幣貶但韓元升，外資恐賣台買韓", "down"
-    elif asia_sync == 1:
+    elif asia.level == "sync":
         verdict, css = "三幣同步（國際資金流入亞洲，大盤安全）", "up"
-    elif asia_sync == 0:
+    elif asia.level == "diverge":
         verdict, css = "分歧（只有部分亞幣動，買盤恐不持續）", "flat"
     else:
         verdict, css = "資料不足（亞幣收盤基準累積中）", "flat"
-    rows.append(_row("亞幣同步", raw, verdict, css, notes))
+    effects = []
+    if krw.effect:
+        effects.append(f"韓元背離 {_effect_text(krw)}")
+    asia_effect = _effect_text(asia)
+    if asia_effect:
+        label = "亞幣同步" if asia.level == "sync" else "亞幣分歧"
+        effects.append(f"{label} {asia_effect}")
+    rows.append(_row("亞幣同步", raw, verdict, css, notes, "；".join(effects) or None))
 
     # 3. 期貨價差
     night, prev_spot = inp.night_close, inp.prev_spot
@@ -110,15 +155,17 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
             raw += f"（扣除息後 {spread_adj:+.0f}）"
     else:
         raw = f"{spread_adj:+.0f}" if spread_adj is not None else "資料不足"
+    threshold = f"{settings.FUTURES_SPREAD_THRESHOLD:g}"
     if spread_adj is None:
         verdict, css = "資料不足", "flat"
-    elif spread_adj >= settings.FUTURES_SPREAD_THRESHOLD:
-        verdict, css = "正價差>100（開高機率高）", "up"
-    elif spread_adj <= -settings.FUTURES_SPREAD_THRESHOLD:
-        verdict, css = "逆價差>100（開低機率高）", "down"
+    elif call.futures_vote == "bullish":
+        verdict, css = f"正價差≥{threshold}（開高機率高）", "up"
+    elif call.futures_vote == "bearish":
+        verdict, css = f"逆價差≥{threshold}（開低機率高）", "down"
     else:
-        verdict, css = "價差<100（中性）", "flat"
-    rows.append(_row("期貨價差", raw, verdict, css, notes))
+        verdict, css = f"價差未達±{threshold}（中性）", "flat"
+    rows.append(_row("期貨價差", raw, verdict, css, notes,
+                     _vote_text("期貨票", call.futures_vote)))
 
     # 4. 夜盤量比（原數據顯示今夜實際口數 + 近 N 日均量，比單一倍數有感）
     if vol_ratio is not None:
@@ -128,30 +175,29 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
             raw = f"今夜 {night_vol:,} 口 ｜ 近{n}日均 {avg:,.0f} 口 → {vol_ratio:.2f}倍"
         else:
             raw = f"{vol_ratio:.2f}x（vs 近{n}日均量）"
-        if vol_ratio >= settings.VOLUME_RATIO_HIGH:
-            verdict, css = "爆量（大戶提前佈局，順著做）", "up"
-        elif vol_ratio <= settings.VOLUME_RATIO_LOW:
-            verdict, css = "量縮（市場在等，開盤波動大）", "flat"
-        else:
-            verdict, css = "量能正常", "flat"
+        verdict, css = {
+            "high": ("爆量（大戶提前佈局，順著做）", "up"),
+            "low": ("量縮（市場在等，開盤波動大）", "flat"),
+        }.get(call.night_volume.level, ("量能正常", "flat"))
     else:
         raw, verdict, css = "資料不足", "資料不足", "flat"
-    rows.append(_row("夜盤量比", raw, verdict, css, notes))
+    rows.append(_row("夜盤量比", raw, verdict, css, notes,
+                     _effect_text(call.night_volume)))
 
     # 5. 外資未平倉
     if oi_net is not None:
         raw = f"{oi_net:+,} 口"
         if oi_delta is not None:
             raw += f"（較前日 {oi_delta:+,}）"
-        if oi_net <= settings.OI_BEARISH_THRESHOLD:
-            verdict, css = "外資淨空（方向偏空）", "down"
-        elif oi_net >= settings.OI_BULLISH_THRESHOLD:
-            verdict, css = "外資淨多（方向偏多）", "up"
-        else:
-            verdict, css = "部位中性", "flat"
+        # 籌碼沒有票：只在與判斷方向相逆時扣信心（見 effect）
+        verdict, css = {
+            "net_short": ("外資淨空", "down"),
+            "net_long": ("外資淨多", "up"),
+        }.get(call.foreign_oi.level, ("部位中性", "flat"))
     else:
         raw, verdict, css = "尚未收集（收盤後更新）", "—", "flat"
-    rows.append(_row("外資未平倉", raw, verdict, css, notes))
+    rows.append(_row("外資未平倉", raw, verdict, css, notes,
+                     _effect_text(call.foreign_oi)))
 
     # 6. 美股對照（看異常）
     sp_now, sp_prev = inp.sp500_today, inp.sp500_prev
@@ -173,6 +219,27 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
     rows.append(_jpy_risk_gauge(inp, notes))
 
     return rows
+
+
+def premarket_drift_notice(date: str, conn: sqlite3.Connection) -> str | None:
+    """解讀即時重算的盤前判斷與 signals 已存那筆不同時回一行提示；相同或缺資料回 None。
+
+    正常交易日兩者相同；事後補資料、或規則版本更新後回看舊日子才會不同。
+    """
+    stored = conn.execute(
+        "SELECT direction, confidence, rule_version FROM signals WHERE date = ?", (date,)
+    ).fetchone()
+    metrics = load_daily_metrics(date, conn)
+    if stored is None or metrics is None:
+        return None
+    call = evaluate_premarket_call(metrics)
+    direction, confidence, rule_version = stored
+    if (call.direction, call.confidence, call.rule_version) == (direction, confidence, rule_version):
+        return None
+    return (f"解讀以目前資料／規則 {call.rule_version} 重算"
+            f"（{DIRECTION_LABELS[call.direction]} 信心 {call.confidence}），"
+            f"與 08:50 的盤前判斷（{DIRECTION_LABELS.get(direction, direction)} "
+            f"信心 {confidence}，{rule_version}）不同")
 
 
 def _jpy_risk_gauge(inp: PremarketInputs, notes: dict) -> dict:

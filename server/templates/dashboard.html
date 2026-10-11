@@ -131,6 +131,7 @@
   <span class="section-title" style="margin:0">盤前解讀</span>
   <span class="muted">原數據(事實) → 判讀(綁門檻) → 為什麼(觀點)</span>
 </div>
+{% if explain_notice %}<div class="muted" style="margin-bottom:8px">⚠ {{ explain_notice }}</div>{% endif %}
 <div class="explain">
   <div class="explain-head"><span>維度</span><span>原數據</span><span>判讀</span><span>為什麼</span></div>
   {% for e in explain %}
@@ -138,12 +139,13 @@
     <div class="er-main" data-toggle>
       <span class="er-dim">{{ e.dim }}</span>
       <span class="er-raw">{{ e.raw }}</span>
-      <span class="er-verdict"><span class="chip chip-{{ e.css }}">{{ e.verdict }}</span></span>
+      <span class="er-verdict"><span class="chip chip-{{ e.css }}">{{ e.verdict }}</span>{% if e.effect %} <span class="muted">{{ e.effect }}</span>{% endif %}</span>
       <span class="er-why">{{ e.why }}{% if e.why_source %}<span class="src">{{ e.why_source }}觀點</span>{% endif %}</span>
       <span class="er-caret"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></span>
     </div>
     <div class="er-detail">
       <div class="dl"><span class="dk">原數據</span><span class="dv">{{ e.raw }}</span></div>
+      {% if e.effect %}<div class="dl"><span class="dk">效果</span><span class="dv">{{ e.effect }}</span></div>{% endif %}
       <div class="dl"><span class="dk">為什麼</span><span class="dv">{{ e.why }}{% if e.why_source %}<span class="src">{{ e.why_source }}觀點</span>{% endif %}</span></div>
     </div>
   </div>

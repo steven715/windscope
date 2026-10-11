@@ -108,6 +108,13 @@ class TestPagesWithData:
         assert "4 / 5" in resp.text
         assert "匯率與期貨同向" in resp.text
 
+    def test_dashboard_explain_shows_effects_and_drift_notice(self, client_with_data):
+        """盤前解讀列出各維度效果；fixture 存的 v1／信心 4 與即時重算（信心 3）不同 → 提示。"""
+        resp = client_with_data.get("/")
+        assert "匯率票 ↑ 偏多" in resp.text
+        assert "亞幣同步 信心 +1" in resp.text
+        assert "與 08:50 的盤前判斷" in resp.text
+
     def test_dashboard_shows_verification(self, client_with_data):
         resp = client_with_data.get("/")
         assert "✓ 命中" in resp.text
