@@ -16,6 +16,7 @@ def test_after_close_skips_non_trading_day():
 def test_after_close_full_success(memory_db, monkeypatch):
     """所有 collector 成功時，status = completed。"""
     from jobs import after_close
+    memory_db.execute("INSERT INTO watchlist (stock_id, stock_name) VALUES ('2330', '台積電')")
 
     # Mock 所有步驟都成功
     def mock_step(name, fn):
@@ -38,6 +39,7 @@ def test_after_close_full_success(memory_db, monkeypatch):
 def test_after_close_partial_failure(memory_db, monkeypatch):
     """部分 collector 失敗時，status = partial，其他步驟仍執行。"""
     from jobs import after_close
+    memory_db.execute("INSERT INTO watchlist (stock_id, stock_name) VALUES ('2330', '台積電')")
 
     call_count = {"n": 0}
 
@@ -65,6 +67,22 @@ def test_after_close_partial_failure(memory_db, monkeypatch):
     # 拆出去的步驟不應再出現在 after_close
     for moved in ("twse_stock_close", "chip", "integration_chip", "fx_close"):
         assert moved not in result["results"]
+
+
+def test_after_close_skips_trends_when_watchlist_empty(memory_db, monkeypatch):
+    """觀察名單為空 → 趨勢步驟略過、不計失敗。"""
+    from jobs import after_close
+
+    monkeypatch.setattr(after_close, "run_step", lambda name, fn: (True, None))
+    monkeypatch.setattr(after_close, "is_trading_day", lambda d: True)
+
+    with patch("jobs.after_close.get_connection") as mock_conn:
+        mock_conn.return_value.__enter__ = lambda s: memory_db
+        mock_conn.return_value.__exit__ = lambda s, *a: None
+        result = after_close.run_after_close("2026-04-08")
+
+    assert "stock_trends" not in result["results"]
+    assert result["status"] == "completed"
 
 
 def test_collectors_receive_injected_db_path(monkeypatch):

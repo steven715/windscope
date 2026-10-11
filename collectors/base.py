@@ -4,9 +4,20 @@ from abc import ABC, abstractmethod
 from typing import Callable
 
 from config import settings
+from db.watchlist import watchlist_list
 from utils.logger import log_event
 
 logger = logging.getLogger(__name__)
+
+
+def load_watchlist(db_path: str | None) -> list[dict]:
+    """觀察名單（DB 表為準，表空即空）；讀取失敗記 log 回空名單，不讓 collector 掛掉。"""
+    try:
+        return [{"stock_id": r["stock_id"], "stock_name": r["stock_name"]}
+                for r in watchlist_list(db_path=db_path)]
+    except Exception as e:
+        logger.error("watchlist 讀取失敗，視為空名單: %s", e)
+        return []
 
 
 class BaseCollector(ABC):

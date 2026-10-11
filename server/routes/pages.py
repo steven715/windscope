@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 
 from config import settings
 from db.connection import get_connection
+from db.watchlist import watchlist_get, watchlist_list
 from integration.premarket_call import DIRECTION_LABELS as _DIRECTION_LABELS
 from integration.premarket_call import load_daily_metrics
 from integration.verification import (
@@ -287,9 +288,7 @@ def chip_import_page(request: Request, msg: str | None = None):
     """分點籌碼手動匯入頁：看著看盤軟體截圖，把關鍵分點的買賣超填進表單。"""
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
-        stocks = conn.execute(
-            "SELECT stock_id, stock_name FROM watchlist ORDER BY stock_id"
-        ).fetchall()
+        stocks = [(w["stock_id"], w["stock_name"]) for w in watchlist_list(conn=conn)]
         brokers = conn.execute(
             "SELECT broker_name FROM broker_tags ORDER BY broker_name"
         ).fetchall()
@@ -321,10 +320,8 @@ def chip_import_submit(
 
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
-        row = conn.execute(
-            "SELECT stock_name FROM watchlist WHERE stock_id = ?", (stock_id,)
-        ).fetchone()
-    stock_name = row[0] if row else stock_id
+        item = watchlist_get(stock_id, conn=conn)
+    stock_name = item["stock_name"] if item else stock_id
 
     items = []
     for name, b, s in zip(broker_name, buy, sell):
@@ -392,11 +389,8 @@ def stock_import_page(request: Request, msg: str | None = None):
     db_path = request.app.state.db_path
     warm_bars = settings.TREND_MA_BIG + settings.TREND_SLOPE_LOOKBACK
     with get_connection(db_path) as conn:
-        stocks = conn.execute(
-            "SELECT stock_id, stock_name FROM watchlist ORDER BY stock_id"
-        ).fetchall()
         rows = []
-        for sid, name in stocks:
+        for sid, name in ((w["stock_id"], w["stock_name"]) for w in watchlist_list(conn=conn)):
             cnt, first, last = conn.execute(
                 "SELECT COUNT(*), MIN(date), MAX(date) FROM raw_stock_daily "
                 "WHERE stock_id = ?", (sid,)
@@ -433,12 +427,9 @@ def stock_import_run(request: Request, background_tasks: BackgroundTasks,
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
         if stock_id == "__ALL__":
-            ids = [r[0] for r in conn.execute(
-                "SELECT stock_id FROM watchlist ORDER BY stock_id").fetchall()]
+            ids = [w["stock_id"] for w in watchlist_list(conn=conn)]
         else:
-            ids = [stock_id.strip()] if conn.execute(
-                "SELECT 1 FROM watchlist WHERE stock_id = ?",
-                (stock_id.strip(),)).fetchone() else []
+            ids = [stock_id.strip()] if watchlist_get(stock_id.strip(), conn=conn) else []
 
     if not ids:
         return RedirectResponse(
@@ -755,12 +746,12 @@ def backtest_page(request: Request, run_id: int | None = None,
     db_path = request.app.state.db_path
     warm_bars = settings.TREND_MA_BIG + settings.TREND_SLOPE_LOOKBACK
     with get_connection(db_path) as conn:
-        stocks = [{"stock_id": r[0], "stock_name": r[1], "bars": r[2] or 0,
-                   "warm": (r[2] or 0) >= warm_bars}
-                  for r in conn.execute(
-                      "SELECT w.stock_id, w.stock_name, (SELECT COUNT(*) FROM "
-                      "raw_stock_daily s WHERE s.stock_id = w.stock_id) "
-                      "FROM watchlist w ORDER BY w.stock_id").fetchall()]
+        stocks = []
+        for w in watchlist_list(conn=conn):
+            bars = conn.execute("SELECT COUNT(*) FROM raw_stock_daily WHERE stock_id = ?",
+                                (w["stock_id"],)).fetchone()[0]
+            stocks.append({"stock_id": w["stock_id"], "stock_name": w["stock_name"],
+                           "bars": bars, "warm": bars >= warm_bars})
         names = {s["stock_id"]: s["stock_name"] for s in stocks}
 
         runs = [dict(zip(_BT_RUN_COLS, r)) for r in conn.execute(
@@ -811,10 +802,9 @@ def backtest_history_page(request: Request):
         runs = [dict(zip(_BT_RUN_COLS, r)) for r in conn.execute(
             f"SELECT {', '.join(_BT_RUN_COLS)} FROM backtest_runs "
             "ORDER BY id DESC LIMIT 100").fetchall()]
-        names = {r[0]: r[1] for r in conn.execute(
-            "SELECT stock_id, stock_name FROM watchlist").fetchall()}
+        _fill_stock_names(conn, runs)  # stock_info：移出觀察名單後名稱仍在
     for r in runs:
-        r["stock_name"] = names.get(r["stock_id"], r["stock_id"])
+        r["stock_name"] = r["stock_name"] or r["stock_id"]
         r["mode_label"] = _BT_MODE_LABELS.get(r["entry_mode"], r["entry_mode"])
     return templates.TemplateResponse(request, "backtest_history.html", {
         "active": "backtest_history", "runs": runs,
@@ -836,8 +826,7 @@ def backtest_run_route(request: Request, stock_id: str = Form(...),
     modes = ["single", "scaled"] if entry_mode == "both" else [entry_mode]
     last_run_id, n_bars = None, 0
     with get_connection(db_path) as conn:
-        if not conn.execute("SELECT 1 FROM watchlist WHERE stock_id = ?",
-                            (sid,)).fetchone():
+        if watchlist_get(sid, conn=conn) is None:
             return RedirectResponse(url=f"/backtest?msg={quote('找不到該觀察股')}",
                                     status_code=303)
         for mode in modes:
@@ -949,12 +938,10 @@ def backtest_compare_page(request: Request, a: int, b: int):
         if not run_a or not run_b:
             return RedirectResponse(url=f"/backtest?msg={quote('找不到要比較的回測')}",
                                     status_code=303)
-        names = {r[0]: r[1] for r in conn.execute(
-            "SELECT stock_id, stock_name FROM watchlist WHERE stock_id IN (?, ?)",
-            (run_a["stock_id"], run_b["stock_id"])).fetchall()}
+        _fill_stock_names(conn, [run_a, run_b])
 
     for run in (run_a, run_b):
-        run["stock_name"] = names.get(run["stock_id"], run["stock_id"])
+        run["stock_name"] = run["stock_name"] or run["stock_id"]
         run["mode_label"] = _BT_MODE_LABELS.get(run["entry_mode"], run["entry_mode"])
 
     fa, fb = _flat_params(pa), _flat_params(pb)
@@ -1035,10 +1022,8 @@ def watchlist_page(request: Request):
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
         index_row, idx_changes = _index_strip(conn)
-        stocks = conn.execute(
-            "SELECT stock_id, stock_name, added_date, reason "
-            "FROM watchlist ORDER BY stock_id"
-        ).fetchall()
+        stocks = [(w["stock_id"], w["stock_name"], w["added_date"], w["reason"])
+                  for w in watchlist_list(conn=conn)]
         asof = _signals_asof(conn)
         stock_chip = {s[0]: load_stock_chip(asof, s[0], conn) for s in stocks}
         # 趨勢獨立於大盤 signals 節奏，用今日為 asof 取最新趨勢（避免 signals job
@@ -1106,10 +1091,9 @@ def stock_detail_page(request: Request, stock_id: str):
 
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
-        row = conn.execute(
-            "SELECT stock_id, stock_name, added_date, reason FROM watchlist "
-            "WHERE stock_id = ?", (stock_id,)
-        ).fetchone()
+        item = watchlist_get(stock_id, conn=conn)
+        row = (item["stock_id"], item["stock_name"], item["added_date"],
+               item["reason"]) if item else None
         if row is None:
             return RedirectResponse(url="/watchlist", status_code=303)
         chip = load_stock_chip(_signals_asof(conn), stock_id, conn)

@@ -8,6 +8,7 @@ import sqlite3
 from datetime import datetime
 
 from config import settings
+from db.watchlist import watchlist_list
 from integration.stock_chip import classify_broker, classify_foreign, foreign_streak
 
 logger = logging.getLogger(__name__)
@@ -24,13 +25,10 @@ def compute_foreign_stock_signals(date: str, conn: sqlite3.Connection) -> list[d
         "DELETE FROM stock_signals WHERE date = ? AND broker_name = '外資'", (date,)
     )
 
-    watch = conn.execute(
-        "SELECT stock_id FROM watchlist ORDER BY stock_id"
-    ).fetchall()
     results = []
     now = datetime.now().isoformat()
 
-    for (stock_id,) in watch:
+    for stock_id in (w["stock_id"] for w in watchlist_list(conn=conn)):
         s = foreign_streak(conn, stock_id, date)
         if s is None:
             continue

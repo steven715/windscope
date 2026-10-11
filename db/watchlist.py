@@ -1,4 +1,4 @@
-"""觀察名單管理：唯一的讀寫入口（list、add、remove、collector 載入）。"""
+"""觀察名單管理：watchlist 表唯一的讀寫入口（list、get、add、remove、seed）。"""
 
 import json
 import logging
@@ -10,28 +10,27 @@ from db.connection import get_connection
 
 logger = logging.getLogger(__name__)
 
-# 初始種子檔：只在 DB 的 watchlist 表不存在/為空時當 fallback（見 load_watchlist_seeded）。
-# 執行期真相一律以 DB 表為準——增刪只走本模組的 watchlist_add/remove。
+# 初始種子檔：只由 watchlist_seed（init-db）匯入一次。執行期真相一律以 DB 表為準，
+# 表空就是觀察名單為空——不退回種子檔。
 _SEED_PATH = Path(__file__).resolve().parent.parent / "config" / "watchlist.json"
 
 
-def load_watchlist_seeded(
-    db_path: str | None = None,
-    conn: sqlite3.Connection | None = None,
-) -> list[dict]:
-    """Collector 專用名單載入：DB 的 watchlist 表為準（網頁/CLI 增刪即時生效），
-    表不存在或為空時 fallback 到 config/watchlist.json（初始種子）。
-    回傳 [{"stock_id", "stock_name"}, ...]。"""
-    try:
-        rows = watchlist_list(db_path=db_path, conn=conn)
-        if rows:
-            return [{"stock_id": r["stock_id"], "stock_name": r["stock_name"]}
-                    for r in rows]
-    except Exception as e:
-        logger.warning("load_watchlist_seeded: DB read failed (%s), using JSON seed", e)
+def watchlist_seed(conn: sqlite3.Connection, json_path: str | None = None) -> int:
+    """從種子檔匯入觀察名單（INSERT OR REPLACE，並寫 stock_info）。回傳匯入筆數。"""
+    from db.schema import upsert_stock_info
 
-    with open(_SEED_PATH, encoding="utf-8") as f:
-        return json.load(f)
+    with open(json_path or _SEED_PATH, encoding="utf-8") as f:
+        stocks = json.load(f)
+    for stock in stocks:
+        conn.execute(
+            "INSERT OR REPLACE INTO watchlist (stock_id, stock_name, added_date, reason) "
+            "VALUES (?, ?, ?, ?)",
+            (stock["stock_id"], stock["stock_name"], stock["added_date"], stock["reason"]),
+        )
+        upsert_stock_info(conn, stock["stock_id"], stock["stock_name"])
+    conn.commit()
+    logger.info("Imported %d watchlist entries", len(stocks))
+    return len(stocks)
 
 
 def watchlist_list(db_path: str | None = None,
@@ -58,6 +57,21 @@ def watchlist_list(db_path: str | None = None,
         }
         for r in rows
     ]
+
+
+def watchlist_get(stock_id: str, db_path: str | None = None,
+                  conn: sqlite3.Connection | None = None) -> dict | None:
+    """取單檔觀察名單（同 watchlist_list 的 dict 形狀）；不在名單回 None。"""
+    sql = ("SELECT stock_id, stock_name, added_date, reason "
+           "FROM watchlist WHERE stock_id = ?")
+    if conn is not None:
+        r = conn.execute(sql, (stock_id,)).fetchone()
+    else:
+        with get_connection(db_path) as c:
+            r = c.execute(sql, (stock_id,)).fetchone()
+    if r is None:
+        return None
+    return {"stock_id": r[0], "stock_name": r[1], "added_date": r[2], "reason": r[3]}
 
 
 def watchlist_add(stock_id: str, stock_name: str, reason: str,

@@ -6,7 +6,8 @@ import sys
 
 from config import settings
 from db.connection import get_connection
-from db.schema import create_all_tables, import_broker_tags, import_watchlist
+from db.schema import create_all_tables, import_broker_tags
+from db.watchlist import watchlist_seed
 from utils.logger import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ def cmd_init_db(args: argparse.Namespace) -> None:
     with get_connection() as conn:
         create_all_tables(conn)
         bt_count = import_broker_tags(conn)
-        wl_count = import_watchlist(conn)
+        wl_count = watchlist_seed(conn)
 
     print(f"Database initialized: {settings.DB_PATH}")
     print(f"  broker_tags: {bt_count} entries imported")

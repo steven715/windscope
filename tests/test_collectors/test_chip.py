@@ -21,6 +21,19 @@ def chip_collector(tmp_path):
     return ChipCollector(db_path=db_path)
 
 
+@pytest.fixture
+def chip_collector_2330(tmp_path):
+    """watchlist 明確塞 2330 的 ChipCollector（與 config/watchlist.json 解耦）。"""
+    db_path = str(tmp_path / "test.db")
+    conn = sqlite3.connect(db_path)
+    create_all_tables(conn)
+    conn.execute("INSERT INTO watchlist (stock_id, stock_name, added_date, reason) "
+                 "VALUES ('2330', '台積電', '2026-04-08', 't')")
+    conn.commit()
+    conn.close()
+    return ChipCollector(db_path=db_path)
+
+
 def _finmind_payload() -> dict:
     """讀取 FinMind 回應 fixture（依官方文件 schema 構造）。"""
     return json.loads(
@@ -47,11 +60,11 @@ class TestCollectBrokerTrading:
         assert data is None
         mock_get.assert_not_called()
 
-    def test_collect_with_token(self, chip_collector, monkeypatch):
+    def test_collect_with_token(self, chip_collector_2330, monkeypatch):
         """有 token 時逐檔查詢 watchlist 並彙總券商買賣。"""
         monkeypatch.setattr("config.settings.FINMIND_TOKEN", "fake-token")
         with patch("collectors.chip.http_get", return_value=_mock_resp(_finmind_payload())):
-            data = chip_collector.collect_broker_trading("2026-06-11")
+            data = chip_collector_2330.collect_broker_trading("2026-06-11")
 
         assert data is not None
         assert "2330" in data
@@ -100,15 +113,15 @@ class TestCollectBrokerTrading:
         assert isinstance(results, dict)
         assert results["broker_trading"] is False
 
-    def test_run_with_token_saves_to_db(self, chip_collector, monkeypatch):
+    def test_run_with_token_saves_to_db(self, chip_collector_2330, monkeypatch):
         """run() 成功收集後寫入 raw_chip。"""
         monkeypatch.setattr("config.settings.FINMIND_TOKEN", "fake-token")
         with patch("collectors.chip.http_get", return_value=_mock_resp(_finmind_payload())):
-            results = chip_collector.run("2026-06-11")
+            results = chip_collector_2330.run("2026-06-11")
 
         assert results["broker_trading"] is True
 
-        conn = sqlite3.connect(chip_collector.db_path)
+        conn = sqlite3.connect(chip_collector_2330.db_path)
         row = conn.execute(
             "SELECT buy_volume, sell_volume, net_volume FROM raw_chip "
             "WHERE date = '2026-06-11' AND stock_id = '2330' AND broker_name = '凱基-台北'"
@@ -240,7 +253,6 @@ class TestWatchlistLoading:
         ids = {s["stock_id"] for s in collector._watchlist}
         assert ids == {"9999"}
 
-    def test_empty_db_falls_back_to_json(self, chip_collector):
-        """DB watchlist empty -> fall back to config/watchlist.json seed."""
-        ids = {s["stock_id"] for s in chip_collector._watchlist}
-        assert "2330" in ids
+    def test_empty_db_means_empty_watchlist(self, chip_collector):
+        """DB watchlist 為空 → 觀察名單為空（不退回種子檔）。"""
+        assert chip_collector._watchlist == []
