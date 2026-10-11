@@ -391,27 +391,18 @@ def build_stock_explain(date: str, stock_id: str,
 # 鏡像籌碼解讀的三欄：原數據(事實)→判讀(綁 TREND_RULE_VERSION 門檻)→為什麼(觀點)。
 # 技術面讀 stock_trend_signals（由個股日K導出）；基本面資料源未接，先預留占位。
 
-_TREND_LABELS = {"UP": "上升趨勢", "DOWN": "下降趨勢",
-                 "FLAT": "震盪盤整", "UNKNOWN": "資料不足"}
-_TREND_CSS = {"UP": "up", "DOWN": "down", "FLAT": "flat", "UNKNOWN": "flat"}
-
-
 def _stock_trend_row(date: str, stock_id: str, conn: sqlite3.Connection,
                      notes: dict) -> dict:
-    """趨勢（技術面）維度：讀 stock_trend_signals 最新一筆，組原數據＋三態判讀。"""
-    row = conn.execute(
-        "SELECT big_trend, big_trend_confidence, value_center, bias_pct, "
-        "       small_state, small_turn_up, action_hint, position_hint, adjust_note "
-        "FROM stock_trend_signals WHERE stock_id = ? AND date <= ? "
-        "ORDER BY date DESC LIMIT 1",
-        (stock_id, date),
-    ).fetchone()
-    if row is None:
+    """趨勢（技術面）維度：讀 date 以前最新一筆趨勢訊號，組原數據＋三態判讀。"""
+    from integration.trend_signal import load_stock_trend
+
+    t = load_stock_trend(stock_id, conn, asof=date)
+    if t is None:
         return _row("趨勢（技術面）", "尚未回補歷史K線（可用『K線匯入』補）",
                     "資料不可用", "flat", notes)
 
-    big, slope, center, bias, small, turn_up, action, pos, adj_note = row
-    if big == "UNKNOWN":
+    slope, center, bias, small = t.big_trend_confidence, t.value_center, t.bias_pct, t.small_state
+    if t.big_trend == "UNKNOWN":
         return _row("趨勢（技術面）", "歷史K線不足，年線暖機未完成（需~260根）",
                     "資料不足", "flat", notes)
 
@@ -422,15 +413,15 @@ def _stock_trend_row(date: str, stock_id: str, conn: sqlite3.Connection,
         parts.append(f"年線斜率{slope * 100:+.1f}%")
     if bias is not None:
         parts.append(f"乖離{bias * 100:+.1f}%")
-    parts.append(f"小勢{small}" + ("·MA5轉升" if turn_up else ""))
+    parts.append(f"小勢{small}" + ("·MA5轉升" if t.small_turn_up else ""))
     raw = "｜".join(parts)
-    if adj_note:                       # 還原提示：公司行為缺口偵測（供人工核對）
-        raw += f"｜{adj_note}"
+    if t.adjust_note:                  # 還原提示：公司行為缺口偵測（供人工核對）
+        raw += f"｜{t.adjust_note}"
 
-    verdict = f"{_TREND_LABELS.get(big, big)}·{action}"
-    if pos and pos != "—":
-        verdict += f"（{pos}）"
-    return _row("趨勢（技術面）", raw, verdict, _TREND_CSS.get(big, "flat"), notes)
+    verdict = f"{t.label}·{t.action_hint}"
+    if t.position_hint and t.position_hint != "—":
+        verdict += f"（{t.position_hint}）"
+    return _row("趨勢（技術面）", raw, verdict, t.css, notes)
 
 
 def _stock_fundamental_row(notes: dict) -> dict:

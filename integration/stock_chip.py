@@ -223,17 +223,13 @@ def _read_zone(conn: sqlite3.Connection, stock_id: str, date: str) -> ZoneReadin
         return ZoneReading(True, row[0], row[1])
 
     # 退回 K線趨勢的乖離（bias_pct 是還原後對 MA20 的乖離，比例）
-    trow = conn.execute(
-        "SELECT bias_pct FROM stock_trend_signals "
-        "WHERE stock_id = ? AND date <= ? AND bias_pct IS NOT NULL "
-        "ORDER BY date DESC LIMIT 1",
-        (stock_id, date),
-    ).fetchone()
-    if trow is not None and trow[0] is not None:
-        from integration.chip_metrics import _classify_price_zone
+    from integration.chip_metrics import classify_price_zone
+    from integration.trend_signal import load_stock_trend
 
-        pct = trow[0] * 100
-        return ZoneReading(True, pct, _classify_price_zone(pct), from_kline=True)
+    trend = load_stock_trend(stock_id, conn, asof=date)
+    if trend is not None and trend.bias_pct is not None:
+        pct = trend.bias_pct * 100
+        return ZoneReading(True, pct, classify_price_zone(pct), from_kline=True)
 
     return ZoneReading(available=False)
 

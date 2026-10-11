@@ -75,7 +75,7 @@ def _calc_price_vs_ma20(conn: sqlite3.Connection, date: str,
     return round((close_price - ma) / ma * 100, 2)
 
 
-def _classify_price_zone(pct: float | None) -> str | None:
+def classify_price_zone(pct: float | None) -> str | None:
     """根據 price_vs_ma20 分類價格區間。"""
     if pct is None:
         return None
@@ -135,7 +135,7 @@ def compute_chip_metrics(date: str, conn: sqlite3.Connection) -> list[dict]:
             price_vs_ma20 = None
 
         # 4. price_zone
-        price_zone = _classify_price_zone(price_vs_ma20)
+        price_zone = classify_price_zone(price_vs_ma20)
 
         # 5. both_sides_flag
         if buy_vol and sell_vol and buy_vol > 0 and sell_vol > 0:

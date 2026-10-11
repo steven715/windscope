@@ -384,7 +384,7 @@ async def chip_import_ocr(image: UploadFile = File(...)):
 @router.get("/stock-import", response_class=HTMLResponse)
 def stock_import_page(request: Request, msg: str | None = None):
     """K線匯入：列出各觀察股的日K狀態＋補救匯入按鈕（auto-backfill 失敗時的救援）。"""
-    from integration.explain import _TREND_LABELS
+    from integration.trend_signal import load_stock_trend
 
     db_path = request.app.state.db_path
     warm_bars = settings.TREND_MA_BIG + settings.TREND_SLOPE_LOOKBACK
@@ -395,20 +395,16 @@ def stock_import_page(request: Request, msg: str | None = None):
                 "SELECT COUNT(*), MIN(date), MAX(date) FROM raw_stock_daily "
                 "WHERE stock_id = ?", (sid,)
             ).fetchone()
-            trend = conn.execute(
-                "SELECT big_trend, action_hint, date FROM stock_trend_signals "
-                "WHERE stock_id = ? ORDER BY date DESC LIMIT 1", (sid,)
-            ).fetchone()
+            trend = load_stock_trend(sid, conn)
             bar_count = cnt or 0
             rows.append({
                 "stock_id": sid, "stock_name": name,
                 "bar_count": bar_count, "first_date": first, "last_date": last,
                 "warm": bar_count >= warm_bars,
-                "trend_label": _TREND_LABELS.get(trend[0]) if trend else None,
-                "trend_css": {"UP": "up", "DOWN": "down"}.get(
-                    trend[0] if trend else None, "flat"),
-                "action": trend[1] if trend else None,
-                "trend_date": trend[2] if trend else None,
+                "trend_label": trend.label if trend else None,
+                "trend_css": trend.css if trend else "flat",
+                "action": trend.action_hint if trend else None,
+                "trend_date": trend.date if trend else None,
             })
     # 有股票還沒算出趨勢（剛加入回補中，或 0 根）→ 頁面自動更新讓使用者看到進度
     pending = any(r["trend_label"] is None for r in rows)
