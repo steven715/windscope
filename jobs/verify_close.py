@@ -4,7 +4,7 @@ import logging
 import sqlite3
 
 from db.connection import get_connection
-from jobs.helpers import determine_status, run_step, run_step_value
+from jobs.helpers import JobRun
 from utils.trading_calendar import is_trading_day
 
 logger = logging.getLogger(__name__)
@@ -16,74 +16,37 @@ def run_verify_close(date: str, db_path: str | None = None) -> dict:
 
     回傳格式同其他 jobs，額外包含 verification 結果 dict。
     """
-    logger.info("run_verify_close: starting for %s", date)
-
     if not is_trading_day(date):
-        logger.info("run_verify_close: %s is not a trading day, skipping", date)
-        return {
-            "date": date, "status": "skipped",
-            "results": {}, "errors": [], "verification": None,
-        }
+        return JobRun.skipped("verify_close", date, "非交易日", verification=None)
 
-    results = {}
-    errors = []
-    verification = None
+    from collectors.twse import TWSECollector
+    from integration.verification import verify_signal
+
+    job = JobRun("verify_close", date)
+    twse = TWSECollector(db_path=db_path)
 
     # 1. 收集當日加權指數 OHLC（會寫入 raw_index）
-    ok, err = run_step("index_ohlc", lambda: _collect_index_ohlc(date, db_path))
-    results["index_ohlc"] = ok
-    if err:
-        errors.append(err)
+    job.collect("index_ohlc", lambda: twse.collect_index_ohlc(date),
+                lambda d: twse.save_index_ohlc(date, d))
 
     # 1b. 確保前一交易日的指數基準存在：缺則從 MI_5MINS_HIST 補。
     #     避免單日驗證漏跑造成隔日驗證因「無前日收盤」連環失敗。
-    ok, err = run_step("prev_index_baseline",
-                       lambda: _ensure_prev_index_baseline(date, db_path))
-    results["prev_index_baseline"] = ok
-    if err:
-        errors.append(err)
-
-    # 2. 驗證訊號
-    from integration.verification import verify_signal
+    job.step("prev_index_baseline", lambda: _ensure_prev_index_baseline(date, db_path))
 
     with get_connection(db_path) as conn:
-        verification, err = run_step_value("verify", lambda: verify_signal(date, conn))
-        results["verify"] = verification is not None
-        if err:
-            errors.append(err)
+        # 2. 驗證盤前判斷
+        verification = job.step("verify", lambda: verify_signal(date, conn))
 
         # 2b. 自癒：補驗最近「有訊號卻無 verification」的交易日。
         #     某日 14:30 指數尚未發布 → 當日 verify partial、無驗證列；隔日
         #     _ensure_prev_index_baseline 會補回該日指數，此步隨後補上驗證，
         #     避免訊號靜默掉出命中率統計（如 2026-06-25）。
-        ok, err = run_step("backfill_unverified",
-                           lambda: _backfill_unverified_signals(date, conn))
-        results["backfill_unverified"] = ok
-        if err:
-            errors.append(err)
+        job.step("backfill_unverified", lambda: _backfill_unverified_signals(date, conn))
 
-    status = determine_status(results)
-    logger.info("run_verify_close: %s status=%s", date, status)
-    return {
-        "date": date, "status": status,
-        "results": results, "errors": errors,
-        "verification": verification,
-    }
+    return {**job.finish(), "verification": verification}
 
 
 # ── 內部步驟函式 ─────────────────────────────────────────────────
-
-
-def _collect_index_ohlc(date: str, db_path: str | None) -> bool:
-    """收集加權指數當日 OHLC。"""
-    from collectors.twse import TWSECollector
-
-    c = TWSECollector(db_path=db_path)
-    data = c.collect_index_ohlc(date)
-    if data is None:
-        return False
-    c.save_index_ohlc(date, data)
-    return True
 
 
 def _ensure_prev_index_baseline(date: str, db_path: str | None) -> bool:

@@ -9,7 +9,7 @@ compute_fx_metrics 升貶基準用的「前一日收盤」（今日 quote_0845 v
 
 import logging
 
-from jobs.helpers import determine_status, run_step
+from jobs.helpers import JobRun
 from utils.trading_calendar import is_trading_day
 
 logger = logging.getLogger(__name__)
@@ -20,25 +20,14 @@ CLOSE_FX_PAIRS = ["USD/TWD", "USD/CNY", "USD/KRW", "USD/JPY"]
 
 def run_afternoon_fx(date: str, db_path: str | None = None) -> dict:
     """匯率收盤收集 job：收 close_16 槽。非交易日整步略過。"""
-    logger.info("run_afternoon_fx: starting for %s", date)
-
     if not is_trading_day(date):
-        logger.info("run_afternoon_fx: %s 非交易日，skipping", date)
-        return {"date": date, "status": "skipped", "results": {}, "errors": []}
+        return JobRun.skipped("afternoon_fx", date, "非交易日")
 
     from collectors.fx import FXCollector
 
+    job = JobRun("afternoon_fx", date)
     c = FXCollector(db_path=db_path)
-    results = {}
-    errors = []
     for pair in CLOSE_FX_PAIRS:
-        step = "fx_close_" + pair.split("/")[1].lower()
-        ok, err = run_step(step,
-                           lambda p=pair: c.collect_and_save_pair(date, p, "close_16"))
-        results[step] = ok
-        if err:
-            errors.append(err)
-
-    status = determine_status(results)
-    logger.info("run_afternoon_fx: %s status=%s", date, status)
-    return {"date": date, "status": status, "results": results, "errors": errors}
+        job.step("fx_close_" + pair.split("/")[1].lower(),
+                 lambda p=pair: c.collect_and_save_pair(date, p, "close_16"))
+    return job.finish()

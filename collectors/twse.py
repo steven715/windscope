@@ -46,10 +46,6 @@ class TWSECollector(BaseCollector):
 
     # ── collect 方法 ──────────────────────────────────────────────
 
-    def collect(self, date: str) -> dict | None:
-        """收集指定日期的三大法人買賣超（保留原有介面）。"""
-        return self.collect_institutional(date)
-
     def collect_institutional(self, date: str) -> dict | None:
         """取得三大法人買賣超。date 格式：YYYY-MM-DD。"""
         date_param = date.replace("-", "")
@@ -305,10 +301,6 @@ class TWSECollector(BaseCollector):
         return {"ex_dividend_points": 0.0}
 
     # ── save 方法（全部使用 ON CONFLICT DO UPDATE）──────────────
-
-    def save(self, date: str, data: dict) -> None:
-        """存入 raw_institutional（保留原有介面）。"""
-        self.save_institutional(date, data)
 
     def save_institutional(self, date: str, data: dict) -> None:
         """存入 raw_institutional，用 ON CONFLICT DO UPDATE。"""

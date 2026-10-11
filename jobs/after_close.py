@@ -10,7 +10,7 @@ import sqlite3
 
 from db.connection import get_connection
 from db.watchlist import watchlist_list
-from jobs.helpers import determine_status, run_step
+from jobs.helpers import JobRun
 from utils.trading_calendar import is_trading_day
 
 logger = logging.getLogger(__name__)
@@ -28,123 +28,44 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
         "errors": [...]
     }
     """
-    logger.info("run_after_close: starting for %s", date)
-
     if not is_trading_day(date):
-        logger.info("run_after_close: %s is not a trading day, skipping", date)
-        return {"date": date, "status": "skipped", "results": {}, "errors": []}
+        return JobRun.skipped("after_close", date, "非交易日")
 
-    results = {}
-    errors = []
+    from collectors.taifex import TAIFEXCollector
+    from collectors.twse import TWSECollector
+
+    job = JobRun("after_close", date)
+    twse = TWSECollector(db_path=db_path)
+    taifex = TAIFEXCollector(db_path=db_path)
 
     with get_connection(db_path) as conn:
         # 1. TWSE: 加權指數收盤價（spot_close）——隔日 after_night 算期貨夜盤缺口的基準
-        ok, err = run_step("twse_spot_close", lambda: _collect_twse_spot_close(date, db_path))
-        results["twse_spot_close"] = ok
-        if err:
-            errors.append(err)
-
+        job.collect("twse_spot_close", lambda: twse.collect_spot_close(date),
+                    lambda d: twse.save_spot_close(date, d))
         # 2. TWSE: 三大法人買賣超
-        ok, err = run_step("twse_institutional", lambda: _collect_twse_institutional(date, db_path))
-        results["twse_institutional"] = ok
-        if err:
-            errors.append(err)
-
+        job.collect("twse_institutional", lambda: twse.collect_institutional(date),
+                    lambda d: twse.save_institutional(date, d))
         # 3. TWSE: 外資個股買賣超（watchlist）
-        ok, err = run_step("twse_foreign_stock", lambda: _collect_twse_foreign_stock(date, db_path))
-        results["twse_foreign_stock"] = ok
-        if err:
-            errors.append(err)
-
+        job.collect("twse_foreign_stock", lambda: twse.collect_foreign_stock(date),
+                    lambda d: twse.save_foreign_stock(date, d))
         # 4. TWSE: 除息預估點數
-        ok, err = run_step("twse_ex_dividend", lambda: _collect_twse_ex_dividend(date, db_path))
-        results["twse_ex_dividend"] = ok
-        if err:
-            errors.append(err)
-
+        job.collect("twse_ex_dividend", lambda: twse.collect_ex_dividend_points(date),
+                    lambda d: twse.save_ex_dividend(date, d))
         # 5. TAIFEX: 外資期貨未平倉
-        ok, err = run_step("taifex_oi", lambda: _collect_taifex_oi(date, db_path))
-        results["taifex_oi"] = ok
-        if err:
-            errors.append(err)
+        job.collect("taifex_oi", lambda: taifex.collect_oi_foreign(date),
+                    lambda d: taifex.save_oi_foreign(date, d))
 
         # 6. 個股日K + 趨勢訊號：更新 watchlist 當月日K並重算趨勢（spec v2 趨勢層）
         #    觀察名單為空 → 整步略過、不計失敗
         if watchlist_list(conn=conn):
-            ok, err = run_step("stock_trends",
-                               lambda: _refresh_stock_trends(date, conn, db_path))
-            results["stock_trends"] = ok
-            if err:
-                errors.append(err)
+            job.step("stock_trends", lambda: _refresh_stock_trends(date, conn, db_path))
         else:
             logger.info("after_close: 觀察名單為空，個股日K與趨勢略過")
 
-    status = determine_status(results)
-    logger.info("run_after_close: %s status=%s", date, status)
-    return {"date": date, "status": status, "results": results, "errors": errors}
+    return job.finish()
 
 
 # ── 內部步驟函式 ─────────────────────────────────────────────────
-
-
-def _collect_twse_spot_close(date: str, db_path: str | None) -> bool:
-    """收集加權指數收盤價。"""
-    from collectors.twse import TWSECollector
-
-    c = TWSECollector(db_path=db_path)
-    data = c.collect_spot_close(date)
-    if data is None:
-        return False
-    c.save_spot_close(date, data)
-    return True
-
-
-def _collect_twse_institutional(date: str, db_path: str | None) -> bool:
-    """收集三大法人買賣超。"""
-    from collectors.twse import TWSECollector
-
-    c = TWSECollector(db_path=db_path)
-    data = c.collect_institutional(date)
-    if data is None:
-        return False
-    c.save_institutional(date, data)
-    return True
-
-
-def _collect_twse_foreign_stock(date: str, db_path: str | None) -> bool:
-    """收集外資個股買賣超（watchlist）。"""
-    from collectors.twse import TWSECollector
-
-    c = TWSECollector(db_path=db_path)
-    data = c.collect_foreign_stock(date)
-    if data is None:
-        return False
-    c.save_foreign_stock(date, data)
-    return True
-
-
-def _collect_twse_ex_dividend(date: str, db_path: str | None) -> bool:
-    """收集除息預估點數。"""
-    from collectors.twse import TWSECollector
-
-    c = TWSECollector(db_path=db_path)
-    data = c.collect_ex_dividend_points(date)
-    if data is None:
-        return False
-    c.save_ex_dividend(date, data)
-    return True
-
-
-def _collect_taifex_oi(date: str, db_path: str | None) -> bool:
-    """收集外資期貨未平倉。"""
-    from collectors.taifex import TAIFEXCollector
-
-    c = TAIFEXCollector(db_path=db_path)
-    data = c.collect_oi_foreign(date)
-    if data is None:
-        return False
-    c.save_oi_foreign(date, data)
-    return True
 
 
 def _refresh_stock_trends(date: str, conn: sqlite3.Connection,

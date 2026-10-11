@@ -42,10 +42,6 @@ class FXCollector(BaseCollector):
             return False
         return self.save_fx(date, data["currency_pair"], data["rate"], time_slot)
 
-    def collect(self, date: str) -> dict | None:
-        """收集 USD/TWD（預設 collect 介面）。"""
-        return self.collect_twd(date, time_slot="close_16")
-
     def collect_twd(self, date: str, time_slot: str = "close_16") -> dict | None:
         """取得 USD/TWD 即期買入匯率。回傳 {"currency_pair": "USD/TWD", "rate": float} 或 None。"""
         try:
@@ -215,10 +211,6 @@ class FXCollector(BaseCollector):
                     collected_at = excluded.collected_at""",
                 (date, close, now),
             )
-
-    def save(self, date: str, data: dict) -> None:
-        """存入 FX 資料（預設 save 介面）。"""
-        self.save_fx(date, data["currency_pair"], data["rate"], "close_16")
 
     def save_fx(self, date: str, currency_pair: str, rate: float,
                 time_slot: str) -> bool:

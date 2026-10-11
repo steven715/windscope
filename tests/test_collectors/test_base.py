@@ -1,94 +1,33 @@
-"""BaseCollector.run instrumentation 測試：三分支 outcome 對應 collector_run 事件。"""
+"""BaseCollector 測試：db_path 注入、_try_collect_and_save 三分支、觀察名單載入。"""
 
-import json
-import logging
+import sqlite3
 
-from collectors.base import BaseCollector
-
-
-class _EventCapture(logging.Handler):
-    def __init__(self):
-        super().__init__()
-        self.events = []
-
-    def emit(self, record):
-        try:
-            self.events.append(json.loads(record.getMessage()))
-        except Exception:
-            pass
+from collectors.base import BaseCollector, load_watchlist
+from db.schema import create_all_tables
 
 
-def _attach():
-    lg = logging.getLogger("windscope.events")
-    h = _EventCapture()
-    h.setLevel(logging.DEBUG)
-    lg.addHandler(h)
-    return lg, h
+def test_db_path_injected():
+    assert BaseCollector(db_path="/tmp/x.db").db_path == "/tmp/x.db"
 
 
-def _last_collector_run(events):
-    return [e for e in events if e.get("event") == "collector_run"][-1]
+def test_try_collect_and_save_branches():
+    """有資料→存且 True；None→不存、False；例外→不 raise、False。"""
+    c = BaseCollector(db_path=":memory:")
+    saved = []
+    assert c._try_collect_and_save(lambda: {"x": 1}, saved.append) is True
+    assert c._try_collect_and_save(lambda: None, saved.append) is False
 
-
-class _OkCollector(BaseCollector):
-    def collect(self, date):
-        return {"x": 1}
-
-    def save(self, date, data):
-        pass
-
-
-class _NoDataCollector(BaseCollector):
-    def collect(self, date):
-        return None
-
-    def save(self, date, data):
-        pass
-
-
-class _FailCollector(BaseCollector):
-    def collect(self, date):
+    def boom():
         raise RuntimeError("collect blew up")
-
-    def save(self, date, data):
-        pass
-
-
-def test_collector_run_ok():
-    """collect 有資料且 save 成功 → outcome=ok，含 collector/date/duration_ms。"""
-    lg, h = _attach()
-    try:
-        ok = _OkCollector(db_path=":memory:").run("2026-06-15")
-    finally:
-        lg.removeHandler(h)
-
-    assert ok is True
-    ev = _last_collector_run(h.events)
-    assert ev["collector"] == "_OkCollector"
-    assert ev["date"] == "2026-06-15"
-    assert ev["outcome"] == "ok"
-    assert isinstance(ev["duration_ms"], int)
+    assert c._try_collect_and_save(boom, saved.append) is False
+    assert saved == [{"x": 1}]
 
 
-def test_collector_run_no_data():
-    """collect 回 None → outcome=no_data，run() 仍回 False。"""
-    lg, h = _attach()
-    try:
-        ok = _NoDataCollector(db_path=":memory:").run("2026-06-15")
-    finally:
-        lg.removeHandler(h)
-
-    assert ok is False
-    assert _last_collector_run(h.events)["outcome"] == "no_data"
-
-
-def test_collector_run_failed():
-    """collect 拋例外 → outcome=failed，run() 不 raise、回 False。"""
-    lg, h = _attach()
-    try:
-        ok = _FailCollector(db_path=":memory:").run("2026-06-15")
-    finally:
-        lg.removeHandler(h)
-
-    assert ok is False
-    assert _last_collector_run(h.events)["outcome"] == "failed"
+def test_load_watchlist_reads_db(tmp_path):
+    db = str(tmp_path / "w.db")
+    conn = sqlite3.connect(db)
+    create_all_tables(conn)
+    conn.execute("INSERT INTO watchlist (stock_id, stock_name) VALUES ('2330', '台積電')")
+    conn.commit()
+    conn.close()
+    assert load_watchlist(db) == [{"stock_id": "2330", "stock_name": "台積電"}]

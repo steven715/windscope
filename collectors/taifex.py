@@ -33,10 +33,6 @@ class TAIFEXCollector(BaseCollector):
 
     # ── collect 方法 ──────────────────────────────────────────────
 
-    def collect(self, date: str) -> dict | None:
-        """收集夜盤收盤資料（預設 collect 介面）。"""
-        return self.collect_night_session(date)
-
     def collect_night_session(self, date: str) -> dict | None:
         """取得台指期夜盤收盤價和成交量。回傳 {"night_close": float, "night_volume": int} 或 None。"""
         query_date = date.replace("-", "/")  # YYYY/MM/DD
@@ -153,10 +149,6 @@ class TAIFEXCollector(BaseCollector):
         return None
 
     # ── save 方法 ────────────────────────────────────────────────
-
-    def save(self, date: str, data: dict) -> None:
-        """存入夜盤資料（預設 save 介面）。"""
-        self.save_night_session(date, data)
 
     def save_night_session(self, date: str, data: dict) -> None:
         """更新 raw_futures.night_close 和 night_volume。"""

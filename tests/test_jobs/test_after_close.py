@@ -1,6 +1,9 @@
 """after_close job 測試。"""
 
+import sqlite3
 from unittest.mock import patch
+
+from db.schema import create_all_tables
 
 
 def test_after_close_skips_non_trading_day():
@@ -13,7 +16,7 @@ def test_after_close_skips_non_trading_day():
     assert result["results"] == {}
 
 
-def test_after_close_full_success(memory_db, monkeypatch):
+def test_after_close_full_success(memory_db, monkeypatch, step_seam):
     """所有 collector 成功時，status = completed。"""
     from jobs import after_close
     memory_db.execute("INSERT INTO watchlist (stock_id, stock_name) VALUES ('2330', '台積電')")
@@ -22,7 +25,7 @@ def test_after_close_full_success(memory_db, monkeypatch):
     def mock_step(name, fn):
         return True, None
 
-    monkeypatch.setattr(after_close, "run_step", mock_step)
+    step_seam(mock_step)
     monkeypatch.setattr(after_close, "is_trading_day", lambda d: True)
 
     with patch("jobs.after_close.get_connection") as mock_conn:
@@ -36,7 +39,7 @@ def test_after_close_full_success(memory_db, monkeypatch):
     assert result["errors"] == []
 
 
-def test_after_close_partial_failure(memory_db, monkeypatch):
+def test_after_close_partial_failure(memory_db, monkeypatch, step_seam):
     """部分 collector 失敗時，status = partial，其他步驟仍執行。"""
     from jobs import after_close
     memory_db.execute("INSERT INTO watchlist (stock_id, stock_name) VALUES ('2330', '台積電')")
@@ -49,7 +52,7 @@ def test_after_close_partial_failure(memory_db, monkeypatch):
             return False, "taifex_oi: stub, returning None"
         return True, None
 
-    monkeypatch.setattr(after_close, "run_step", mock_step)
+    step_seam(mock_step)
     monkeypatch.setattr(after_close, "is_trading_day", lambda d: True)
 
     with patch("jobs.after_close.get_connection") as mock_conn:
@@ -69,11 +72,11 @@ def test_after_close_partial_failure(memory_db, monkeypatch):
         assert moved not in result["results"]
 
 
-def test_after_close_skips_trends_when_watchlist_empty(memory_db, monkeypatch):
+def test_after_close_skips_trends_when_watchlist_empty(memory_db, monkeypatch, step_seam):
     """觀察名單為空 → 趨勢步驟略過、不計失敗。"""
     from jobs import after_close
 
-    monkeypatch.setattr(after_close, "run_step", lambda name, fn: (True, None))
+    step_seam(lambda name, fn: (True, None))
     monkeypatch.setattr(after_close, "is_trading_day", lambda d: True)
 
     with patch("jobs.after_close.get_connection") as mock_conn:
@@ -85,13 +88,13 @@ def test_after_close_skips_trends_when_watchlist_empty(memory_db, monkeypatch):
     assert result["status"] == "completed"
 
 
-def test_collectors_receive_injected_db_path(monkeypatch):
+def test_collectors_receive_injected_db_path(monkeypatch, tmp_path):
     """回歸：job 注入 db_path 時，各收集步驟的 collector 也要寫進同一個 DB（舊版用預設正式 DB）。"""
     import collectors.chip as chip
     import collectors.fx as fx
     import collectors.taifex as taifex
     import collectors.twse as twse
-    from jobs import after_close, after_night, before_open, chip_collect
+    from jobs import after_close, after_night, before_open, chip_collect, verify_close
 
     seen = []
 
@@ -102,17 +105,25 @@ def test_collectors_receive_injected_db_path(monkeypatch):
         def __getattr__(self, name):
             return lambda *a, **k: None  # collect_* 回 None → 步驟 no-data，不寫入
 
-    monkeypatch.setattr(twse, "TWSECollector", FakeCollector)
-    monkeypatch.setattr(taifex, "TAIFEXCollector", FakeCollector)
-    monkeypatch.setattr(fx, "FXCollector", FakeCollector)
-    monkeypatch.setattr(chip, "ChipCollector", FakeCollector)
+    for mod, name in ((twse, "TWSECollector"), (taifex, "TAIFEXCollector"),
+                      (fx, "FXCollector"), (chip, "ChipCollector")):
+        monkeypatch.setattr(mod, name, FakeCollector)
+    for job in (after_close, after_night, before_open, chip_collect, verify_close):
+        monkeypatch.setattr(job, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(chip_collect.settings, "FINMIND_TOKEN", "t")
+    monkeypatch.setattr(before_open, "notify", lambda *a: None)
 
-    db = "/tmp/isolated.db"
-    for fn in (after_close._collect_twse_spot_close, after_close._collect_twse_institutional,
-               after_close._collect_twse_foreign_stock, after_close._collect_twse_ex_dividend,
-               after_close._collect_taifex_oi, after_night._collect_taifex_night,
-               after_night._collect_sp500, chip_collect._collect_twse_stock_close,
-               chip_collect._collect_chip, before_open._collect_fx_intraday):
-        assert fn("2026-04-08", db) is False
+    db = str(tmp_path / "isolated.db")
+    conn = sqlite3.connect(db)
+    create_all_tables(conn)
+    conn.execute("INSERT INTO watchlist (stock_id, stock_name) VALUES ('2330', '台積電')")
+    conn.commit()
+    conn.close()
 
-    assert seen == [db] * 10
+    after_close.run_after_close("2026-04-08", db)
+    after_night.run_after_night("2026-04-08", db)
+    before_open.run_before_open("2026-04-08", db)
+    chip_collect.run_chip_collect("2026-04-08", db)
+    verify_close.run_verify_close("2026-04-08", db)
+
+    assert seen and set(seen) == {db}

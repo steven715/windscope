@@ -30,10 +30,6 @@ class ChipCollector(BaseCollector):
 
     # ── collect 方法 ──────────────────────────────────────────────
 
-    def collect(self, date: str) -> dict | None:
-        """自動收集 watchlist 個股的分點資料（預設 collect 介面）。"""
-        return self.collect_broker_trading(date)
-
     def collect_broker_trading(self, date: str) -> dict | None:
         """透過 FinMind 取得 watchlist 個股的券商分點進出。
 
