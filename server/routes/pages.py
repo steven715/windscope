@@ -310,12 +310,13 @@ def chip_import_submit(
     buy: list[str] = Form(default=[]),
     sell: list[str] = Form(default=[]),
 ):
-    """寫入手動填的分點資料 → raw_chip，並重算當日籌碼指標與個股訊號。"""
+    """寫入手動填的分點資料 → raw_chip，重算當日籌碼指標與下一個交易日的籌碼觀察。"""
     from datetime import datetime
 
     from collectors.chip import ChipCollector
     from integration.chip_metrics import compute_chip_metrics
     from integration.signal_engine import compute_stock_signals
+    from utils.trading_calendar import get_next_trading_day
 
     db_path = request.app.state.db_path
     with get_connection(db_path) as conn:
@@ -358,9 +359,12 @@ def chip_import_submit(
             except ValueError:
                 pass
         compute_chip_metrics(date, conn)
-        compute_stock_signals(date, conn)
+        # date 的分點影響的是下一個交易日的籌碼觀察（第 T 日只看 T 之前的分點）
+        obs_date = get_next_trading_day(date)
+        compute_stock_signals(obs_date, conn)
 
-    msg = f"已匯入 {stock_name}（{stock_id}）{date} 的 {len(items)} 筆分點，已重算個股訊號"
+    msg = (f"已匯入 {stock_name}（{stock_id}）{date} 的 {len(items)} 筆分點，"
+           f"已重算 {obs_date} 的籌碼觀察")
     return RedirectResponse(url=f"/chip-import?msg={quote(msg)}", status_code=303)
 
 

@@ -219,7 +219,7 @@ class TestSignalPersistence:
         assert rows[0][0] == "bullish"  # 期貨票仍偏多，僅匯率轉中性
 
 
-def _insert_stock_metric(conn, date="2026-06-12", stock_id="2330",
+def _insert_stock_metric(conn, date="2026-06-11", stock_id="2330",
                          broker_name="兆豐-嘉義", net_amount=1.2e8,
                          consecutive=3, price_zone="low",
                          both_sides=0, broker_type="swing"):
@@ -297,6 +297,58 @@ class TestStockSignals:
     def test_no_metrics_empty_list(self):
         conn = _make_db()
         assert compute_stock_signals("2026-06-12", conn) == []
+
+
+class TestStockSignalsDateWindow:
+    """第 T 日的分點籌碼觀察只看 T 之前的分點指標（與外資一致：08:50 時 T 日未收）。"""
+
+    def test_reads_previous_day_metrics(self):
+        """chip_collect／匯入寫在 T-1 → before_open 的 T 日要讀得到。"""
+        conn = _make_db()
+        _insert_stock_metric(conn, date="2026-06-11", both_sides=1)
+        results = compute_stock_signals("2026-06-12", conn)
+        assert [r["category"] for r in results] == ["fake_volume"]
+        row = conn.execute(
+            "SELECT date FROM stock_signals WHERE stock_id = '2330'").fetchone()
+        assert row[0] == "2026-06-12"
+
+    def test_ignores_same_day_metrics(self):
+        """T 日當天的分點指標不算進第 T 日的籌碼觀察（重算歷史日才與 08:50 一致）。"""
+        conn = _make_db()
+        _insert_stock_metric(conn, date="2026-06-12", both_sides=1)
+        assert compute_stock_signals("2026-06-12", conn) == []
+
+    def test_latest_date_per_stock(self):
+        """每檔各取 T 之前最近一個有分點指標的日期，舊日的列不混進來。"""
+        conn = _make_db()
+        _insert_stock_metric(conn, date="2026-06-08", stock_id="2330",
+                             broker_name="舊分點", both_sides=1)
+        _insert_stock_metric(conn, date="2026-06-11", stock_id="2330",
+                             broker_name="新分點", both_sides=1)
+        _insert_stock_metric(conn, date="2026-06-05", stock_id="2454",
+                             broker_name="久遠分點", both_sides=1)
+        results = compute_stock_signals("2026-06-12", conn)
+        got = {(r["stock_id"], r["broker_name"]) for r in results}
+        assert got == {("2330", "新分點"), ("2454", "久遠分點")}
+
+    def test_recompute_clears_stale_broker_observations(self):
+        """重算先清當日舊的分點籌碼觀察；外資那列不動。"""
+        conn = _make_db()
+        _insert_stock_metric(conn, both_sides=1)
+        assert compute_stock_signals("2026-06-12", conn)
+        conn.execute(
+            "INSERT INTO stock_signals (date, stock_id, broker_name, category, "
+            "reasons, rule_version, created_at) "
+            "VALUES ('2026-06-12', '2330', '外資', 'foreign_buy', 'r', 'v', 'now')")
+        conn.execute("UPDATE daily_stock_metrics SET both_sides_flag = 0, "
+                     "net_amount = 1e6")
+        conn.commit()
+
+        assert compute_stock_signals("2026-06-12", conn) == []
+        rows = conn.execute(
+            "SELECT broker_name FROM stock_signals WHERE date = '2026-06-12'"
+        ).fetchall()
+        assert rows == [("外資",)]
 
 
 class TestFormatSignalText:
