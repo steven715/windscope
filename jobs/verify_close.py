@@ -4,7 +4,7 @@ import logging
 import sqlite3
 
 from db.connection import get_connection
-from jobs.helpers import determine_status, run_step
+from jobs.helpers import determine_status, run_step, run_step_value
 from utils.trading_calendar import is_trading_day
 
 logger = logging.getLogger(__name__)
@@ -44,12 +44,11 @@ def run_verify_close(date: str, db_path: str | None = None) -> dict:
         errors.append(err)
 
     # 2. 驗證訊號
+    from integration.verification import verify_signal
+
     with get_connection(db_path) as conn:
-        ok, err = run_step("verify", lambda: _verify(date, conn))
-        if ok:
-            from integration.verification import verify_signal
-            verification = verify_signal(date, conn)
-        results["verify"] = ok
+        verification, err = run_step_value("verify", lambda: verify_signal(date, conn))
+        results["verify"] = verification is not None
         if err:
             errors.append(err)
 
@@ -113,14 +112,6 @@ def _ensure_prev_index_baseline(date: str, db_path: str | None) -> bool:
     c.save_index_ohlc(prev_day, data)
     logger.info("_ensure_prev_index_baseline: 已回補 raw_index %s", prev_day)
     return True
-
-
-def _verify(date: str, conn: sqlite3.Connection) -> bool:
-    """執行訊號驗證。"""
-    from integration.verification import verify_signal
-
-    result = verify_signal(date, conn)
-    return result is not None
 
 
 def _backfill_unverified_signals(date: str, conn: sqlite3.Connection,

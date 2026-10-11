@@ -43,6 +43,26 @@ def test_full_flow_hit(tmp_path):
     assert result["verification"]["hit_day"] == 1
 
 
+def test_verifies_once_per_run(tmp_path):
+    """回歸：當日驗證只跑一次 verify_signal（舊版步驟內跑一次丟掉結果、再跑一次取結果）。"""
+    from integration import verification
+
+    db_path = _setup_db(tmp_path)
+    ohlc = {"open": 43300.0, "high": 43500.0, "low": 43200.0, "close": 43400.0}
+    real = verification.verify_signal
+    calls = []
+
+    def spy(date, conn):
+        calls.append(date)
+        return real(date, conn)
+
+    with patch("collectors.twse.TWSECollector.collect_index_ohlc", return_value=ohlc),          patch("integration.verification.verify_signal", side_effect=spy):
+        result = run_verify_close("2026-06-12", db_path=db_path)
+
+    assert calls.count("2026-06-12") == 1
+    assert result["verification"]["hit_day"] == 1
+
+
 def test_collector_failure_does_not_crash(tmp_path):
     """OHLC 收集失敗 → verify 也失敗，但 job 不崩潰、不寫驗證紀錄。"""
     db_path = _setup_db(tmp_path)
