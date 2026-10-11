@@ -83,14 +83,12 @@ def _effect_text(adj: Adjustment) -> str | None:
 
 
 def _vote_text(name: str, vote: str) -> str:
-    return f"{name} {DIRECTION_LABELS[vote]}"
+    return f"{name} {DIRECTION_LABELS.get(vote, vote)}"
 
 
 def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
     """組出 date 的盤前解讀表。回傳每維度 {dim, raw, verdict, css, effect, why} 的 list。
-
-    盤前判斷的維度（匯率、亞幣同步、期貨價差、夜盤量比、外資未平倉）的級別與效果
-    取自 premarket_call，本檔只負責措辭；effect＝該維度對票或信心的實際效果。
+    盤前判斷維度的級別與 effect（對票／信心的實際效果）取自 premarket_call，本檔只負責措辭。
     """
     metrics = load_daily_metrics(date, conn)
     if metrics is None:
@@ -131,8 +129,12 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
     asia, krw = call.asia_sync, call.krw_divergence
     if krw.level == "divergence":
         verdict, css = "警示：台幣人民幣貶但韓元升，外資恐賣台買韓", "down"
-    elif asia.level == "sync":
+    elif asia.level == "sync" and detail.get("TWD") == "bearish":
+        verdict, css = "三幣同步貶（資金撤出亞洲）", "down"
+    elif asia.level == "sync" and detail.get("TWD") == "bullish":
         verdict, css = "三幣同步（國際資金流入亞洲，大盤安全）", "up"
+    elif asia.level == "sync":
+        verdict, css = "三幣同步持平（無明顯資金流向）", "flat"
     elif asia.level == "diverge":
         verdict, css = "分歧（只有部分亞幣動，買盤恐不持續）", "flat"
     else:
@@ -222,24 +224,32 @@ def build_explain(date: str, conn: sqlite3.Connection) -> list[dict]:
 
 
 def premarket_drift_notice(date: str, conn: sqlite3.Connection) -> str | None:
-    """解讀即時重算的盤前判斷與 signals 已存那筆不同時回一行提示；相同或缺資料回 None。
-
-    正常交易日兩者相同；事後補資料、或規則版本更新後回看舊日子才會不同。
+    """解讀即時重算的盤前判斷與 signals 已存那筆不同（結果、兩票或規則版本）時回一行提示。
+    相同或缺資料回 None；正常交易日兩者相同，事後補資料或規則更新後回看舊日子才會不同。
     """
     stored = conn.execute(
-        "SELECT direction, confidence, rule_version FROM signals WHERE date = ?", (date,)
+        "SELECT direction, confidence, fx_vote, futures_vote, rule_version "
+        "FROM signals WHERE date = ?", (date,)
     ).fetchone()
     metrics = load_daily_metrics(date, conn)
     if stored is None or metrics is None:
         return None
     call = evaluate_premarket_call(metrics)
-    direction, confidence, rule_version = stored
-    if (call.direction, call.confidence, call.rule_version) == (direction, confidence, rule_version):
+    direction, confidence, fx_vote, futures_vote, rule_version = stored
+    stored_version = rule_version or "未記錄"
+    same_result = ((call.direction, call.confidence, call.fx_vote, call.futures_vote)
+                   == (direction, confidence, fx_vote, futures_vote))
+    if same_result and call.rule_version == rule_version:
         return None
+    if same_result:
+        return (f"08:50 的盤前判斷用規則 {stored_version}，解讀以現行規則 "
+                f"{call.rule_version} 重算（結果相同）")
     return (f"解讀以目前資料／規則 {call.rule_version} 重算"
-            f"（{DIRECTION_LABELS[call.direction]} 信心 {call.confidence}），"
-            f"與 08:50 的盤前判斷（{DIRECTION_LABELS.get(direction, direction)} "
-            f"信心 {confidence}，{rule_version}）不同")
+            f"（{DIRECTION_LABELS.get(call.direction, call.direction)} 信心 {call.confidence}，"
+            f"匯率票 {DIRECTION_LABELS.get(call.fx_vote, call.fx_vote)}、"
+            f"期貨票 {DIRECTION_LABELS.get(call.futures_vote, call.futures_vote)}），"
+            f"與 08:50 的盤前判斷不同（{DIRECTION_LABELS.get(direction, direction)} "
+            f"信心 {confidence}，規則 {stored_version}）")
 
 
 def _jpy_risk_gauge(inp: PremarketInputs, notes: dict) -> dict:

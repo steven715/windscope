@@ -9,7 +9,7 @@
 flowchart LR
   RAW["L1 原始事實<br/>raw_fx / raw_futures / raw_index<br/>raw_institutional / raw_chip"]
   L2["L2 衍生指標<br/>daily_metrics / daily_stock_metrics"]
-  L3["L3 訊號<br/>市場訊號 signals + 個股訊號 stock_signals"]
+  L3["L3<br/>盤前判斷 signals + 籌碼觀察 stock_signals"]
   L4["L4 驗證<br/>verifications（命中率）"]
   RAW --> L2 --> L3 --> L4
 ```

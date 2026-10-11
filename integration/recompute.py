@@ -1,12 +1,12 @@
-"""純導出層：給定 date，從原始事實（raw_*）重新導出 L2 衍生指標與 L3 訊號。
+"""純導出層：給定 date，從原始事實（raw_*）重新導出 L2 衍生指標與 L3 盤前判斷／籌碼觀察。
 
 functional core：recompute_date(date) = f(raw, config)，同一輸入恆得同一輸出、
 與「何時執行」無關。本模組不收集任何外部資料，只讀 raw_* 重算下列衍生資料
 （皆以 ON CONFLICT/REPLACE 冪等覆寫）：
   L2  daily_metrics（fx / futures）、daily_stock_metrics（chip）
-  L3  stock_signals（個股觀察）、signals（市場訊號）
+  L3  stock_signals（籌碼觀察）、signals（盤前判斷）
 
-順序固定：先 L2 指標、再 L3 訊號（市場訊號讀 daily_metrics、個股訊號讀籌碼指標）。
+順序固定：先 L2 指標、再 L3（盤前判斷讀 daily_metrics、籌碼觀察讀籌碼指標）。
 """
 
 import logging

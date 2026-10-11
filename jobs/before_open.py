@@ -71,7 +71,7 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
         if err:
             errors.append(err)
 
-        # 5. Layer 3: 市場訊號 + 個股觀察訊號（休市日跳過，不寫 signals 表）
+        # 5. Layer 3: 盤前判斷 + 籌碼觀察（休市日跳過，不寫 signals 表）
         signal = None
         if trading:
             signal, err = run_step_value("signal", lambda: _compute_signals(date, conn))

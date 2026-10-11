@@ -194,6 +194,29 @@ class TestPremarketEffects:
         assert "韓元升" in row["verdict"]
         assert row["effect"] == "韓元背離 信心 -1；亞幣分歧 信心 -1"
 
+    def test_krw_divergence_with_asia_sync_both_effects(self):
+        """韓元背離＋亞幣同步（理論組合）→ 兩個效果都列，與理由一致。"""
+        conn = self._conn()
+        _metrics_only(conn, fx_direction="bearish", fx_asia_sync=1,
+                      futures_spread_adjusted=-150,
+                      fx_asia_detail=json.dumps(
+                          {"TWD": "bearish", "CNY": "bearish", "KRW": "bullish"}))
+        assert _dims(conn)["亞幣同步"]["effect"] == "韓元背離 信心 -1；亞幣同步 信心 +1"
+
+    def test_all_neutral_sync_not_worded_bullish(self):
+        """三幣持平（fx_metrics 也算同步）→ 判讀持平、未計入：匯率票中性。"""
+        conn = self._conn()
+        _metrics_only(conn, fx_asia_sync=1, fx_asia_detail=json.dumps(
+            {"TWD": "neutral", "CNY": "neutral", "KRW": "neutral"}))
+        row = _dims(conn)["亞幣同步"]
+        assert "持平" in row["verdict"] and row["css"] == "flat"
+        assert row["effect"] == "亞幣同步 未計入：匯率票中性"
+
+    def test_unknown_fx_direction_does_not_crash(self):
+        conn = self._conn()
+        _metrics_only(conn, fx_direction="weird")
+        assert _dims(conn)["匯率（台幣）"]["verdict"] == "資料不足"
+
     def test_vote_rows_show_votes(self):
         conn = self._conn()
         _metrics_only(conn, fx_direction="bullish", futures_spread_adjusted=-150)
@@ -219,15 +242,21 @@ class TestPremarketEffects:
 
 
 class TestDriftNotice:
-    @staticmethod
-    def _conn_with_signal(direction, confidence, rule_version=None):
+    _CURRENT = object()
+
+    @classmethod
+    def _conn_with_signal(cls, direction, confidence, rule_version=_CURRENT,
+                          fx_vote="bullish", futures_vote="bullish"):
+        """即時重算為 偏多／信心 3／兩票偏多；signals 存入指定的那筆。"""
+        if rule_version is cls._CURRENT:
+            rule_version = settings.SIGNAL_RULE_VERSION
         conn = sqlite3.connect(":memory:")
         create_all_tables(conn)
         _metrics_only(conn, fx_direction="bullish", futures_spread_adjusted=150)
         conn.execute(
-            "INSERT INTO signals (date, direction, confidence, rule_version) "
-            "VALUES ('2026-06-16', ?, ?, ?)",
-            (direction, confidence, rule_version or settings.SIGNAL_RULE_VERSION))
+            "INSERT INTO signals (date, direction, confidence, fx_vote, futures_vote, "
+            "rule_version) VALUES ('2026-06-16', ?, ?, ?, ?, ?)",
+            (direction, confidence, fx_vote, futures_vote, rule_version))
         conn.commit()
         return conn
 
@@ -238,7 +267,19 @@ class TestDriftNotice:
     def test_differs_from_stored_shows_notice(self):
         conn = self._conn_with_signal("neutral", 2, "v0")
         notice = premarket_drift_notice("2026-06-16", conn)
-        assert "重算" in notice and "v0" in notice and "信心 3" in notice
+        assert "不同" in notice and "v0" in notice and "信心 3" in notice
+
+    def test_only_rule_version_differs(self):
+        """結果相同、只差規則版本 → 明說結果相同；NULL 版本顯示「未記錄」。"""
+        notice = premarket_drift_notice("2026-06-16", self._conn_with_signal("bullish", 3, "v0"))
+        assert "結果相同" in notice and "v0" in notice
+        notice = premarket_drift_notice("2026-06-16", self._conn_with_signal("bullish", 3, None))
+        assert "未記錄" in notice and "None" not in notice
+
+    def test_votes_differ_with_same_result_shows_notice(self):
+        """方向信心相同但兩票不同（事後補資料）→ 仍提示。"""
+        conn = self._conn_with_signal("bullish", 3, fx_vote="neutral")
+        assert "不同" in premarket_drift_notice("2026-06-16", conn)
 
     def test_no_stored_signal_no_notice(self):
         conn = sqlite3.connect(":memory:")
