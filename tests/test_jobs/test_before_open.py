@@ -265,7 +265,7 @@ def test_before_open_computes_signal_and_summary_once(memory_db, monkeypatch):
     """回歸：訊號與摘要各只計算一次（舊版 step 成功後又各呼叫一次、寫入路徑跑兩次）。"""
     from jobs import before_open
     import integration.premarket_call as pc
-    import integration.signal_engine as se
+    import integration.chip_observation as co
     import integration.summary as su
 
     monkeypatch.setattr(before_open, "is_trading_day", lambda d: True)
@@ -281,8 +281,7 @@ def test_before_open_computes_signal_and_summary_once(memory_db, monkeypatch):
         return "摘要"
 
     monkeypatch.setattr(pc, "compute_premarket_call", fake_signal)
-    monkeypatch.setattr(se, "compute_stock_signals", lambda date, conn: None)
-    monkeypatch.setattr(se, "compute_foreign_stock_signals", lambda date, conn: None)
+    monkeypatch.setattr(co, "refresh_chip_observations", lambda date, conn: [])
     monkeypatch.setattr(su, "format_premarket_call_text", lambda signal: "訊號")
     monkeypatch.setattr(su, "generate_daily_summary", fake_summary)
 

@@ -1,6 +1,6 @@
 """個股籌碼判讀：外資動向／主力分點／股價位置三維度，與彙總出的籌碼傾向。
 
-唯一入口 load_stock_chip：分類規則（綁 settings 門檻）只在這裡；signal_engine 用
+唯一入口 load_stock_chip：分類規則（綁 settings 門檻）只在這裡；chip_observation 用
 classify_foreign／classify_broker 產籌碼觀察（寫 stock_signals），explain 只把
 StockChip 排成解讀表，pages 只顯示。純讀，不寫 DB。籌碼傾向不經驗證，不是立場。
 """

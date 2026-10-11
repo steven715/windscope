@@ -1358,6 +1358,25 @@ class TestChipImport:
         conn.close()
         assert dates == ["2026-06-22"]  # 06-19 週五 → 下週一
 
+    def test_post_also_refreshes_foreign_observation(self, tmp_path):
+        """匯入分點走籌碼觀察單一入口 → 外資觀察也一併重算（舊版漏外資）。"""
+        db_path, client = self._client(tmp_path)
+        conn = sqlite3.connect(db_path)
+        for d, net in (("2026-06-18", 3927), ("2026-06-19", 9646)):
+            conn.execute("INSERT INTO raw_chip (date, stock_id, broker_name, net_volume) "
+                         "VALUES (?, '2330', '__FOREIGN__', ?)", (d, net))
+        conn.commit()
+        conn.close()
+        client.post("/chip-import", data={
+            "date": "2026-06-19", "stock_id": "2330", "close_price": "1000",
+            "broker_name": ["兆豐-嘉義"], "buy": ["5000"], "sell": ["1000"],
+        }, follow_redirects=True)
+        conn = sqlite3.connect(db_path)
+        row = conn.execute("SELECT category FROM stock_signals WHERE date = '2026-06-22' "
+                           "AND broker_name = '外資'").fetchone()
+        conn.close()
+        assert row == ("外資連買",)
+
     def test_post_empty_rows(self, tmp_path):
         _, client = self._client(tmp_path)
         resp = client.post("/chip-import", data={

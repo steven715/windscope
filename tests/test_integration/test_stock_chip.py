@@ -6,7 +6,7 @@ import pytest
 
 from db.schema import create_all_tables
 from integration.explain import build_stock_explain
-from integration.signal_engine import compute_foreign_stock_signals, compute_stock_signals
+from integration.chip_observation import refresh_chip_observations
 from integration.stock_chip import (
     BrokerReading,
     ForeignReading,
@@ -90,7 +90,7 @@ def test_explain_and_stock_signals_share_broker_wording(conn):
     conn.commit()
 
     # 06-18 的分點影響下一交易日（06-19）的籌碼觀察
-    stored = {r["reasons"] for r in compute_stock_signals("2026-06-19", conn)}
+    stored = {r["reasons"] for r in refresh_chip_observations("2026-06-19", conn)}
     broker = next(r for r in build_stock_explain("2026-06-18", "2454", conn)
                   if r["dim"] == "主力分點")
     assert stored == {broker["verdict"]}
@@ -101,7 +101,7 @@ def test_explain_and_foreign_signals_agree(conn):
     """外資連買：籌碼觀察的理由與解讀的判讀為同一句。"""
     conn.execute("INSERT INTO watchlist (stock_id, stock_name) VALUES ('2330', '台積電')")
     _foreign(conn, "2330", [-100, 2000, 3000])
-    stored = [r["reason"] for r in compute_foreign_stock_signals("2026-06-18", conn)]
+    stored = [r["reasons"] for r in refresh_chip_observations("2026-06-18", conn)]
     foreign = next(r for r in build_stock_explain("2026-06-18", "2330", conn)
                    if r["dim"] == "外資動向")
     assert stored == [foreign["verdict"]]

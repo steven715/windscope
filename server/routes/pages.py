@@ -315,7 +315,7 @@ def chip_import_submit(
 
     from collectors.chip import ChipCollector
     from integration.chip_metrics import compute_chip_metrics
-    from integration.signal_engine import compute_stock_signals
+    from integration.chip_observation import refresh_chip_observations
     from utils.trading_calendar import get_next_trading_day
 
     db_path = request.app.state.db_path
@@ -359,7 +359,7 @@ def chip_import_submit(
         compute_chip_metrics(date, conn)
         # date 的分點影響的是下一個交易日的籌碼觀察（第 T 日只看 T 之前的分點）
         obs_date = get_next_trading_day(date)
-        compute_stock_signals(obs_date, conn)
+        refresh_chip_observations(obs_date, conn)
 
     msg = (f"已匯入 {stock_name}（{stock_id}）{date} 的 {len(items)} 筆分點，"
            f"已重算 {obs_date} 的籌碼觀察")

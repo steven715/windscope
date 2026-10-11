@@ -1,6 +1,8 @@
 """Layer 3 籌碼觀察：個股分點與外資動向的分類標籤，寫入 stock_signals。
 
-盤前判斷（大盤）在 integration/premarket_call。分類規則在 integration/stock_chip。
+唯一入口 refresh_chip_observations(T)：第 T 日的籌碼觀察只看 T 之前的資料（08:50 時
+T 日分點／T86 未收），分點與外資各自先清當日舊列再寫。分類規則在 integration/stock_chip；
+盤前判斷（大盤）在 integration/premarket_call。
 """
 
 import logging
@@ -14,8 +16,35 @@ from integration.stock_chip import classify_broker, classify_foreign, foreign_st
 logger = logging.getLogger(__name__)
 
 
-def compute_foreign_stock_signals(date: str, conn: sqlite3.Connection) -> list[dict]:
-    """用 T86 每檔外資買賣超（raw_chip __FOREIGN__）產生個股觀察訊號，寫入 stock_signals。
+def refresh_chip_observations(date: str, conn: sqlite3.Connection) -> list[dict]:
+    """重算 date 的籌碼觀察（分點＋外資）並寫入 stock_signals。
+    回傳 [{stock_id, broker_name, category, reasons}, ...]（分點在前、外資在後）。"""
+    results = _refresh_broker(date, conn) + _refresh_foreign(date, conn)
+    conn.commit()
+    logger.info("Chip observations for %s: %d records", date, len(results))
+    return results
+
+
+def _upsert(conn: sqlite3.Connection, date: str, stock_id: str, broker_name: str,
+            category: str, reason: str, now: str) -> dict:
+    conn.execute(
+        """INSERT INTO stock_signals
+               (date, stock_id, broker_name, category, reasons,
+                rule_version, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(date, stock_id, broker_name) DO UPDATE SET
+               category = excluded.category,
+               reasons = excluded.reasons,
+               rule_version = excluded.rule_version,
+               created_at = excluded.created_at""",
+        (date, stock_id, broker_name, category, reason, settings.SIGNAL_RULE_VERSION, now),
+    )
+    return {"stock_id": stock_id, "broker_name": broker_name,
+            "category": category, "reasons": reason}
+
+
+def _refresh_foreign(date: str, conn: sqlite3.Connection) -> list[dict]:
+    """用 T86 每檔外資買賣超（raw_chip __FOREIGN__）產生外資籌碼觀察。
 
     訊號於 08:50 產出時今日 T86 尚未收（18:30 才收），故用「今日之前」最新（前一交易日）
     的外資資料。對 watchlist 每檔算外資連買/連賣天數與累計張數。
@@ -42,33 +71,18 @@ def compute_foreign_stock_signals(date: str, conn: sqlite3.Connection) -> list[d
             continue
         category, reason = classified
 
-        conn.execute(
-            """INSERT INTO stock_signals
-                   (date, stock_id, broker_name, category, reasons,
-                    rule_version, created_at)
-               VALUES (?, ?, '外資', ?, ?, ?, ?)
-               ON CONFLICT(date, stock_id, broker_name) DO UPDATE SET
-                   category = excluded.category,
-                   reasons = excluded.reasons,
-                   rule_version = excluded.rule_version,
-                   created_at = excluded.created_at""",
-            (date, stock_id, category, reason, settings.SIGNAL_RULE_VERSION, now),
-        )
-        results.append({"stock_id": stock_id, "category": category, "reason": reason})
-
-    conn.commit()
-    logger.info("Foreign stock signals for %s: %d records", date, len(results))
+        results.append(_upsert(conn, date, stock_id, "外資", category, reason, now))
     return results
 
 
-def compute_stock_signals(date: str, conn: sqlite3.Connection) -> list[dict]:
-    """從 daily_stock_metrics 計算 date 的分點籌碼觀察，寫入 stock_signals。
+def _refresh_broker(date: str, conn: sqlite3.Connection) -> list[dict]:
+    """從 daily_stock_metrics 計算 date 的分點籌碼觀察。
 
     與外資一致只看 date 之前：每檔取 date 之前最近一個有分點指標的日期
     （08:50 時 date 當日分點未收／未匯入；重算歷史日也才與當時一致）。
     """
     # 先清掉當日舊的分點籌碼觀察（只 INSERT 會殘留已不成立的分類）；外資那列由
-    # compute_foreign_stock_signals 負責
+    # _refresh_foreign 負責
     conn.execute(
         "DELETE FROM stock_signals WHERE date = ? AND broker_name != '外資'", (date,)
     )
@@ -84,8 +98,7 @@ def compute_stock_signals(date: str, conn: sqlite3.Connection) -> list[dict]:
     ).fetchall()
 
     if not rows:
-        conn.commit()
-        logger.info("compute_stock_signals: no stock metrics before %s", date)
+        logger.info("chip observations: no broker metrics before %s", date)
         return []
 
     results = []
@@ -101,30 +114,5 @@ def compute_stock_signals(date: str, conn: sqlite3.Connection) -> list[dict]:
             continue
         category, reason = classified
 
-        signal = {
-            "date": date,
-            "stock_id": stock_id,
-            "broker_name": broker_name,
-            "category": category,
-            "reasons": reason,
-            "rule_version": settings.SIGNAL_RULE_VERSION,
-        }
-        results.append(signal)
-
-        conn.execute(
-            """INSERT INTO stock_signals
-                   (date, stock_id, broker_name, category, reasons,
-                    rule_version, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(date, stock_id, broker_name) DO UPDATE SET
-                   category = excluded.category,
-                   reasons = excluded.reasons,
-                   rule_version = excluded.rule_version,
-                   created_at = excluded.created_at""",
-            (date, stock_id, broker_name, category, reason,
-             settings.SIGNAL_RULE_VERSION, now),
-        )
-
-    conn.commit()
-    logger.info("Stock signals for %s: %d records", date, len(results))
+        results.append(_upsert(conn, date, stock_id, broker_name, category, reason, now))
     return results

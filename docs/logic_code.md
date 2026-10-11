@@ -78,7 +78,7 @@ flowchart TD
 
 ---
 
-## 3. L3 個股觀察訊號 `compute_stock_signals`（每檔×每分點）
+## 3. L3 籌碼觀察 `refresh_chip_observations`（每檔×每分點＋外資）
 
 ```mermaid
 flowchart TD
