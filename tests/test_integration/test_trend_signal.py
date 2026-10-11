@@ -217,3 +217,46 @@ class TestComputeTrendSignal:
         assert res["big_trend"] == expected["big_trend"] == UP     # 還原後 UP
         # 未還原原始序列評估為 DOWN（年線被分割前高價拉低）→ 證明 compute 確實套了還原
         assert evaluate(_bars(closes))["big_trend"] != res["big_trend"]
+
+
+def _insert_trend(conn, date, big="UP", bias=0.05, reasons=("r1",)):
+    import json
+    conn.execute(
+        "INSERT INTO stock_trend_signals (date, stock_id, big_trend, bias_pct, "
+        "small_turn_up, action_hint, reasons, rule_version) "
+        "VALUES (?, '2330', ?, ?, 1, '觀望', ?, 'tv1')",
+        (date, big, bias, json.dumps(list(reasons), ensure_ascii=False)))
+    conn.commit()
+
+
+class TestLoadStockTrend:
+    def test_latest_and_asof(self):
+        from integration.trend_signal import load_stock_trend
+
+        conn = sqlite3.connect(":memory:")
+        create_all_tables(conn)
+        _insert_trend(conn, "2026-06-10", big="DOWN")
+        _insert_trend(conn, "2026-06-12", big="UP")
+
+        latest = load_stock_trend("2330", conn)
+        assert (latest.date, latest.big_trend, latest.label, latest.css) == (
+            "2026-06-12", "UP", "上升趨勢", "up")
+        assert latest.reasons == ["r1"] and latest.small_turn_up is True
+        assert load_stock_trend("2330", conn, asof="2026-06-11").big_trend == "DOWN"
+        assert load_stock_trend("2330", conn, asof="2026-06-01") is None
+
+    def test_missing_returns_none(self):
+        from integration.trend_signal import load_stock_trend
+
+        conn = sqlite3.connect(":memory:")
+        create_all_tables(conn)
+        assert load_stock_trend("2330", conn) is None
+
+    def test_unknown_label(self):
+        from integration.trend_signal import load_stock_trend
+
+        conn = sqlite3.connect(":memory:")
+        create_all_tables(conn)
+        _insert_trend(conn, "2026-06-12", big="UNKNOWN", bias=None, reasons=())
+        t = load_stock_trend("2330", conn)
+        assert (t.label, t.css, t.bias_pct, t.reasons) == ("資料不足", "flat", None, [])

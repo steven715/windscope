@@ -236,22 +236,12 @@ def query_stock_ohlc(stock_id: str, request: Request, limit: int = 300,
 @router.get("/stock/{stock_id}/trend")
 def query_stock_trend(stock_id: str, request: Request) -> dict:
     """個股最新趨勢訊號（reasons 已解開為 list）。無訊號回 found=false。"""
+    from dataclasses import asdict
+
+    from integration.trend_signal import load_stock_trend
+
     with get_connection(request.app.state.db_path) as conn:
-        row = conn.execute(
-            "SELECT date, big_trend, big_trend_confidence, value_center, bias_pct, "
-            "       small_state, small_turn_up, fundamental_gate, action_hint, "
-            "       position_hint, flat_redirect, reasons, rule_version, adjust_note "
-            "FROM stock_trend_signals WHERE stock_id = ? ORDER BY date DESC LIMIT 1",
-            (stock_id,),
-        ).fetchone()
-    if row is None:
+        trend = load_stock_trend(stock_id, conn)
+    if trend is None:
         return {"stock_id": stock_id, "found": False}
-    return {
-        "stock_id": stock_id, "found": True, "date": row[0],
-        "big_trend": row[1], "big_trend_confidence": row[2],
-        "value_center": row[3], "bias_pct": row[4], "small_state": row[5],
-        "small_turn_up": bool(row[6]), "fundamental_gate": row[7],
-        "action_hint": row[8], "position_hint": row[9], "flat_redirect": row[10],
-        "reasons": json.loads(row[11]) if row[11] else [],
-        "rule_version": row[12], "adjust_note": row[13],
-    }
+    return {"stock_id": stock_id, "found": True, **asdict(trend)}

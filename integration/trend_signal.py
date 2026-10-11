@@ -24,6 +24,10 @@ UP, DOWN, FLAT, UNKNOWN = "UP", "DOWN", "FLAT", "UNKNOWN"
 # fundamental_gate 取值
 GATE_PASS, GATE_FAIL, GATE_UNKNOWN = "PASS", "FAIL", "UNKNOWN"
 
+# 大勢顯示標籤與配色（與規則同處；explain／pages 經 TrendReading 取用）
+TREND_LABELS = {UP: "上升趨勢", DOWN: "下降趨勢", FLAT: "震盪盤整", UNKNOWN: "資料不足"}
+TREND_CSS = {UP: "up", DOWN: "down", FLAT: "flat", UNKNOWN: "flat"}
+
 
 @dataclass
 class TrendParams:
@@ -287,6 +291,63 @@ def _save_trend_signal(conn: sqlite3.Connection, result: dict) -> None:
          settings.TREND_RULE_VERSION, datetime.now().isoformat()),
     )
     conn.commit()
+
+
+@dataclass(frozen=True)
+class TrendReading:
+    """stock_trend_signals 的一筆趨勢訊號（reasons 已解開）；label／css 為大勢顯示用。"""
+
+    date: str
+    big_trend: str | None
+    big_trend_confidence: float | None
+    value_center: float | None
+    bias_pct: float | None
+    small_state: str | None
+    small_turn_up: bool
+    fundamental_gate: str | None
+    action_hint: str | None
+    position_hint: str | None
+    flat_redirect: str | None
+    reasons: list
+    adjust_note: str | None
+    rule_version: str | None
+
+    @property
+    def label(self) -> str | None:
+        """大勢中文標籤（例：上升趨勢）。"""
+        return TREND_LABELS.get(self.big_trend, self.big_trend)
+
+    @property
+    def css(self) -> str:
+        """大勢配色 class。"""
+        return TREND_CSS.get(self.big_trend, "flat")
+
+
+_READING_COLUMNS = (
+    "date", "big_trend", "big_trend_confidence", "value_center", "bias_pct",
+    "small_state", "small_turn_up", "fundamental_gate", "action_hint",
+    "position_hint", "flat_redirect", "reasons", "adjust_note", "rule_version",
+)
+
+
+def load_stock_trend(stock_id: str, conn: sqlite3.Connection,
+                     asof: str | None = None) -> TrendReading | None:
+    """讀個股最新一筆趨勢訊號（唯一讀取入口）；asof 給定時取該日（含）以前最新。無則 None。"""
+    where, params = "stock_id = ?", [stock_id]
+    if asof is not None:
+        where += " AND date <= ?"
+        params.append(asof)
+    row = conn.execute(
+        f"SELECT {', '.join(_READING_COLUMNS)} FROM stock_trend_signals "
+        f"WHERE {where} ORDER BY date DESC LIMIT 1",
+        params,
+    ).fetchone()
+    if row is None:
+        return None
+    values = dict(zip(_READING_COLUMNS, row))
+    values["small_turn_up"] = bool(values["small_turn_up"])
+    values["reasons"] = json.loads(values["reasons"]) if values["reasons"] else []
+    return TrendReading(**values)
 
 
 def compute_trend_signal(stock_id: str, conn: sqlite3.Connection,
