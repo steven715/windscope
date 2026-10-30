@@ -581,6 +581,8 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"></path></svg><span>排程紀錄</span></a>
 
     <div class="nav-group">策略交易</div>
+    <a href="/stats" class="{{ 'active' if active == 'stats' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"></path><path d="M5 8l7-5 7 5"></path><path d="M3 12h4M17 12h4"></path><path d="M5 21h14"></path></svg><span>判斷有效性</span></a>
     <a href="/backtest" class="{{ 'active' if active == 'backtest' }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="M7 14l3-4 3 3 5-7"></path></svg><span>回測</span></a>
     <a href="/backtest/history" class="{{ 'active' if active == 'backtest_history' }}">
@@ -611,7 +613,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18v-6M10 18V7M16 18v-9"></path><line x1="2" y1="20" x2="20" y2="20"></line></svg><span>訊號</span></a>
     <a href="/watchlist" class="{{ 'active' if active == 'watchlist' }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 16.9 6.7 19.6l1-5.8L3.5 9.2l5.9-.9z"></path></svg><span>名單</span></a>
-    <a href="/more" class="{{ 'active' if active in ['more', 'playbook', 'backtest', 'backtest_history', 'data', 'chip_import', 'stock_import', 'scheduler', 'scheduler_runs'] }}">
+    <a href="/more" class="{{ 'active' if active in ['more', 'playbook', 'stats', 'backtest', 'backtest_history', 'data', 'chip_import', 'stock_import', 'scheduler', 'scheduler_runs'] }}">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle></svg><span>更多</span></a>
   </nav>
 <script>

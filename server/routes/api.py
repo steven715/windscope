@@ -200,6 +200,21 @@ def query_stats(request: Request, last_n: int = 20) -> dict:
         return get_verification_stats(conn, last_n=last_n)
 
 
+@router.get("/call-stats")
+def query_call_stats(request: Request, rule_version: str | None = None,
+                     date_from: str | None = None, date_to: str | None = None,
+                     cost_bps: float | None = None) -> dict:
+    """盤前判斷有效性統計（基準線/信心校準/單因子/判斷回測＋結論），與 /stats 頁同一份結果。
+
+    結構化戰績，供外部工具或 LLM 讀取；比例以 0–1 表示、報酬為小數。
+    """
+    from integration.call_stats import build_call_stats
+
+    with get_connection(request.app.state.db_path) as conn:
+        return build_call_stats(conn, rule_version or None, date_from or None,
+                                date_to or None, cost_bps)
+
+
 @router.get("/live")
 def query_live(request: Request) -> dict:
     """盤中即時驗證：當日訊號 + 即時加權指數雙基準比對。讀背景快取，瞬間返回。"""
