@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -83,6 +84,28 @@ def test_target_id_deterministic_and_rebuild_keeps_lock(db):
     b = build_premarket_target(D, db)                               # 重算（例如 recompute）
     assert b["target_id"] == a["target_id"]
     assert target_get(db, a["target_id"])["locked_at"] == "2026-06-12T08:48:00+08:00"
+
+
+def test_rebuild_after_lock_keeps_locked_content_unless_forced(db, caplog):
+    """鎖定後訊號變了（例如 recompute）：不覆蓋、記 warning、回傳既有；force 才覆蓋。"""
+    _signal(db); _prev_index(db)
+    a = build_premarket_target(D, db)
+    target_lock(db, a["target_id"], "2026-06-12T08:48:00+08:00")
+    db.execute("UPDATE signals SET direction = 'bearish' WHERE date = ?", (D,))
+    with caplog.at_level("WARNING"):
+        b = build_premarket_target(D, db)
+    assert b["target_weight"] == a["target_weight"] and "鎖定，不可修改" in caplog.text
+    c = build_premarket_target(D, db, force=True)
+    assert c["target_weight"] < 0 and target_get(db, a["target_id"])["locked_at"] == "2026-06-12T08:48:00+08:00"
+
+
+def test_fixture_target_ids_match_hash():
+    """契約 fixture 的 target_id 必須等於冪等鍵的雜湊（tradewind 的對稱測試會重算）。"""
+    fix = Path(__file__).resolve().parents[2] / "docs" / "contracts" / "fixtures" / "targets.jsonl"
+    for line in fix.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            r = json.loads(line)
+            assert r["target_id"] == target_id_for(r["strategy_id"], r["instrument_id"], r["valid_from"], r["rule_version"])
 
 
 def test_rule_version_changes_target_id(db):

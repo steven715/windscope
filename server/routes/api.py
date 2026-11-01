@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import sqlite3
 
 from fastapi import APIRouter, HTTPException, Request
@@ -218,28 +219,39 @@ def query_instruments(request: Request, tradable_only: bool = False) -> dict:
         return _envelope("instruments", instruments_list(conn=conn, tradable_only=tradable_only))
 
 
+_TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$")
+_EVENTS_MAX_BATCH = 10_000
+
+
 @router.get("/bars")
 def query_bars(request: Request, instrument_id: str, resolution: str = "1d",
                date_from: str | None = None, date_to: str | None = None,
-               session: str | None = None, limit: int = 500) -> dict:
-    """統一 K 線列（契約 bars，舊→新）：新 bars 表 ∪ 舊 raw 表的映射。"""
+               session: str | None = None, limit: int = 500, offset: int = 0) -> dict:
+    """統一 K 線列（契約 bars，舊→新）：新 bars 表 ∪ 舊 raw 表的映射。去重後再分頁。"""
     from db.bars import bars_query
 
     limit = max(1, min(limit, 5000))
     with get_connection(request.app.state.db_path) as conn:
-        rows = bars_query(conn, instrument_id, resolution, date_from, date_to, session, limit)
-    return {**_envelope("bars", rows), "instrument_id": instrument_id, "resolution": resolution}
+        rows = bars_query(conn, instrument_id, resolution, date_from, date_to, session, limit,
+                          max(0, offset))
+    return {**_envelope("bars", rows), "instrument_id": instrument_id, "resolution": resolution,
+            "limit": limit, "offset": max(0, offset)}
 
 
 @router.get("/targets")
 def query_targets(request: Request, date: str | None = None, since: str | None = None,
-                  strategy_id: str | None = None, limit: int = 200) -> dict:
-    """目標部位（契約 targets＝Insight＋Trade Plan）。date＝某交易日；since＝produced_at ≥ 時刻。"""
+                  strategy_id: str | None = None, locked_only: bool = False,
+                  limit: int = 200) -> dict:
+    """目標部位（契約 targets＝Insight＋Trade Plan）。date＝某交易日；since＝有變動（產生或鎖定）≥ 時刻。"""
     from db.targets import targets_list
 
+    if since:
+        since = since.replace(" ", "+")      # query string 未編碼的 '+' 會變成空格
+        if not _TS_RE.match(since):
+            raise HTTPException(status_code=422, detail="since 須為 YYYY-MM-DDTHH:MM:SS+08:00（+ 請編碼為 %2B）")
     with get_connection(request.app.state.db_path) as conn:
         rows = targets_list(conn, session_date=date, since=since, strategy_id=strategy_id,
-                            limit=max(1, min(limit, _MAX_ROWS)))
+                            locked_only=locked_only, limit=max(1, min(limit, _MAX_ROWS)))
     return _envelope("targets", rows)
 
 
@@ -247,9 +259,13 @@ def query_targets(request: Request, date: str | None = None, since: str | None =
 def lock_target(target_id: str, request: Request) -> dict:
     """盤前鎖定 Trade Plan（寫 locked_at；已鎖定不變）。不存在回 404。"""
     from db.targets import target_lock
+    from utils.contract_schema import ContractError
 
-    with get_connection(request.app.state.db_path) as conn:
-        rec = target_lock(conn, target_id)
+    try:
+        with get_connection(request.app.state.db_path) as conn:
+            rec = target_lock(conn, target_id)
+    except ContractError as e:
+        raise HTTPException(status_code=422, detail=f"target 不符契約，無法鎖定：{e.errors[0]}")
     if rec is None:
         raise HTTPException(status_code=404, detail=f"unknown target: {target_id}")
     return {"target_id": target_id, "locked_at": rec["locked_at"]}
@@ -278,6 +294,8 @@ def ingest_events(request: Request, body: dict) -> dict:
     sn = body.get("account_snapshots") or []
     if not isinstance(ev, list) or not isinstance(sn, list):
         raise HTTPException(status_code=422, detail="events / account_snapshots 必須是陣列")
+    if len(ev) + len(sn) > _EVENTS_MAX_BATCH:
+        raise HTTPException(status_code=413, detail=f"一次最多 {_EVENTS_MAX_BATCH} 筆")
     with get_connection(request.app.state.db_path) as conn:
         r1 = events_ingest(conn, ev)
         r2 = snapshots_ingest(conn, sn)

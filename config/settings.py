@@ -116,11 +116,10 @@ BACKTEST_ASSUME_GATE_PASS = True
 # === 契約 I/O（docs/contracts v0.2，ADR-0005／0006）===
 # 盤前判斷 → 契約 target（Insight＋Trade Plan）。數值是 Playbook 參數的預設值，寫進每筆 target 的
 # trade_plan；改任一條請 bump PREMARKET_PLAYBOOK["playbook_version"]（不同版本績效分開記）。
-CONTRACT_SCHEMA_VERSION = "0.2"
 PREMARKET_TARGET_INSTRUMENT = "TAIFEX:TMF"   # 盤前判斷對應的可交易商品（微台）
 PREMARKET_TARGET_VALID_FROM = "08:50"
 PREMARKET_TARGET_VALID_UNTIL = "13:25"
-TARGET_LOCK_DEADLINE = "08:55"               # 08:55 未鎖定的 target，tradewind 視為中性
+TARGET_LOCK_DEADLINE = "08:55"               # 08:55 未鎖定的 target，tradewind 視為中性；之後才鎖只記 warning
 # 失效條件：開盤 30 分內現貨跌破（偏多）／站上（偏空）前一交易日低點／高點
 PREMARKET_INVALIDATION_UNTIL = "09:30"
 PREMARKET_PLAYBOOK = {

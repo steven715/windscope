@@ -381,29 +381,41 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_date ON account_snapshots(session_date,
 
 # bars_v：契約 bars 的統一讀取視圖＝新 bars 表 ∪ 三張舊 raw 表（不搬資料，過渡用）。
 # 舊表沒有可知時刻，依契約規則推：日 K＝收盤時刻、夜盤＝05:00；ingested_at 取 collected_at。
-# 夜盤 ts 以「歸屬日前一日 15:00」近似（週一的夜盤實為上週五；精確值由 bars 表承載）。
+# 夜盤 ts 以「歸屬日前一日 15:00」近似（週一的夜盤實為上週五；精確值由 bars 表承載），所以
+# 同一商品同日若 bars 表已有資料，raw 列一律排除（NOT EXISTS），避免同一根 K 出現兩筆。
+# origin：1＝bars 表、0＝raw 映射，讀取端去重時 bars 優先。raw_futures 的 oi_net_foreign 是外資
+# 淨部位（帶號），不是契約的 open_interest（總未平倉），故不映射。
 # 日期格式／時區正規化（+08:00）在 db/bars.py 讀取端做，view 只負責對映欄位。
+# DROP/CREATE 包在一個交易裡，server 執行中跑 init-db 不會出現「no such table: bars_v」的空窗。
 _BARS_VIEW_SQL = """
+BEGIN;
 DROP VIEW IF EXISTS bars_v;
 CREATE VIEW bars_v AS
 SELECT instrument_id, resolution, session, session_date, ts, open, high, low, close,
-       volume, turnover, open_interest, source, published_at, ingested_at, revision
+       volume, turnover, open_interest, source, published_at, ingested_at, revision, 1 AS origin
   FROM bars
 UNION ALL
-SELECT 'TWSE:TAIEX', '1d', 'regular', date, date || 'T09:00:00+08:00',
-       open, high, low, close, NULL, NULL, NULL, 'twse.raw_index',
-       date || 'T13:30:00+08:00', collected_at, 0
-  FROM raw_index WHERE close IS NOT NULL
+SELECT 'TWSE:TAIEX', '1d', 'regular', r.date, r.date || 'T09:00:00+08:00',
+       r.open, r.high, r.low, r.close, NULL, NULL, NULL, 'twse.raw_index',
+       r.date || 'T13:30:00+08:00', r.collected_at, 0, 0
+  FROM raw_index r WHERE r.close IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM bars b WHERE b.instrument_id = 'TWSE:TAIEX'
+                   AND b.resolution = '1d' AND b.session = 'regular' AND b.session_date = r.date)
 UNION ALL
-SELECT 'TWSE:' || stock_id, '1d', 'regular', date, date || 'T09:00:00+08:00',
-       open, high, low, close, volume, NULL, NULL, 'twse.raw_stock_daily',
-       date || 'T13:30:00+08:00', collected_at, 0
-  FROM raw_stock_daily WHERE close IS NOT NULL
+SELECT 'TWSE:' || r.stock_id, '1d', 'regular', r.date, r.date || 'T09:00:00+08:00',
+       r.open, r.high, r.low, r.close, r.volume, NULL, NULL, 'twse.raw_stock_daily',
+       r.date || 'T13:30:00+08:00', r.collected_at, 0, 0
+  FROM raw_stock_daily r WHERE r.close IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM bars b WHERE b.instrument_id = 'TWSE:' || r.stock_id
+                   AND b.resolution = '1d' AND b.session = 'regular' AND b.session_date = r.date)
 UNION ALL
-SELECT 'TAIFEX:TX', '1d', 'night', date, date(date, '-1 day') || 'T15:00:00+08:00',
-       NULL, NULL, NULL, night_close, night_volume, NULL, oi_net_foreign, 'taifex.raw_futures',
-       date || 'T05:00:00+08:00', collected_at, 0
-  FROM raw_futures WHERE night_close IS NOT NULL;
+SELECT 'TAIFEX:TX', '1d', 'night', r.date, date(r.date, '-1 day') || 'T15:00:00+08:00',
+       NULL, NULL, NULL, r.night_close, r.night_volume, NULL, NULL, 'taifex.raw_futures',
+       r.date || 'T05:00:00+08:00', r.collected_at, 0, 0
+  FROM raw_futures r WHERE r.night_close IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM bars b WHERE b.instrument_id = 'TAIFEX:TX'
+                   AND b.resolution = '1d' AND b.session = 'night' AND b.session_date = r.date);
+COMMIT;
 """
 
 

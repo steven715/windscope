@@ -8,31 +8,37 @@
 import json
 import logging
 import sqlite3
+from datetime import datetime
 
 from utils.contract_schema import require_valid
+from utils.tw_time import TW
 
 logger = logging.getLogger(__name__)
 
 _COLS = ("instrument_id", "resolution", "session", "session_date", "ts", "open", "high", "low",
          "close", "volume", "turnover", "open_interest", "source", "published_at",
          "ingested_at", "revision")
+# bars_v 多一欄 origin（1＝bars 表、0＝raw 映射），只用於去重排序，不輸出。
 
 
 def normalize_ts(value: str | None, fallback: str | None = None) -> str | None:
-    """把各種時間字串正規化成契約格式 `YYYY-MM-DDTHH:MM:SS+08:00`；空值用 fallback。"""
+    """把各種 ISO 時間字串正規化成契約格式 `YYYY-MM-DDTHH:MM:SS+08:00`；空值用 fallback。
+
+    naive（無時區）視為 Asia/Taipei；帶 Z／其他 offset 的換算成台北時間；微秒去掉。
+    解析失敗回 None（不產生看似合法但錯誤的時刻）。
+    """
     v = value or fallback
     if not v:
         return None
-    v = v.strip().replace(" ", "T")
-    if "." in v:                       # 去微秒：...:41.123456(+08:00)
-        head, _, tail = v.partition(".")
-        tz = tail[tail.find("+"):] if "+" in tail else ""
-        v = head + tz
-    if len(v) == 10:                   # 只有日期
-        v += "T00:00:00"
-    if "+" not in v and not v.endswith("Z"):
-        v += "+08:00"
-    return v
+    v = v.strip()
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(v)
+    except ValueError:
+        return None
+    dt = dt.replace(tzinfo=TW) if dt.tzinfo is None else dt.astimezone(TW)
+    return dt.replace(microsecond=0).isoformat()
 
 
 def _row_to_record(row: tuple) -> dict:
@@ -49,8 +55,8 @@ def _row_to_record(row: tuple) -> dict:
 
 def bars_query(conn: sqlite3.Connection, instrument_id: str, resolution: str = "1d",
                date_from: str | None = None, date_to: str | None = None,
-               session: str | None = None, limit: int = 500) -> list[dict]:
-    """查 bars_v（舊→新），回契約 bars dict 列表。同一鍵多 revision 時取最大。"""
+               session: str | None = None, limit: int = 500, offset: int = 0) -> list[dict]:
+    """查 bars_v（舊→新），回契約 bars dict 列表。同一鍵取最大 revision（bars 表優先），再 LIMIT/OFFSET。"""
     conds = ["instrument_id = ?", "resolution = ?"]
     params: list = [instrument_id, resolution]
     if session:
@@ -62,16 +68,14 @@ def bars_query(conn: sqlite3.Connection, instrument_id: str, resolution: str = "
     if date_to:
         conds.append("session_date <= ?")
         params.append(date_to)
-    sql = (f"SELECT {', '.join(_COLS)} FROM bars_v WHERE {' AND '.join(conds)} "
-           "ORDER BY ts ASC, revision DESC LIMIT ?")
-    rows = conn.execute(sql, [*params, max(1, limit)]).fetchall()
-    out: dict[tuple, dict] = {}
-    for r in rows:
-        rec = _row_to_record(r)
-        key = (rec["instrument_id"], rec["resolution"], rec["session"], rec["ts"])
-        if key not in out:            # 已依 revision DESC 排，首筆即最大 revision
-            out[key] = rec
-    return list(out.values())
+    cols = ", ".join(_COLS)
+    sql = (f"SELECT {cols} FROM ("
+           f"  SELECT {cols}, ROW_NUMBER() OVER (PARTITION BY instrument_id, resolution, session, ts "
+           f"         ORDER BY revision DESC, origin DESC) AS rn"
+           f"  FROM bars_v WHERE {' AND '.join(conds)}) "
+           "WHERE rn = 1 ORDER BY ts ASC LIMIT ? OFFSET ?")
+    rows = conn.execute(sql, [*params, max(1, limit), max(0, offset)]).fetchall()
+    return [_row_to_record(r) for r in rows]
 
 
 def bars_upsert(conn: sqlite3.Connection, records: list[dict]) -> int:

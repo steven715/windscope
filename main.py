@@ -458,7 +458,7 @@ def cmd_targets(args: argparse.Namespace) -> None:
     with get_connection() as conn:
         if args.action == "build":
             d = args.arg or _date.today().isoformat()
-            rec = build_premarket_target(d, conn)
+            rec = build_premarket_target(d, conn, force=args.force)
             print(_json.dumps(rec, ensure_ascii=False, indent=2) if rec else f"{d}: 無盤前判斷")
         elif args.action == "list":
             for rec in targets_list(conn, session_date=args.arg):
@@ -836,6 +836,7 @@ def main() -> None:
     )
     targets_parser.add_argument("action", choices=["build", "list", "lock"])
     targets_parser.add_argument("arg", nargs="?", help="date (build/list) 或 target_id (lock)")
+    targets_parser.add_argument("--force", action="store_true", help="build：已鎖定的 target 也覆蓋（盤後修正用）")
 
     ingest_parser = subparsers.add_parser(
         "ingest-events", help="掃 tradewind inbox 的 events/account_snapshots JSONL 入庫"

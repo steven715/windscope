@@ -8,11 +8,11 @@ instruments_seed 灌一次（與 watchlist 同一套規則，CLAUDE.md 硬約束
 import json
 import logging
 import sqlite3
-from datetime import datetime
 from pathlib import Path
 
 from db.connection import get_connection
 from utils.contract_schema import require_valid
+from utils.tw_time import now_tw_iso
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ def instrument_upsert(conn: sqlite3.Connection, record: dict) -> None:
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (record["instrument_id"], json.dumps(record, ensure_ascii=False),
          record["asset_class"], int(record["tradable"]), int(record.get("active", True)),
-         record["as_of"], datetime.now().isoformat(timespec="seconds")),
+         record["as_of"], now_tw_iso()),
     )
 
 

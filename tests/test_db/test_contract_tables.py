@@ -56,6 +56,13 @@ def test_normalize_ts():
     assert normalize_ts("2026-06-12 14:30:12") == "2026-06-12T14:30:12+08:00"
     assert normalize_ts("2026-06-12T14:30:12+08:00") == "2026-06-12T14:30:12+08:00"
     assert normalize_ts("2026-06-12") == "2026-06-12T00:00:00+08:00"
+    assert normalize_ts("2026-06-12T14:30") == "2026-06-12T14:30:00+08:00"
+    # 其他時區一律換算成台北時間，不是硬貼 +08:00
+    assert normalize_ts("2026-06-12T05:30:41Z") == "2026-06-12T13:30:41+08:00"
+    assert normalize_ts("2026-06-12T05:30:41.5Z") == "2026-06-12T13:30:41+08:00"
+    assert normalize_ts("2026-06-12T14:30:12-05:00") == "2026-06-13T03:30:12+08:00"
+    assert normalize_ts("2026-06-12T14:30:12.123456+00:00") == "2026-06-12T22:30:12+08:00"
+    assert normalize_ts("not a time") is None
     assert normalize_ts(None, fallback="2026-06-12T09:00:00+08:00") == "2026-06-12T09:00:00+08:00"
     assert normalize_ts(None) is None
 
@@ -79,7 +86,8 @@ def test_bars_view_maps_legacy_tables_to_contract(db):
     assert stk["volume"] == 28431000 and validate_record("bars", stk) == []
     fut = bars_query(db, "TAIFEX:TX", session="night")[0]
     assert fut["session_date"] == "2026-06-15" and fut["ts"] == "2026-06-14T15:00:00+08:00"
-    assert fut["published_at"] == "2026-06-15T05:00:00+08:00" and fut["open_interest"] == -32150
+    assert fut["published_at"] == "2026-06-15T05:00:00+08:00"
+    assert fut["open_interest"] is None and fut["volume"] == 41230   # oi_net_foreign 是帶號淨部位，不映射
     assert validate_record("bars", fut) == []
     assert bars_query(db, "TWSE:TAIEX", date_from="2026-06-13") == []
 
@@ -97,6 +105,30 @@ def test_bars_upsert_revision_and_latest(db):
         bars_upsert(db, [{**rows[0], "resolution": "2m"}])
 
 
+def test_bars_query_dedupes_before_paging_and_prefers_bars_table(db):
+    """同鍵多 revision 先去重再 LIMIT/OFFSET；bars 表有同日資料時 raw 映射列被排除。"""
+    base = [b for b in _fixture("bars") if b["resolution"] == "1m"][0]
+    recs = []
+    for i in range(3):
+        ts = f"2026-06-12T09:2{i}:00+08:00"
+        pub = f"2026-06-12T09:2{i + 1}:00+08:00"
+        for rev in range(3):
+            recs.append({**base, "ts": ts, "published_at": pub, "revision": rev, "close": 23000 + rev})
+    bars_upsert(db, recs)
+    got = bars_query(db, "TAIFEX:TMF", "1m", limit=2)
+    assert [g["revision"] for g in got] == [2, 2] and len(got) == 2
+    assert bars_query(db, "TAIFEX:TMF", "1m", limit=2, offset=2)[0]["ts"] == "2026-06-12T09:22:00+08:00"
+    # raw_index 的 2026-06-12 與 bars 表同日同鍵 → 只剩 bars 表那筆
+    db.execute("INSERT INTO raw_index (date, open, high, low, close, collected_at) "
+               "VALUES ('2026-06-12', 1, 2, 0.5, 1.5, '2026-06-12T14:30:12')")
+    assert bars_query(db, "TWSE:TAIEX")[0]["source"] == "twse.raw_index"
+    bars_upsert(db, [{**base, "instrument_id": "TWSE:TAIEX", "resolution": "1d", "session": "regular",
+                      "ts": "2026-06-12T09:00:00+08:00", "published_at": "2026-06-12T13:30:00+08:00",
+                      "source": "twse.MI_5MINS_HIST", "volume": None, "revision": 0}])
+    out = bars_query(db, "TWSE:TAIEX")
+    assert len(out) == 1 and out[0]["source"] == "twse.MI_5MINS_HIST"
+
+
 # ── targets ──────────────────────────────────────────────────────────────
 
 
@@ -107,17 +139,43 @@ def test_targets_put_get_list_lock(db):
     assert target_get(db, rows[0]["target_id"]) == rows[0]
     assert len(targets_list(db, session_date="2026-06-12")) == 1
     assert len(targets_list(db, strategy_id="trend_signal")) == 2
-    assert [t["target_id"] for t in targets_list(db, since="2026-06-15T00:00:00+08:00")] \
-        == [r["target_id"] for r in rows if r["produced_at"] >= "2026-06-15"]
+    assert targets_list(db, since="2999-01-01T00:00:00+08:00") == []          # since＝有變動的時刻
+    assert len(targets_list(db, since="2000-01-01T00:00:00+08:00")) == len(rows)
     # 鎖定：寫 locked_at；再鎖不變；重 put（重算）不解除
     unlocked = rows[0]
     assert target_get(db, rows[0]["target_id"])["locked_at"] is None
     first = target_lock(db, rows[0]["target_id"], "2026-06-12T08:48:00+08:00")["locked_at"]
     assert first == "2026-06-12T08:48:00+08:00"
     assert target_lock(db, rows[0]["target_id"], "2026-06-12T08:50:00+08:00")["locked_at"] == first
-    target_put(db, unlocked)
+    target_put(db, unlocked)                                           # 內容相同：保留鎖定
     assert target_get(db, rows[0]["target_id"])["locked_at"] == first
     assert target_lock(db, "nope") is None
+
+
+def test_locked_target_rejects_content_change_unless_forced(db):
+    from db.targets import TargetLockedError
+
+    rec = {**_fixture("targets")[0], "locked_at": None}
+    target_put(db, rec)
+    target_lock(db, rec["target_id"], "2026-06-12T08:48:00+08:00")
+    changed = {**rec, "target_weight": -1.0}
+    with pytest.raises(TargetLockedError):
+        target_put(db, changed)
+    assert target_get(db, rec["target_id"])["target_weight"] == rec["target_weight"]
+    target_put(db, changed, force=True)
+    got = target_get(db, rec["target_id"])
+    assert got["target_weight"] == -1.0 and got["locked_at"] == "2026-06-12T08:48:00+08:00"
+
+
+def test_targets_since_sees_locks(db):
+    """since 是「有變動」：鎖定後用更晚的 since 仍拿得到那筆（tradewind 輪詢的主流程）。"""
+    rec = {**_fixture("targets")[0], "locked_at": None}
+    target_put(db, rec)
+    db.execute("UPDATE targets SET updated_at = '2000-01-01T00:00:00+08:00'")   # 模擬很久以前產生
+    assert targets_list(db, since="2020-01-01T00:00:00+08:00") == []
+    target_lock(db, rec["target_id"], "2026-06-12T08:52:00+08:00")                 # 鎖定＝一次變動
+    assert [t["target_id"] for t in targets_list(db, since="2020-01-01T00:00:00+08:00")] == [rec["target_id"]]
+    assert targets_list(db, locked_only=True)[0]["locked_at"] == "2026-06-12T08:52:00+08:00"
 
 
 def test_targets_put_rejects_invalid(db):
@@ -134,8 +192,11 @@ def test_events_ingest_idempotent_and_invalid(db):
     ev = _fixture("events")
     r = events_ingest(db, ev)
     assert r["inserted"] == len(ev) and r["duplicates"] == 0 and r["invalid"] == 0
-    r2 = events_ingest(db, ev + [{"event_id": "bad"}])
-    assert r2["inserted"] == 0 and r2["duplicates"] == len(ev) and r2["invalid"] == 1 and r2["errors"]
+    r2 = events_ingest(db, ev + [{"event_id": "bad"}, 123, None, ["x"]])
+    assert r2["inserted"] == 0 and r2["duplicates"] == len(ev) and r2["invalid"] == 4 and len(r2["errors"]) == 4
+    # run_mode 與來源不符 → invalid（Paper 與實盤永不混算）
+    r3 = events_ingest(db, [{**ev[0], "event_id": "z-00000001"}], expect_run_mode="shioaji_live")
+    assert r3["invalid"] == 1 and "run_mode" in r3["errors"][0]
     assert len(events_list(db, session_date="2026-06-12", run_mode="paper")) == len(ev)
     assert [e["kind"] for e in events_list(db, target_id=ev[0]["target_id"])][:2] == ["plan", "plan"]
     assert events_list(db, run_mode="shioaji_live") == []
@@ -165,3 +226,11 @@ def test_ingest_inbox_scans_files_idempotently(db, tmp_path):
     s2 = ingest_inbox(db, str(tmp_path))                     # 全掃：舊檔全部 duplicates，新檔 1 筆
     assert s2["files"] == 3 and s2["events"]["inserted"] == 1 and s2["events"]["duplicates"] == len(ev)
     assert ingest_inbox(db, str(tmp_path / "missing"))["files"] == 0
+    # 歸屬交易日取檔名、run_mode 取目錄：放錯目錄的檔整批 invalid，且不影響其他檔
+    (tmp_path / "events" / "shioaji_live").mkdir()
+    (tmp_path / "events" / "shioaji_live" / "2026-06-14.jsonl").write_text(
+        json.dumps({**ev[0], "event_id": "live-0001"}) + "\n[1,2]\n", encoding="utf-8")
+    s3 = ingest_inbox(db, str(tmp_path), session_date="2026-06-14")
+    assert s3["files"] == 1 and s3["events"]["inserted"] == 0 and s3["events"]["invalid"] == 2
+    assert events_list(db, run_mode="shioaji_live") == []
+    assert events_list(db, session_date="2026-06-13")[0]["event_id"] == "x-20260613-0001"

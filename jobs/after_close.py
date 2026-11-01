@@ -96,7 +96,7 @@ def _refresh_stock_trends(date: str, conn: sqlite3.Connection,
     return any_ok
 
 
-def _ingest_inbox(date: str, conn) -> dict:
+def _ingest_inbox(date: str, conn: sqlite3.Connection) -> dict:
     """掃 tradewind inbox 當日檔案入庫；回傳統計（沒有檔案也算成功）。"""
     from db.events import ingest_inbox
 

@@ -71,3 +71,17 @@ def test_events_post_get_idempotent(client):
     assert got["schema_version"] == "0.1" and got["count"] == len(ev)
     assert client.get("/api/account-snapshots?date=2026-06-12").json()["count"] == 2
     assert client.post("/api/events", json={"events": "x"}).status_code == 422
+    assert client.post("/api/events", json={"events": [1] * 10_001}).status_code == 413
+    assert client.post("/api/events", json={"events": [1, None]}).json()["events"]["invalid"] == 2
+
+
+def test_targets_since_rejects_bad_format_and_sees_lock(client):
+    assert client.get("/api/targets?since=2026-06-12T08:50:30Z").status_code == 422
+    tid = client.get("/api/targets?date=2026-06-12").json()["records"][0]["target_id"]
+    assert client.get("/api/targets?since=2099-01-01T00:00:00%2B08:00").json()["count"] == 0
+    assert client.get("/api/targets?since=2099-01-01T00:00:00+08:00").json()["count"] == 0   # 未編碼的 + 也接受
+    client.post(f"/api/targets/{tid}/lock")
+    # 鎖定後 updated_at 更新 → 以鎖定前的時刻當 since 一定拿得到
+    assert client.get("/api/targets?since=2000-01-01T00:00:00%2B08:00&locked_only=true").json()["count"] == 1
+    body = client.get("/api/bars?instrument_id=TWSE:TAIEX&limit=1&offset=5").json()
+    assert body["count"] == 0 and body["offset"] == 5

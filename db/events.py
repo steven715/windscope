@@ -10,8 +10,8 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from utils.contract_schema import validate_record
 from utils.tw_time import now_tw_iso
-from utils.contract_schema import ContractError, validate_record
 
 logger = logging.getLogger(__name__)
 
@@ -20,21 +20,39 @@ def _now() -> str:
     return now_tw_iso()
 
 
-def events_ingest(conn: sqlite3.Connection, records: list[dict]) -> dict:
-    """寫入 events（去重 by event_id）。回傳 {inserted, duplicates, invalid, errors}。"""
+def _check(name: str, rec, res: dict, id_key: str, expect_run_mode: str | None) -> bool:
+    """契約驗證＋run_mode 檢查；不合法計入 invalid 並回 False。"""
+    if not isinstance(rec, dict):
+        res["invalid"] += 1
+        res["errors"].append(f"?: 不是物件（{type(rec).__name__}）")
+        return False
+    errs = validate_record(name, rec)
+    if not errs and expect_run_mode and rec.get("run_mode") != expect_run_mode:
+        errs = [f"run_mode {rec.get('run_mode')!r} 與來源目錄 {expect_run_mode!r} 不符"]
+    if errs:
+        res["invalid"] += 1
+        res["errors"].append(f"{rec.get(id_key, '?')}: {errs[0]}")
+        return False
+    return True
+
+
+def events_ingest(conn: sqlite3.Connection, records: list, session_date: str | None = None,
+                  expect_run_mode: str | None = None) -> dict:
+    """寫入 events（去重 by event_id）。回傳 {inserted, duplicates, invalid, errors}。
+
+    session_date 給定時以它為歸屬交易日（inbox 檔名），否則取 ts 的日期；
+    expect_run_mode 給定時 run_mode 不符的筆數計入 invalid（Paper 與實盤永不混算）。
+    """
     res = {"inserted": 0, "duplicates": 0, "invalid": 0, "errors": []}
     now = _now()
     for rec in records:
-        errs = validate_record("events", rec)
-        if errs:
-            res["invalid"] += 1
-            res["errors"].append(f"{rec.get('event_id', '?')}: {errs[0]}")
+        if not _check("events", rec, res, "event_id", expect_run_mode):
             continue
         cur = conn.execute(
             "INSERT OR IGNORE INTO events (event_id, run_mode, session_date, ts, kind, action, "
             "strategy_id, target_id, instrument_id, payload, ingested_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (rec["event_id"], rec["run_mode"], rec["ts"][:10], rec["ts"], rec["kind"],
+            (rec["event_id"], rec["run_mode"], session_date or rec["ts"][:10], rec["ts"], rec["kind"],
              rec["action"], rec.get("strategy_id"), rec.get("target_id"),
              rec.get("instrument_id"), json.dumps(rec, ensure_ascii=False), now),
         )
@@ -45,20 +63,18 @@ def events_ingest(conn: sqlite3.Connection, records: list[dict]) -> dict:
     return res
 
 
-def snapshots_ingest(conn: sqlite3.Connection, records: list[dict]) -> dict:
-    """寫入 account_snapshots（去重 by snapshot_id）。回傳同 events_ingest 的統計。"""
+def snapshots_ingest(conn: sqlite3.Connection, records: list, session_date: str | None = None,
+                     expect_run_mode: str | None = None) -> dict:
+    """寫入 account_snapshots（去重 by snapshot_id）。參數語意同 events_ingest。"""
     res = {"inserted": 0, "duplicates": 0, "invalid": 0, "errors": []}
     now = _now()
     for rec in records:
-        errs = validate_record("account_snapshots", rec)
-        if errs:
-            res["invalid"] += 1
-            res["errors"].append(f"{rec.get('snapshot_id', '?')}: {errs[0]}")
+        if not _check("account_snapshots", rec, res, "snapshot_id", expect_run_mode):
             continue
         cur = conn.execute(
             "INSERT OR IGNORE INTO account_snapshots (snapshot_id, run_mode, account_id, "
             "session_date, as_of, equity, payload, ingested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (rec["snapshot_id"], rec["run_mode"], rec["account_id"], rec["as_of"][:10],
+            (rec["snapshot_id"], rec["run_mode"], rec["account_id"], session_date or rec["as_of"][:10],
              rec["as_of"], rec.get("equity"), json.dumps(rec, ensure_ascii=False), now),
         )
         res["inserted" if cur.rowcount else "duplicates"] += 1
@@ -129,8 +145,11 @@ def ingest_inbox(conn: sqlite3.Connection, inbox_dir: str | None = None,
         pattern = f"*/{session_date}.jsonl" if session_date else "*/*.jsonl"
         for path in sorted(base.glob(pattern)):
             try:
-                res = fn(conn, _read_jsonl(path))
-            except ContractError as e:
+                # 歸屬交易日取檔名、run_mode 取目錄：檔案內容不符的筆數算 invalid
+                res = fn(conn, _read_jsonl(path), session_date=path.stem,
+                         expect_run_mode=path.parent.name)
+            except Exception as e:   # 一個壞檔不該殺掉整個入庫步驟
+                logger.error("ingest %s 失敗：%s", path, e)
                 summary["errors"].append(f"{path}: {e}")
                 continue
             summary["files"] += 1

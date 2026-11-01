@@ -6,11 +6,12 @@ Playbook 參數組成契約 v0.2 的一筆 target。同一天重算得到同一�
 """
 
 import hashlib
+import json
 import logging
 import sqlite3
 
 from config import settings
-from db.targets import target_put
+from db.targets import TargetLockedError, target_get, target_put
 from utils.contract_schema import schema_version
 from utils.trading_calendar import get_previous_trading_day
 from utils.tw_time import now_tw_iso, tw_iso
@@ -47,8 +48,11 @@ def _invalidation(date: str, direction: str, conn: sqlite3.Connection) -> dict:
 
 
 def build_premarket_target(date: str, conn: sqlite3.Connection,
-                           produced_at: str | None = None) -> dict | None:
-    """把 date 的盤前判斷轉成契約 target 並寫入 targets 表。無盤前判斷回 None。"""
+                           produced_at: str | None = None, force: bool = False) -> dict | None:
+    """把 date 的盤前判斷轉成契約 target 並寫入 targets 表。無盤前判斷回 None。
+
+    已鎖定且內容會變的 target 不覆蓋（記 WARNING、回傳既有那筆）；force=True 才覆蓋。
+    """
     row = conn.execute(
         "SELECT direction, confidence, rule_version, reasons FROM signals WHERE date = ?", (date,)
     ).fetchone()
@@ -91,15 +95,17 @@ def build_premarket_target(date: str, conn: sqlite3.Connection,
         "reason": _reason_text(reasons),
         "inputs_ref": {"source_table": "signals", "key": {"date": date}, "inputs_hash": None},
     }
-    target_put(conn, record)
+    try:
+        target_put(conn, record, force=force)
+    except TargetLockedError as e:
+        logger.warning("build_premarket_target: %s；保留既有鎖定內容", e)
+        return target_get(conn, record["target_id"])
     logger.info("target %s: %s %s weight=%s", record["target_id"], date, direction, weight)
     return record
 
 
-def _reason_text(reasons) -> str | None:
+def _reason_text(reasons: str | list | None) -> str | None:
     """signals.reasons（JSON list）→ 一句話（≤200 字）。"""
-    import json
-
     if not reasons:
         return None
     try:
