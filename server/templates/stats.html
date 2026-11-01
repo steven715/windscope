@@ -1,0 +1,227 @@
+{% extends "base.html" %}
+{% block title %}判斷有效性{% endblock %}
+{% block content %}
+<style>
+  .pos { color: var(--up); } .neg { color: var(--down); }
+  .r { text-align: right; }
+  .verdict { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .verdict .chip { font-size: 14px; padding: 6px 16px; }
+  .verdict .vt { flex: 1; min-width: 240px; font: 400 13.5px var(--font); color: #cdd8e2; line-height: 1.7; }
+  .sec { margin: 26px 0 10px; }
+  .sec .section-title { margin-bottom: 4px; }
+  .sec .dim { line-height: 1.6; }
+  .ci { font: 400 11px var(--mono); color: var(--text-mute); white-space: nowrap; }
+  .tag.low { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .dist { font: 500 11.5px var(--mono); white-space: nowrap; }
+  .dist .up, .dist .down, .dist .flat { margin-right: 6px; }
+  .mono-sm { font: 500 12px var(--mono); }
+  .fact-head { display: flex; align-items: baseline; gap: 10px; margin: 14px 0 6px; }
+  .fact-head b { font: 700 13.5px var(--font); }
+  .bt-sub { font: 400 11.5px var(--font); color: var(--text-mute); margin: -4px 0 8px; }
+  tr.ref td { color: var(--text-dim); }
+  /* 寬表（回測 13 欄、因子 7 欄）手機改橫向捲動，不堆疊成長卡 */
+  @media (max-width: 760px) {
+    table.wide { width: auto; min-width: 100%; }
+    table.wide th, table.wide td { white-space: nowrap; }
+  }
+</style>
+
+<div class="page-head">
+  <div>
+    <h1>判斷有效性</h1>
+    <div class="sub">用已驗證的盤前判斷回答一件事：<b>這套規則有沒有 edge？</b> 四張表、一個結論；純讀取，不改任何門檻。</div>
+  </div>
+  <a href="/api/call-stats?rule_version={{ s.filters.rule_version }}&date_from={{ s.filters.date_from }}&date_to={{ s.filters.date_to }}" class="refresh-btn" title="同一份結果的 JSON（可餵給 LLM）">JSON</a>
+</div>
+
+<form class="filter" method="get" action="/stats">
+  <label>規則版本
+    <select name="rule_version">
+      <option value="" {% if not s.filters.rule_version %}selected{% endif %}>全部（分版列於下）</option>
+      {% for v in s.versions %}
+      <option value="{{ v.rule_version }}" {% if v.rule_version and s.filters.rule_version == v.rule_version %}selected{% endif %}>{{ v.rule_version or '（無版本）' }} · {{ v.n }} 筆{% if v.rule_version == current_version %} · 現行{% endif %}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>從 <input type="date" name="date_from" value="{{ s.filters.date_from }}"></label>
+  <label>到 <input type="date" name="date_to" value="{{ s.filters.date_to }}"></label>
+  <button type="submit">查詢</button>
+</form>
+
+{# ── 結論 ── #}
+<div class="panel verdict">
+  <span class="chip {{ verdict_css }}">{{ verdict_label }}</span>
+  <div class="vt">
+    {{ s.assessment.text }}
+    <div class="muted" style="margin-top:4px">
+      已驗證 <b class="mono">{{ s.n }}</b> 筆{% if s.date_range %}（{{ s.date_range[0] }} ～ {{ s.date_range[1] }}）{% endif %}
+      · 結論門檻 {{ s.min_sample }} 筆 · 分桶門檻 {{ s.min_bucket }} 筆
+      {% if s.versions|length > 1 and not s.filters.rule_version %}· <span class="flat">目前混算 {{ s.versions|length }} 個規則版本，建議用上方篩選分開看</span>{% endif %}
+    </div>
+  </div>
+</div>
+
+{% if s.n == 0 %}
+<div class="panel empty">此區間沒有已驗證的盤前判斷。</div>
+{% else %}
+
+{# ── ① 基準線 ── #}
+<div class="sec">
+  <div class="section-title">① 基準線對照</div>
+  <div class="dim">命中率只有和「傻策略」並排才有意義。<b>與結果無關</b>＝保留系統自己的喊多/喊空/喊中性比例、但假設和實際漲跌毫無關係時的期望命中率，是最誠實的「隨機」。</div>
+</div>
+<div class="table-wrap">
+  <table class="stack">
+    <thead><tr><th>策略</th><th class="r">樣本</th><th class="r">收盤命中率</th><th class="r">95% 區間</th><th class="r">系統 − 基準</th></tr></thead>
+    <tbody>
+      <tr>
+        <td data-label="策略"><b>盤前判斷（系統）</b></td>
+        <td data-label="樣本" class="mono r">{{ s.baselines.system.n }}</td>
+        <td data-label="收盤命中率" class="mono r"><b style="color:var(--ok)">{{ s.baselines.system.rate|pct }}</b></td>
+        <td data-label="95% 區間" class="ci r">{{ s.baselines.system.ci_low|pct }} – {{ s.baselines.system.ci_high|pct }}</td>
+        <td data-label="系統 − 基準" class="r">—</td>
+      </tr>
+      {% for b in s.baselines.baselines %}
+      <tr class="ref">
+        <td data-label="策略">{{ b.label }}</td>
+        <td data-label="樣本" class="mono r">{{ b.n }}</td>
+        <td data-label="收盤命中率" class="mono r">{{ b.rate|pct }}</td>
+        <td data-label="95% 區間" class="ci r">{% if b.ci_low is not none %}{{ b.ci_low|pct }} – {{ b.ci_high|pct }}{% else %}—{% endif %}</td>
+        <td data-label="系統 − 基準" class="mono r {{ 'pos' if b.edge_pp is not none and b.edge_pp > 0 else 'neg' if b.edge_pp is not none else '' }}">{{ b.edge_pp|pp }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="footnote" style="margin-top:-8px">
+  實際走勢分布：
+  {% for c in ['up','down','flat'] %}<span class="{{ c }} mono-sm">{{ class_labels[c] }} {{ s.baselines.actual_dist[c].share|pct(0) }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+  ｜ 系統喊的分布：
+  {% for d in ['bullish','bearish','neutral'] %}<span class="mono-sm">{{ direction_labels[d] }} {{ s.baselines.predicted_dist[d].share|pct(0) }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+  ｜ ±{{ flat_band }}% 內為「平」。
+</div>
+
+{# ── ② 信心校準 ── #}
+<div class="sec">
+  <div class="section-title">② 信心校準</div>
+  <div class="dim">信心 1–5 有資訊量的話，命中率應該隨信心上升。
+    {% if s.calibration.monotonic is true %}<span class="hit">✓ 目前嚴格上升</span>（桶 {{ s.calibration.monotonic_buckets|join('→') }}）
+    {% elif s.calibration.monotonic is false %}<span class="miss">✗ 目前非嚴格上升</span>（桶 {{ s.calibration.monotonic_buckets|join('→') }}）——信心加減分邏輯可能只是雜訊
+    {% else %}<span class="flat">樣本 ≥ {{ s.min_bucket }} 的桶不足兩個，無法判定</span>{% endif %}
+  </div>
+</div>
+<div class="table-wrap">
+  <table class="stack">
+    <thead><tr><th>信心</th><th class="r">樣本</th><th class="r">收盤命中</th><th class="r">95% 區間</th><th class="r">跳空命中</th><th class="r">順向平均報酬</th></tr></thead>
+    <tbody>
+      {% for conf, b in s.calibration.by_confidence|dictsort(reverse=true) %}
+      <tr>
+        <td data-label="信心"><b class="mono">{{ conf }}/5</b>{% if b.insufficient %} <span class="tag low">樣本不足</span>{% endif %}</td>
+        <td data-label="樣本" class="mono r">{{ b.n }}</td>
+        <td data-label="收盤命中" class="mono r">{{ b.rate|pct }}</td>
+        <td data-label="95% 區間" class="ci r">{{ b.ci_low|pct }} – {{ b.ci_high|pct }}</td>
+        <td data-label="跳空命中" class="mono r">{{ b.open_rate|pct }}</td>
+        <td data-label="順向平均報酬" class="mono r {{ 'pos' if b.avg_directional_return is not none and b.avg_directional_return > 0 else 'neg' if b.avg_directional_return is not none else '' }}">{% if b.avg_directional_return is not none %}{{ "%+.2f"|format(b.avg_directional_return) }}% <span class="muted">(n={{ b.n_directional }})</span>{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="dim" style="margin:-6px 0 8px">依方向拆開：「喊中性剛好落在 ±0.3%」與「喊方向真的對」是兩種品質不同的命中。</div>
+<div class="table-wrap">
+  <table class="stack">
+    <thead><tr><th>方向</th><th class="r">樣本</th><th class="r">收盤命中</th><th class="r">95% 區間</th><th class="r">跳空命中</th><th class="r">平均漲跌</th><th class="r">順向平均報酬</th></tr></thead>
+    <tbody>
+      {% for d in ['bullish','bearish','neutral'] if d in s.calibration.by_direction %}
+      {% set b = s.calibration.by_direction[d] %}
+      {% set css = 'up' if d == 'bullish' else 'down' if d == 'bearish' else 'flat' %}
+      <tr>
+        <td data-label="方向"><span class="chip chip-{{ css }}">{{ direction_labels[d] }}</span>{% if b.insufficient %} <span class="tag low">樣本不足</span>{% endif %}</td>
+        <td data-label="樣本" class="mono r">{{ b.n }}</td>
+        <td data-label="收盤命中" class="mono r">{{ b.rate|pct }}</td>
+        <td data-label="95% 區間" class="ci r">{{ b.ci_low|pct }} – {{ b.ci_high|pct }}</td>
+        <td data-label="跳空命中" class="mono r">{{ b.open_rate|pct }}</td>
+        <td data-label="平均漲跌" class="mono r">{% if b.avg_day_change_pct is not none %}{{ "%+.2f"|format(b.avg_day_change_pct) }}%{% else %}—{% endif %}</td>
+        <td data-label="順向平均報酬" class="mono r {{ 'pos' if b.avg_directional_return is not none and b.avg_directional_return > 0 else 'neg' if b.avg_directional_return is not none else '' }}">{% if b.avg_directional_return is not none %}{{ "%+.2f"|format(b.avg_directional_return) }}%{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── ③ 判斷回測 ── #}
+<div class="sec">
+  <div class="section-title">③ 判斷回測：把「方向對」換成「有賺」</div>
+  <div class="dim">偏多＝做多、偏空＝做空、中性＝空手（不計入勝率）。每趟來回成本 <b class="mono">{{ s.backtest.cost_bps }} bps</b>（0050 口徑）。
+    <b>信心加權</b>＝部位∝信心、權重正規化成平均 1（總曝險與等權相同）；若贏不過等權，是信心沒資訊量的第二個證據。</div>
+</div>
+{% for mode, m in s.backtest.modes.items() %}
+{% set ml = bt_modes[mode] %}
+<div class="fact-head"><b>{{ ml[0] }}</b><span class="muted">{{ m.n_days }} 個交易日 · 中性空手 {{ m.n_neutral }} 日 · 同口徑指數（逐日複利、無成本）{{ m.index_return|spct }}</span></div>
+<div class="bt-sub">{{ ml[1] }}</div>
+<div class="table-wrap">
+  <table class="wide">
+    <thead><tr><th>部位</th><th class="r">筆數</th><th class="r">勝率</th><th class="r">95% 區間</th><th class="r">平均獲利</th><th class="r">平均虧損</th><th class="r">盈虧比</th><th class="r">期望值/筆</th><th class="r">PF</th><th class="r">累積報酬</th><th class="r">最大回撤</th><th class="r">Sharpe</th><th class="r">最大連敗</th></tr></thead>
+    <tbody>
+      {% for key, label, is_ref in [('equal','照判斷做（等權）', false), ('weighted','照判斷做（信心加權）', false), ('always_long','每天做多', true), ('always_short','每天做空', true)] %}
+      {% set t = m[key] %}
+      <tr class="{{ 'ref' if is_ref }}">
+        <td data-label="部位">{% if not is_ref %}<b>{{ label }}</b>{% else %}{{ label }}{% endif %}</td>
+        <td data-label="筆數" class="mono r">{{ t.n }}</td>
+        <td data-label="勝率" class="mono r">{{ t.win_rate|pct }}</td>
+        <td data-label="95% 區間" class="ci r">{% if t.ci_low is not none %}{{ t.ci_low|pct }} – {{ t.ci_high|pct }}{% else %}—{% endif %}</td>
+        <td data-label="平均獲利" class="mono r pos">{{ t.avg_win|spct }}</td>
+        <td data-label="平均虧損" class="mono r neg">{{ t.avg_loss|spct }}</td>
+        <td data-label="盈虧比" class="mono r">{{ t.payoff|num }}</td>
+        <td data-label="期望值/筆" class="mono r {{ 'pos' if t.expectancy is not none and t.expectancy > 0 else 'neg' if t.expectancy is not none else '' }}">{{ t.expectancy|spct }}</td>
+        <td data-label="PF" class="mono r">{% if t.n and t.profit_factor is none %}∞{% else %}{{ t.profit_factor|num }}{% endif %}</td>
+        <td data-label="累積報酬" class="mono r {{ 'pos' if t.total_return is not none and t.total_return > 0 else 'neg' if t.total_return is not none else '' }}">{{ t.total_return|spct }}</td>
+        <td data-label="最大回撤" class="mono r neg">{{ t.max_drawdown|spct }}</td>
+        <td data-label="Sharpe" class="mono r">{{ t.sharpe|num }}</td>
+        <td data-label="最大連敗" class="mono r">{{ t.max_losing_streak }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+<div class="footnote" style="margin-top:-8px">期望值＝勝率×平均獲利 − 敗率×平均虧損（每筆平均報酬）；PF＝總獲利/總虧損；Sharpe 以有部位的交易日年化（252）。這是看「照著做會不會賺」，與上面的命中率是兩件事。</div>
+{% endif %}
+
+{# ── ④ 單因子表 ── #}
+<div class="sec">
+  <div class="section-title">④ 單因子表</div>
+  <div class="dim">每個盤前輸入依<b>現行門檻</b>分桶，看當日漲跌分布與該因子<b>單獨</b>暗示方向的命中率——直接告訴你哪個輸入有資訊量、哪個是擺設。
+    只需 daily_metrics＋指數，不需有判斷，所以回補過的歷史日也算進去（不依規則版本篩）。</div>
+</div>
+{% for f in s.factors %}
+<div class="fact-head"><b>{{ f.label }}</b><span class="muted">{{ f.n }} 日</span></div>
+{% if f.buckets %}
+<div class="table-wrap">
+  <table class="wide">
+    <thead><tr><th>分桶</th><th class="r">樣本</th><th>當日 漲 / 跌 / 平</th><th class="r">平均漲跌</th><th class="r">中位</th><th>單獨暗示</th><th class="r">暗示命中</th></tr></thead>
+    <tbody>
+      {% for b in f.buckets %}
+      <tr>
+        <td data-label="分桶">{{ b.label }}{% if b.insufficient %} <span class="tag low">樣本不足</span>{% endif %}</td>
+        <td data-label="樣本" class="mono r">{{ b.n }}</td>
+        <td data-label="漲/跌/平" class="dist"><span class="up">{{ b.dist.up.share|pct(0) }}</span><span class="down">{{ b.dist.down.share|pct(0) }}</span><span class="flat">{{ b.dist.flat.share|pct(0) }}</span></td>
+        <td data-label="平均漲跌" class="mono r {{ 'pos' if b.avg_pct > 0 else 'neg' if b.avg_pct < 0 else '' }}">{{ "%+.2f"|format(b.avg_pct) }}%</td>
+        <td data-label="中位" class="mono r">{{ "%+.2f"|format(b.median_pct) }}%</td>
+        <td data-label="單獨暗示">{% if b.implied %}{{ direction_labels[b.implied] }}{% else %}<span class="muted">—（修飾項，不投票）</span>{% endif %}</td>
+        <td data-label="暗示命中" class="mono r">{% if b.implied_hit %}{{ b.implied_hit.rate|pct }} <span class="ci">{{ b.implied_hit.ci_low|pct(0) }}–{{ b.implied_hit.ci_high|pct(0) }}</span>{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="panel empty" style="padding:14px">此區間無資料</div>
+{% endif %}
+{% endfor %}
+
+<div class="footnote" style="margin-top:18px">
+  怎麼讀：① 系統沒贏過基準 → 規則整體沒資訊量；② 信心不單調 → 加減分邏輯該重審；③ 命中率高但期望值負 → 方向對不等於賺錢，看盈虧比；④ 某因子各桶漲跌分布差不多 → 那個輸入是擺設。
+  任何一格樣本不足都先別下結論，先累積資料。
+</div>
+{% endblock %}

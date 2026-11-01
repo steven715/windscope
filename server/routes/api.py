@@ -201,6 +201,7 @@ def query_stats(request: Request, last_n: int = 20) -> dict:
         return get_verification_stats(conn, last_n=last_n)
 
 
+<<<<<<< HEAD
 # ── 契約 I/O（docs/contracts v0.2）：JSON 信封 {schema_version, count, records} ─────────────
 
 
@@ -311,6 +312,21 @@ def query_snapshots(request: Request, date: str | None = None,
     with get_connection(request.app.state.db_path) as conn:
         rows = snapshots_list(conn, date, run_mode, max(1, min(limit, _MAX_ROWS)))
     return _envelope("account_snapshots", rows)
+=======
+@router.get("/call-stats")
+def query_call_stats(request: Request, rule_version: str | None = None,
+                     date_from: str | None = None, date_to: str | None = None,
+                     cost_bps: float | None = None) -> dict:
+    """盤前判斷有效性統計（基準線/信心校準/單因子/判斷回測＋結論），與 /stats 頁同一份結果。
+
+    結構化戰績，供外部工具或 LLM 讀取；比例以 0–1 表示、報酬為小數。
+    """
+    from integration.call_stats import build_call_stats
+
+    with get_connection(request.app.state.db_path) as conn:
+        return build_call_stats(conn, rule_version or None, date_from or None,
+                                date_to or None, cost_bps)
+>>>>>>> origin/main
 
 
 @router.get("/live")

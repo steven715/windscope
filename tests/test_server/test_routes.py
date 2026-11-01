@@ -612,8 +612,11 @@ class TestScheduler:
     def test_run_job_now(self, tmp_path, monkeypatch):
         """run_job_now 在背景觸發一次 job 並記錄結果；None scheduler 回 False。"""
         import threading
+
+        from apscheduler.schedulers.background import BackgroundScheduler
+
         import server.scheduler as sched_mod
-        from server.scheduler import create_scheduler, run_job_now
+        from server.scheduler import run_job_now
 
         db_path = str(tmp_path / "test.db")
         conn = sqlite3.connect(db_path)
@@ -623,25 +626,27 @@ class TestScheduler:
         assert run_job_now(None, "after_close", db_path=db_path) is False
 
         ran = threading.Event()
+        notified = threading.Event()
 
         def fake_job(db):
             ran.set()
             return {"status": "completed"}
 
         monkeypatch.setitem(sched_mod.JOB_DEFS["after_close"], "func", fake_job)
-        scheduler = create_scheduler(db_path=db_path)
+        # notify 是 runner 的最後一步：等到它才代表 wrapper（含 _record_run）真的跑完。
+        # 否則測試先結束、monkeypatch 還原，殘留的 notify 會漏進下一個測試的 calls。
+        monkeypatch.setattr(sched_mod, "notify", lambda *a: notified.set())
+        # 用空 scheduler：create_scheduler 會把全部 job（含每 12 秒的盤中刷新）排進去，
+        # 測試期間可能真的觸發、打真實 HTTP；這裡只驗 run_job_now 自己加的那個 job。
+        scheduler = BackgroundScheduler()
         scheduler.start()
         try:
             assert run_job_now(scheduler, "after_close", db_path=db_path) is True
             assert ran.wait(timeout=5), "manual job did not run within 5s"
-            # 等 wrapper 寫完 _last_runs
-            for _ in range(50):
-                if "after_close" in sched_mod._last_runs:
-                    break
-                threading.Event().wait(0.1)
+            assert notified.wait(timeout=5), "runner did not finish within 5s"
             assert sched_mod._last_runs["after_close"]["status"] == "completed"
         finally:
-            scheduler.shutdown(wait=False)
+            scheduler.shutdown(wait=True)
 
         assert run_job_now(scheduler, "no_such_job", db_path=db_path) is False
 

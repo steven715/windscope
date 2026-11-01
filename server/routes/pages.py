@@ -59,6 +59,32 @@ def _status_zh(status: str | None) -> str:
 
 templates.env.filters["status_zh"] = _status_zh
 
+
+def _fmt_pct(v: float | None, digits: int = 1) -> str:
+    """0–1 比例 → '61.5%'；None → '—'。"""
+    return "—" if v is None else f"{v * 100:.{digits}f}%"
+
+
+def _fmt_signed_pct(v: float | None, digits: int = 2) -> str:
+    """小數報酬 → '+1.23%'（帶號）；None → '—'。"""
+    return "—" if v is None else f"{v * 100:+.{digits}f}%"
+
+
+def _fmt_pp(v: float | None) -> str:
+    """百分點差 → '+8.3 pp'；None → '—'。"""
+    return "—" if v is None else f"{v:+.1f} pp"
+
+
+def _fmt_num(v: float | None, digits: int = 2) -> str:
+    """一般數值 → 固定小數；None → '—'。"""
+    return "—" if v is None else f"{v:.{digits}f}"
+
+
+templates.env.filters["pct"] = _fmt_pct
+templates.env.filters["spct"] = _fmt_signed_pct
+templates.env.filters["pp"] = _fmt_pp
+templates.env.filters["num"] = _fmt_num
+
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _CLASS_LABELS = {"up": "漲", "down": "跌", "flat": "平"}
 # 亞幣方向中文 + 卡片配色（升值對台股偏多→綠/up；貶值→紅/down）
@@ -550,6 +576,41 @@ def signals_page(request: Request, date_from: str | None = None,
     return templates.TemplateResponse(request, "signals.html", {
         "active": "signals", "records": records, "stats": stats,
         "date_from": date_from or "", "date_to": date_to or "",
+    })
+
+
+_VERDICT_LABELS = {
+    "insufficient": ("樣本不足", "chip-neutral"),
+    "edge": ("有 edge", "chip-ok"),
+    "unclear": ("可能有 edge", "chip-flat"),
+    "no_edge": ("看不出 edge", "chip-bad"),
+}
+_CALL_BT_MODE_LABELS = {
+    "open_to_close": ("開盤進 → 收盤出", "08:50 看判斷、09:00 開盤進、13:30 收盤出；真正可執行的口徑"),
+    "close_to_close": ("前收 → 收盤", "與收盤基準命中同口徑；對照「方向對」和「有賺」差多少"),
+}
+
+
+@router.get("/stats", response_class=HTMLResponse)
+def stats_page(request: Request, rule_version: str | None = None,
+               date_from: str | None = None, date_to: str | None = None):
+    """判斷有效性：基準線對照、信心校準、單因子表、判斷回測＋三選一結論。純讀取。"""
+    from integration.call_stats import build_call_stats
+
+    rule_version = rule_version or None
+    date_from = date_from if date_from and _DATE_RE.match(date_from) else None
+    date_to = date_to if date_to and _DATE_RE.match(date_to) else None
+    with get_connection(request.app.state.db_path) as conn:
+        stats = build_call_stats(conn, rule_version, date_from, date_to)
+
+    verdict_label, verdict_css = _VERDICT_LABELS[stats["assessment"]["verdict"]]
+    return templates.TemplateResponse(request, "stats.html", {
+        "active": "stats", "s": stats,
+        "verdict_label": verdict_label, "verdict_css": verdict_css,
+        "direction_labels": _DIRECTION_LABELS, "class_labels": _CLASS_LABELS,
+        "bt_modes": _CALL_BT_MODE_LABELS,
+        "current_version": settings.SIGNAL_RULE_VERSION,
+        "flat_band": settings.VERIFY_FLAT_BAND_PCT,
     })
 
 
