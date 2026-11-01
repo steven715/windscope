@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "windscope/contracts/targets/0.1",
+  "$id": "windscope/contracts/targets/0.2",
   "title": "PortfolioTarget (Insight + Trade Plan)",
   "description": "windscope → tradewind 的目標部位。Insight（對市場的主張：方向/信心/有效期/失效）＋ Trade Plan（對行動的約束：怎麼進、多大、何時減、何時認錯、什麼不做）。是「希望的最終狀態」不是訂單；冪等；Risk Management 只能縮小或歸零、不能翻向。",
   "type": "object",
@@ -17,7 +17,8 @@
     "valid_until",
     "inputs_ref",
     "invalidation",
-    "trade_plan"
+    "trade_plan",
+    "locked_at"
   ],
   "additionalProperties": false,
   "properties": {
@@ -47,7 +48,7 @@
       "type": "number",
       "minimum": -1,
       "maximum": 1,
-      "description": "目標曝險占 NAV 比例；正=多、負=空、0=空手/出場"
+      "description": "期貨（asset_class=future）：只表達方向與相對強度（+1 全部/−1 全部/0 空手；0.5＝半數），口數由 trade_plan.risk 反推。現股／ETF：目標曝險占 NAV 比例。語意由 instruments.asset_class 決定。"
     },
     "target_quantity": {
       "type": [
@@ -90,6 +91,14 @@
       ],
       "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
       "description": "過期後不得再據以「新進」；是否平倉由策略另送 weight=0 決定。null=直到下一個同策略同商品 target 取代"
+    },
+    "locked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
+      "description": "使用者盤前鎖定 Trade Plan 的時刻；null＝未鎖定 → tradewind 視為中性（weight 0）並記 plan/no_trade_hit:not_locked。鎖定在 windscope 頁面做，期限 08:55。"
     },
     "invalidation": {
       "type": "object",
@@ -157,11 +166,13 @@
     },
     "trade_plan": {
       "type": "object",
-      "description": "Trade Plan：由 Playbook（模板，策略層、有版本）填出的當日實例，帶帳戶參數；盤前鎖定、盤中只執行。數值的預設來源是 windscope settings，這裡放的是這一筆實際採用的值。",
+      "description": "Trade Plan：由 Playbook（共用純函式庫裡的**程式**，有 id 與版本）填出的當日實例。契約只傳 playbook_id/version 與參數，不傳可執行邏輯；trigger/runner_rule/no_trade 的文字欄位只供人讀與事後核對，程式不解析。盤前鎖定、盤中只執行。",
       "required": [
         "playbook_id",
         "playbook_version",
-        "risk"
+        "risk",
+        "params",
+        "max_entries_per_day"
       ],
       "additionalProperties": false,
       "properties": {
@@ -173,6 +184,16 @@
         "playbook_version": {
           "type": "string",
           "description": "模板版本；改任一規則就 bump"
+        },
+        "params": {
+          "type": "object",
+          "description": "交給 Playbook 程式的參數（鍵由該 playbook 定義並版本化）；人讀欄位的機器版本放這裡，例如 {\"pullback_pct\": 0.3, \"confirm_bars\": 1}"
+        },
+        "max_entries_per_day": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1,
+          "description": "同一 target 一天最多進場次數；v0 預設 1（出場後不再進）"
         },
         "entry": {
           "type": [
@@ -192,7 +213,7 @@
             "trigger": {
               "type": "string",
               "maxLength": 200,
-              "description": "觸發條件（v0 為可核對的文字，v1 再結構化）"
+              "description": "觸發條件（人讀、事後核對用；程式以 params 執行）"
             },
             "chase_limit_pts": {
               "type": [
@@ -282,7 +303,7 @@
                 "null"
               ],
               "maxLength": 200,
-              "description": "剩餘部位的出場規則（裁量只允許在這裡提早出場）"
+              "description": "剩餘部位的出場規則（人讀；裁量只允許在這裡提早出場）"
             },
             "force_flat_at": {
               "type": [
@@ -300,7 +321,7 @@
             "type": "string",
             "maxLength": 120
           },
-          "description": "不做條件，寫成可核對的句子（命中任一就不新進）"
+          "description": "不做條件（人讀；機器版本在 params；命中任一就不新進）"
         },
         "discretion_allowed": {
           "type": "array",

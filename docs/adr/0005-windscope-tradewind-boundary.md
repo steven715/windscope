@@ -2,6 +2,7 @@
 
 - **狀態**：Proposed（等 tradewind 上 GitHub、雙 repo session 定稿後改 Accepted）
 - **層名**（2026-11-01 定案）：Insight → Playbook/Trade Plan → Trade Management → Risk Management → Execution，反向 Events。
+- **2026-11-01 補充**：tradewind `docs/review-2026-11-01.md` 六項決定已納入契約 v0.2（Playbook 為程式、口數由 risk 反推、一商品一策略、停損與分批移出 Insight、`published_at/ingested_at`、一天一次）；UI 分離見 ADR-0006。
 - **日期**：2026-11-01
 - **脈絡背景**：使用者釐清長期目標後，把專案定位成兩層：windscope 是「只要有原始資料就能
   重導一切」的基礎設施＋研究層；tradewind 是接真行情、跑模擬盤、最終自動化交易的引擎

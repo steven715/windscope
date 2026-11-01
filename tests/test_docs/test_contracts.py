@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "docs" / "contracts"
-TABLES = ["bars", "instruments", "corporate_actions", "targets", "events"]
+TABLES = ["bars", "instruments", "corporate_actions", "targets", "events", "account_snapshots"]
 
 _TYPES = {
     "string": lambda v: isinstance(v, str),
@@ -157,8 +157,20 @@ def test_events_reference_known_targets_and_tradable_instruments():
 
 
 def test_stream_bars_never_partial():
-    """串流只推收完的 K 棒：1m bar 的 available_at 不早於 ts + 1 分鐘（tick 除外）。"""
+    """串流只推收完的 K 棒：K 棒的 published_at（可知時刻）不早於 ts + 粒度；tick 的 published_at = ts。"""
     _, bars = _load("bars")
     for b in bars:
-        if b["resolution"] == "1m":
-            assert b["available_at"][11:16] > b["ts"][11:16], b
+        if b["resolution"] == "tick":
+            assert b["published_at"] == b["ts"], b
+        elif b["resolution"] in ("1m", "5m"):
+            assert b["published_at"][11:16] > b["ts"][11:16], b
+        assert b["ingested_at"] >= b["published_at"], b   # 拿到不可能早於可知
+
+
+def test_targets_locked_and_single_entry():
+    """v0.2：每筆 target 有 locked_at（可 null）、trade_plan 帶 params 與 max_entries_per_day=1。"""
+    _, rows = _load("targets")
+    for r in rows:
+        assert "locked_at" in r
+        assert r["trade_plan"]["max_entries_per_day"] == 1
+        assert isinstance(r["trade_plan"]["params"], dict) and r["trade_plan"]["params"]

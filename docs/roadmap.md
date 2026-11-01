@@ -53,3 +53,11 @@
 - windscope 端落地順序：① `bars`＋`instruments` 以 view 映射三張 raw 表 → ② `available_at` 語意、回測只讀 ≤t
   → ③ 抽 `trend_signal` 為共用純函式庫（golden test 證明結果不變）→ ④ `targets` 表＋`/api/targets?since=`。
 - 待定事項列在 `docs/contracts/README.md` 末段，等 tradewind 上 GitHub 後在雙 repo session 定稿。
+
+---
+
+## UI 分離（ADR-0006）
+
+- 後端只出 JSON API（FastAPI＋OpenAPI）；UI 在獨立前端 repo（Vite＋TypeScript＋React），同一個前端吃 windscope／tradewind／錢包三個 API。
+- 本 repo 不再新增 Jinja 頁；既有頁面過渡期保留，**API-first**：先補每頁對應的 `/api/*`（`/stats` 已有 `/api/call-stats`），前端做到哪頁、哪頁的 Jinja 才下線。
+- 前端第一批只做兩頁：判斷有效性（windscope）、狀態頁＋kill switch（tradewind，按鈕走 ops）。

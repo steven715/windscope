@@ -215,12 +215,16 @@ _Avoid_: 標的（未指明時）、股票（泛指時）
 **K 線列**（Bar）：
 契約中統一的價格列：商品、粒度、時段、歸屬交易日、開始時刻、原始 OHLCV、來源與可得時刻。**只放原始價**，還原是純函式輸出。
 
-**可得時刻**（Available-at）：
-系統實際取得某列資料的時刻。時點正確性規則：在決策時刻 t 的任何計算只能用可得時刻 ≤ t 的列。
-_Avoid_: 收集時間（口語可，契約用可得時刻）
+**可知時刻**（Published-at, `published_at`）：
+某列資料最早可被知道的時刻：tick＝成交時刻、K 棒＝結束時刻、公告＝公告時刻；來源沒給就依規則推算並註明。時點正確性的閘門：決策時刻 t 只能用可知時刻 ≤ t 的列。與 tradewind 的 `publish_at` 同義。
+_Avoid_: 可得時刻（v0.1 用詞）、資料日期
+
+**取得時刻**（Ingested-at, `ingested_at`）：
+系統實際拿到某列資料的時刻（對應 `collected_at`）。只用於診斷與 live／backtest 差異分析，不當決策閘門。
+_Avoid_: 收集時間（口語可）
 
 **時點正確性**（Point-in-time）：
-回測與模擬盤都只用「當時已知」的資料；由可得時刻保證，是兩邊結果能對得上的前提。
+回測與模擬盤都只用「當時已知」的資料；由可知時刻保證，是兩邊結果能對得上的前提。
 _Avoid_: 無未來函數（口語可）
 
 **公司行為**（Corporate action）：
@@ -234,11 +238,11 @@ _Avoid_: 訊號、命題、預測
 Insight 不再成立的條件；成立時未進場撤單、已進場出場。與停損不同：停損是「錯了虧多少走」，失效是「這個機會已經不存在」。
 
 **Playbook**（戰術手冊）：
-策略層的 Trade Plan **模板**，有版本（`playbook_id`／`playbook_version`）；規定進場窗口與觸發、追價上限、1R 與停損、分批、runner 出場、不做條件、允許的裁量動作。
+策略層的 Trade Plan **模板**，是共用純函式庫裡的**程式**（`f(state, bars, params) -> actions`），有版本（`playbook_id`／`playbook_version`）；規定進場窗口與觸發、追價上限、1R 與停損、分批、runner 出場、不做條件、允許的裁量動作。契約只傳它的 id、版本與 `params`，不傳可執行邏輯。
 _Avoid_: 預案模板、SOP
 
 **Trade Plan**（交易計畫）：
-由 Playbook 填出的**當日實例**，帶帳戶參數（口數、金額）；盤前鎖定、盤中只執行。可被打分「有沒有照做」與「有沒有幫助」（同一組進場有／無 Trade Plan 的回撤差）。
+由 Playbook 填出的**當日實例**，帶帳戶參數；盤前在 windscope 頁面**鎖定**（`locked_at`，期限 08:55，沒鎖定＝中性）、盤中只執行。期貨口數由 `trade_plan.risk` 反推，一天只進一次。可被打分「有沒有照做」與「有沒有幫助」（同一組進場有／無 Trade Plan 的回撤差）。
 _Avoid_: 預案、計畫（未指明時）
 
 **Trade Management**（持倉管理）：
@@ -253,7 +257,10 @@ _Avoid_: 保護層、停損（那是 Trade Plan 的參數）
 在 Trade Management 中人為做出 Trade Plan 允許範圍內的動作（例如提早出場）；每次都回流為一筆 event，與「照計畫做」分開統計，沒加分就收回該項裁量。
 
 **Events**（事件回流）：
-tradewind → windscope 的反向流：成交、Trade Plan 動作、override、風控觸發，每筆帶 `target_id`；是評分 Trade Plan、Trade Management 與風控的唯一依據。
+tradewind → windscope 的反向流：Trade Management 狀態轉換、委託、成交、override、風控觸發、系統狀態、健康，每筆帶 `target_id` 與 `run_mode`（Paper 與實盤永不混算）；是評分 Trade Plan、Trade Management 與風控的唯一依據。v0 以每日 JSONL 檔交換。
+
+**帳戶快照**（Account snapshot）：
+券商回報的帳戶權益、保證金與持倉；tradewind 對帳用，windscope 與未來的個人資產彙總專案（錢包）讀同一份。
 
 **目標部位**（Portfolio target）：
 windscope 送給 tradewind 的「希望的最終部位」＝一個 Insight 加一份 Trade Plan：商品、占淨值權重（正多／負空／零空手）、信心、期間、失效條件、交易計畫、出處。是狀態不是訂單；冪等；風控只能縮小或歸零、不能翻向。

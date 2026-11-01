@@ -1,6 +1,6 @@
-# windscope ⇄ tradewind 契約（contract v0.1 草案）
+# windscope ⇄ tradewind 契約（contract v0.2 草案）
 
-> 狀態：**草案**，等 tradewind 上 GitHub 後在雙 repo session 定稿。決策脈絡見 `docs/adr/0005-windscope-tradewind-boundary.md`。
+> 狀態：**v0.2 草案**（2026-11-01，依 tradewind `docs/review-2026-11-01.md` 的六項決定修訂）。決策脈絡見 `docs/adr/0005-windscope-tradewind-boundary.md`、tradewind ADR-0008／0009／0010。
 > 這個目錄是兩個 repo **唯一共同讀的東西**：schema、fixture、語意規則。任何一邊要改介面，先改這裡、兩邊 contract test 都綠，才算改完。
 
 ## 這份契約在講什麼
@@ -12,15 +12,16 @@
 | `corporate_actions.schema.json` | windscope 產、兩邊讀 | 公司行為（除權息／分割）：還原股價的唯一來源 |
 | `targets.schema.json` | **windscope → tradewind** | 目標部位＝**Insight**（主張：方向/信心/有效期/失效）＋**Trade Plan**（行動約束：怎麼進/多大/何時減/何時認錯/什麼不做）；是最終狀態，不是訂單 |
 | `events.schema.json` | **tradewind → windscope** | 反向流：Trade Management 狀態轉換、委託、成交、override、風控、系統狀態、健康；每筆帶 `run_mode`，Paper 與實盤永不混算 |
+| `account_snapshots.schema.json` | **tradewind → windscope／錢包** | 券商回報的帳戶快照（權益、保證金、持倉）；tradewind 對帳用，未來的個人資產彙總專案也讀這份 |
 
 `fixtures/*.jsonl` 是每張表的範例列；兩個 repo 的 contract test 都讀同一份 fixture。
 
 ## 五條不能破的語意規則
 
 1. **時區固定 `Asia/Taipei`**。所有 `ts`／`*_at` 都是帶 `+08:00` 的 ISO 8601；`session_date` 是 `YYYY-MM-DD`。
-2. **時點正確性（point-in-time）**：每一列都有 `available_at`＝系統**實際拿到它的時刻**。任何在決策時刻 `t` 做的計算，只能用 `available_at ≤ t` 的列。回測與模擬盤都遵守這條，兩邊才對得上。
+2. **時點正確性（point-in-time）**：每一列都有一對時刻——`published_at`＝**可知時刻**（這筆資料最早可被知道：tick＝成交時刻、K 棒＝結束時刻、公告＝公告時刻；來源沒給就依規則推算並註明）與 `ingested_at`＝**取得時刻**（系統實際拿到）。任何在決策時刻 `t` 做的計算，只能用 `published_at ≤ t` 的列；`ingested_at` 只用於診斷與 live/backtest 差異分析。與 tradewind CLAUDE.md 規則 1 的 `publish_at` 同義。
 3. **bars 只放原始價**。還原（除權息／分割）是 `f(bars, corporate_actions)` 的純函式輸出，由共用策略庫算，不落在契約裡。這樣同一份 bars 能被不同還原方式重算。
-4. **targets 是目標狀態，不是訂單**。同一組 `(strategy_id, instrument_id, valid_from, rule_version)` 重送必須得到同一個 target（冪等；`target_id` 就是這四欄的雜湊）；tradewind 負責把「現在部位」調到「目標部位」，怎麼下單、分幾筆是 tradewind 的事。**Insight 與 Trade Plan 分開**：Insight 可對可錯、與帳戶無關；Trade Plan 由 Playbook 模板填出、帶帳戶參數、盤前鎖定。Trade Management 只能做 Trade Plan 列出的動作、停損只能收緊；Risk Management **只能縮小或歸零，不能翻向**。
+4. **targets 是目標狀態，不是訂單**。同一組 `(strategy_id, instrument_id, valid_from, rule_version)` 重送必須得到同一個 target（冪等；`target_id` 就是這四欄的雜湊）；tradewind 負責把「現在部位」調到「目標部位」，怎麼下單、分幾筆是 tradewind 的事。**Insight 與 Trade Plan 分開**：Insight 可對可錯、與帳戶無關；Trade Plan 由 **Playbook（共用純函式庫裡的程式）** 填出、契約只傳 `playbook_id/version`＋`params`，文字欄位只供人讀。**期貨口數由 `trade_plan.risk` 反推**，`target_weight` 只表方向與相對強度；現股才當 NAV 權重。盤前在 windscope 頁面**鎖定**（`locked_at`，期限 08:55），沒鎖定＝中性。v0 **一商品同時一策略、一天只進一次**（`max_entries_per_day=1`）。Trade Management 只能做 Trade Plan 列出的動作、停損只能收緊；Risk Management **只能縮小或歸零，不能翻向**（按帳戶淨部位算）。
 5. **衍生資料不過契約**。`daily_metrics`、趨勢訊號的中間值、信心加減分細節都留在 windscope；tradewind 要用到的特徵，透過共用純函式庫 import 同一份 code 重算，不透過資料交換。
 
 ## 代碼規則（`instrument_id`）
@@ -58,13 +59,14 @@ tradewind 算口數時取「`trade_plan.risk` 反推的口數」與「可用保�
 
 ## 傳輸方式（v0 刻意最笨）
 
-- windscope 端：`targets` 落 SQLite 表＋`GET /api/targets?since=<ts>`（JSON 信封 `{schema_version, records: [...]}`）；離線交換用 JSONL 檔。
-- tradewind 端：輪詢或讀檔。**不用 message queue**，資料量每天幾十列，隊列是純負擔。
+- windscope → tradewind：`targets` 落 SQLite 表＋`GET /api/targets?since=<ts>`（JSON 信封 `{schema_version, records: [...]}`）；bars 歷史 `GET /api/bars`、即時 WS 串流（含心跳）；離線交換用 JSONL 檔。
+- tradewind → windscope：每交易日收盤後寫 `events/{run_mode}/{session_date}.jsonl` 與 `account_snapshots/…`（只增不改），windscope 18:30 讀檔入庫；`POST /api/events`（冪等 by `event_id`）留給之後即時回流，v0 只做寫檔。**不用 message queue**。
 - 需要推播再加 webhook；契約不變。
 
 ## 版本
 
 - `schema_version` 採 `MAJOR.MINOR`。MINOR＝只加可選欄位（向後相容）；MAJOR＝改語意或刪欄位。
+- **0.1 → 0.2（2026-11-01，草案期不守相容）**：`available_at` → `published_at`＋`ingested_at`；targets 加必填 `locked_at`、`trade_plan.params`、`trade_plan.max_entries_per_day`；新增 `events`、`account_snapshots`；instruments 加保證金；bars 加 `tick`。
 - `targets` 每列自帶 `schema_version`（量小、要可追溯）；`bars` 不帶（量大），版本由 API 信封或檔名（`bars.v0.jsonl`）表達。
 - 兩邊各自記錄「支援的 schema_version 範圍」，contract test 用 fixture 鎖住。
 
@@ -85,8 +87,10 @@ tradewind 算口數時取「`trade_plan.risk` 反推的口數」與「可用保�
 
 ## 待定（定稿時要拍板）
 
-- [ ] 期貨連續合約 `TAIFEX:TX` 的換月規則：到期前 N 日切／成交量切？v0 先寫在 instruments 的 `roll_rule`，值由 tradewind 決定。
-- [ ] `target_weight` 的基準是淨值（NAV）還是可用現金？v0 定 **NAV**。
+- [ ] 期貨連續合約 `TAIFEX:TX`／`TMF` 的換月規則：到期前 N 日切／成交量切？v0 先寫在 instruments 的 `roll_rule`，值由 tradewind 決定。
+- [ ] 個人資產彙總（錢包）專案：獨立 repo，讀 `account_snapshots`＋bars 價格＋其他券商／銀行唯讀 API；等 tradewind 到券商模擬階段有真快照再開（tradewind ADR-0010）。
+- [ ] Playbook 共用純函式庫的 repo 位置與發布方式（windscope 子目錄＋git tag，或 monorepo；ADR-0005 §5 的回頭條件）。
+- [x] ~~`target_weight` 的基準~~ → 期貨：方向與相對強度、口數由 `trade_plan.risk` 反推；現股：NAV 權重（已定）。
 - [ ] `valid_until` 到期時 tradewind 是「自動平倉」還是「只停止新進」？v0 定 **只停止新進**，平倉由策略明確送 `weight=0`。
 - [x] ~~要不要在 targets 帶 `stop_hint`~~ → 已以 `trade_plan.risk.stop_pts`（初始停損，只能收緊）與 `invalidation`（失效≠停損）取代。
 - [x] ~~`events` 反向流的 schema~~ → 已起草 `events.schema.json`（kind/action 對照 tradewind 01-objects 的 Fill、OrderEvent、RiskDecision、SystemEvent），等 tradewind 端對稱測試。
