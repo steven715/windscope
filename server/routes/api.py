@@ -200,6 +200,101 @@ def query_stats(request: Request, last_n: int = 20) -> dict:
         return get_verification_stats(conn, last_n=last_n)
 
 
+# ── 契約 I/O（docs/contracts v0.2）：JSON 信封 {schema_version, count, records} ─────────────
+
+
+def _envelope(name: str, records: list[dict]) -> dict:
+    from utils.contract_schema import schema_version
+
+    return {"schema_version": schema_version(name), "count": len(records), "records": records}
+
+
+@router.get("/instruments")
+def query_instruments(request: Request, tradable_only: bool = False) -> dict:
+    """商品主檔（契約 instruments）。"""
+    from db.instruments import instruments_list
+
+    with get_connection(request.app.state.db_path) as conn:
+        return _envelope("instruments", instruments_list(conn=conn, tradable_only=tradable_only))
+
+
+@router.get("/bars")
+def query_bars(request: Request, instrument_id: str, resolution: str = "1d",
+               date_from: str | None = None, date_to: str | None = None,
+               session: str | None = None, limit: int = 500) -> dict:
+    """統一 K 線列（契約 bars，舊→新）：新 bars 表 ∪ 舊 raw 表的映射。"""
+    from db.bars import bars_query
+
+    limit = max(1, min(limit, 5000))
+    with get_connection(request.app.state.db_path) as conn:
+        rows = bars_query(conn, instrument_id, resolution, date_from, date_to, session, limit)
+    return {**_envelope("bars", rows), "instrument_id": instrument_id, "resolution": resolution}
+
+
+@router.get("/targets")
+def query_targets(request: Request, date: str | None = None, since: str | None = None,
+                  strategy_id: str | None = None, limit: int = 200) -> dict:
+    """目標部位（契約 targets＝Insight＋Trade Plan）。date＝某交易日；since＝produced_at ≥ 時刻。"""
+    from db.targets import targets_list
+
+    with get_connection(request.app.state.db_path) as conn:
+        rows = targets_list(conn, session_date=date, since=since, strategy_id=strategy_id,
+                            limit=max(1, min(limit, _MAX_ROWS)))
+    return _envelope("targets", rows)
+
+
+@router.post("/targets/{target_id}/lock")
+def lock_target(target_id: str, request: Request) -> dict:
+    """盤前鎖定 Trade Plan（寫 locked_at；已鎖定不變）。不存在回 404。"""
+    from db.targets import target_lock
+
+    with get_connection(request.app.state.db_path) as conn:
+        rec = target_lock(conn, target_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"unknown target: {target_id}")
+    return {"target_id": target_id, "locked_at": rec["locked_at"]}
+
+
+@router.get("/events")
+def query_events(request: Request, date: str | None = None, run_mode: str | None = None,
+                 target_id: str | None = None, limit: int = 500) -> dict:
+    """tradewind 回流的事件（契約 events）。"""
+    from db.events import events_list
+
+    with get_connection(request.app.state.db_path) as conn:
+        rows = events_list(conn, date, run_mode, target_id, max(1, min(limit, 5000)))
+    return _envelope("events", rows)
+
+
+@router.post("/events")
+def ingest_events(request: Request, body: dict) -> dict:
+    """接收 events／account_snapshots（冪等 by id；不符契約的筆數回 invalid）。
+
+    body：{"events": [...], "account_snapshots": [...]}；任一鍵可省略。
+    """
+    from db.events import events_ingest, snapshots_ingest
+
+    ev = body.get("events") or []
+    sn = body.get("account_snapshots") or []
+    if not isinstance(ev, list) or not isinstance(sn, list):
+        raise HTTPException(status_code=422, detail="events / account_snapshots 必須是陣列")
+    with get_connection(request.app.state.db_path) as conn:
+        r1 = events_ingest(conn, ev)
+        r2 = snapshots_ingest(conn, sn)
+    return {"events": r1, "account_snapshots": r2}
+
+
+@router.get("/account-snapshots")
+def query_snapshots(request: Request, date: str | None = None,
+                    run_mode: str | None = None, limit: int = 200) -> dict:
+    """帳戶快照（契約 account_snapshots）。"""
+    from db.events import snapshots_list
+
+    with get_connection(request.app.state.db_path) as conn:
+        rows = snapshots_list(conn, date, run_mode, max(1, min(limit, _MAX_ROWS)))
+    return _envelope("account_snapshots", rows)
+
+
 @router.get("/live")
 def query_live(request: Request) -> dict:
     """盤中即時驗證：當日訊號 + 即時加權指數雙基準比對。讀背景快取，瞬間返回。"""

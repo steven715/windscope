@@ -21,7 +21,7 @@
 1. **時區固定 `Asia/Taipei`**。所有 `ts`／`*_at` 都是帶 `+08:00` 的 ISO 8601；`session_date` 是 `YYYY-MM-DD`。
 2. **時點正確性（point-in-time）**：每一列都有一對時刻——`published_at`＝**可知時刻**（這筆資料最早可被知道：tick＝成交時刻、K 棒＝結束時刻、公告＝公告時刻；來源沒給就依規則推算並註明）與 `ingested_at`＝**取得時刻**（系統實際拿到）。任何在決策時刻 `t` 做的計算，只能用 `published_at ≤ t` 的列；`ingested_at` 只用於診斷與 live/backtest 差異分析。與 tradewind CLAUDE.md 規則 1 的 `publish_at` 同義。
 3. **bars 只放原始價**。還原（除權息／分割）是 `f(bars, corporate_actions)` 的純函式輸出，由共用策略庫算，不落在契約裡。這樣同一份 bars 能被不同還原方式重算。
-4. **targets 是目標狀態，不是訂單**。同一組 `(strategy_id, instrument_id, valid_from, rule_version)` 重送必須得到同一個 target（冪等；`target_id` 就是這四欄的雜湊）；tradewind 負責把「現在部位」調到「目標部位」，怎麼下單、分幾筆是 tradewind 的事。**Insight 與 Trade Plan 分開**：Insight 可對可錯、與帳戶無關；Trade Plan 由 **Playbook（共用純函式庫裡的程式）** 填出、契約只傳 `playbook_id/version`＋`params`，文字欄位只供人讀。**期貨口數由 `trade_plan.risk` 反推**，`target_weight` 只表方向與相對強度；現股才當 NAV 權重。盤前在 windscope 頁面**鎖定**（`locked_at`，期限 08:55），沒鎖定＝中性。v0 **一商品同時一策略、一天只進一次**（`max_entries_per_day=1`）。Trade Management 只能做 Trade Plan 列出的動作、停損只能收緊；Risk Management **只能縮小或歸零，不能翻向**（按帳戶淨部位算）。
+4. **targets 是目標狀態，不是訂單**。同一組 `(strategy_id, instrument_id, valid_from, rule_version)` 重送必須得到同一個 target（冪等；`target_id` 就是這四欄的雜湊）；tradewind 負責把「現在部位」調到「目標部位」，怎麼下單、分幾筆是 tradewind 的事。**Insight 與 Trade Plan 分開**：Insight 可對可錯、與帳戶無關；Trade Plan 由 **Playbook（共用純函式庫裡的程式）** 填出、契約只傳 `playbook_id/version`＋`params`，文字欄位只供人讀。**期貨口數由 `trade_plan.risk` 反推**，`target_weight` 只表方向與相對強度；現股才當 NAV 權重。盤前在 windscope **鎖定**（`POST /api/targets/{target_id}/lock` 或 CLI `targets lock`，寫 `locked_at`，期限 08:55），沒鎖定＝中性。v0 **一商品同時一策略、一天只進一次**（`max_entries_per_day=1`）。Trade Management 只能做 Trade Plan 列出的動作、停損只能收緊；Risk Management **只能縮小或歸零，不能翻向**（按帳戶淨部位算）。
 5. **衍生資料不過契約**。`daily_metrics`、趨勢訊號的中間值、信心加減分細節都留在 windscope；tradewind 要用到的特徵，透過共用純函式庫 import 同一份 code 重算，不透過資料交換。
 
 ## 代碼規則（`instrument_id`）
@@ -74,13 +74,13 @@ tradewind 算口數時取「`trade_plan.risk` 反推的口數」與「可用保�
 
 | 現在 | 契約 | 做法 |
 |---|---|---|
-| `raw_index(date, o,h,l,c)` | bars `TWSE:TAIEX` `1d` | 先建 view，再搬 |
+| `raw_index(date, o,h,l,c)` | bars `TWSE:TAIEX` `1d` | **已實作** view `bars_v`（`db/bars.py`、`GET /api/bars`）；資料不搬 |
 | `raw_stock_daily(date, stock_id, o,h,l,c,v)` | bars `TWSE:{id}` `1d` | 同上；`volume` 單位股 |
-| `raw_futures(date, night_close, night_volume, …)` | bars `TAIFEX:TX` `1d` `session=night` | 目前只有收盤價，`open/high/low` 可為 null（schema 允許） |
+| `raw_futures(date, night_close, night_volume, …)` | bars `TAIFEX:TX` `1d` `session=night` | 同上；只有收盤價，`open/high/low` 為 null；夜盤 `ts` 以歸屬日前一日 15:00 近似 |
 | `raw_fx` / `intraday_fx` | bars `FX:USDTWD` `1d` / `5m` | — |
-| `stock_info` | instruments | 補 `asset_class`、`tick_size`、`lot_size` |
+| `stock_info` | instruments | **已實作** `instruments` 表＋`config/instruments.json` 種子（`db/instruments.py`、`GET /api/instruments`）；`stock_info` 仍供舊頁面用 |
 | `stock_dividends(factor)` | corporate_actions | `kind` 先全填 `cash_dividend`，factor 直接搬 |
-| `signals`（盤前判斷） | targets `strategy_id=premarket_call` | 偏多/偏空/中性 → `target_weight` ±w(信心)/0，`horizon=intraday`，`valid_from` 08:50、`valid_until` 13:30；`invalidation` 由價差/匯率門檻反推（**待補**：目前盤前判斷沒有失效條件）；`trade_plan` 由 Playbook `pullback_hold` 填 |
+| `signals`（盤前判斷） | targets `strategy_id=premarket_call` | **已實作**（`integration/targets_builder.py`，掛在 before_open）：偏多/偏空/中性 → `target_weight` ±信心/5／0，`horizon=intraday`，`valid_from` 08:50、`valid_until` 13:25；`invalidation`＝開盤 30 分內跌破/站上前日低/高點；`trade_plan` 取 `settings.PREMARKET_PLAYBOOK` |
 | `stock_trend_signals` | targets `strategy_id=trend_signal` | 關注建倉區→進、可加倉→加、減倉→減、大勢離開 UP→0；`horizon=swing`；`invalidation`＝跌破價值中樞 N%；`trade_plan` 由 Playbook `trend_pullback` 填 |
 
 映射的權重數字（信心 3 = 多少 weight、建倉一批多大、1R 幾 %）**預設值放 `config/settings.py`**；契約的 `trade_plan` 放的是這一筆實際採用的值，讓 tradewind 不必知道 windscope 的 settings。
@@ -94,4 +94,4 @@ tradewind 算口數時取「`trade_plan.risk` 反推的口數」與「可用保�
 - [ ] `valid_until` 到期時 tradewind 是「自動平倉」還是「只停止新進」？v0 定 **只停止新進**，平倉由策略明確送 `weight=0`。
 - [x] ~~要不要在 targets 帶 `stop_hint`~~ → 已以 `trade_plan.risk.stop_pts`（初始停損，只能收緊）與 `invalidation`（失效≠停損）取代。
 - [x] ~~`events` 反向流的 schema~~ → 已起草 `events.schema.json`（kind/action 對照 tradewind 01-objects 的 Fill、OrderEvent、RiskDecision、SystemEvent），等 tradewind 端對稱測試。
-- [ ] 盤前判斷目前沒有失效條件，產 Insight 時 `invalidation` 要從哪裡來（價差門檻反推？夜盤低點？）。
+- [x] ~~盤前判斷的 `invalidation` 來源~~ → v0：開盤 30 分內現貨跌破（偏多）／站上（偏空）**前一交易日低／高點**（`integration/targets_builder.py`，`settings.PREMARKET_INVALIDATION_UNTIL`）；前日高低無資料則只留文字。

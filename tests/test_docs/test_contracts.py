@@ -1,11 +1,10 @@
 """契約 fixture 必須符合 schema（docs/contracts）。
 
-純 stdlib 的 JSON Schema 子集驗證器（type/required/enum/pattern/min/max/properties/$ref 本檔內
-定義/additionalProperties），不引第三方。tradewind 端應有對稱的測試讀同一份 fixture。
+驗證器在 utils/contract_schema.py（stdlib JSON Schema 子集）；本檔鎖 fixture 與契約語意。
+tradewind 端應有對稱的測試讀同一份 fixture。
 """
 
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -13,71 +12,7 @@ import pytest
 CONTRACTS = Path(__file__).resolve().parents[2] / "docs" / "contracts"
 TABLES = ["bars", "instruments", "corporate_actions", "targets", "events", "account_snapshots"]
 
-_TYPES = {
-    "string": lambda v: isinstance(v, str),
-    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
-    "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
-    "boolean": lambda v: isinstance(v, bool),
-    "null": lambda v: v is None,
-    "object": lambda v: isinstance(v, dict),
-    "array": lambda v: isinstance(v, list),
-}
-
-
-def _resolve(schema: dict, root: dict) -> dict:
-    ref = schema.get("$ref")
-    if not ref:
-        return schema
-    assert ref.startswith("#/"), ref
-    node = root
-    for part in ref[2:].split("/"):
-        node = node[part]
-    return node
-
-
-def validate(value, schema: dict, root: dict, path: str = "$") -> list[str]:
-    """回傳違規訊息列表（空＝合法）。"""
-    schema = _resolve(schema, root)
-    errs: list[str] = []
-    types = schema.get("type")
-    if types is not None:
-        allowed = types if isinstance(types, list) else [types]
-        if not any(_TYPES[t](value) for t in allowed):
-            return [f"{path}: type {type(value).__name__} not in {allowed}"]
-    if value is None:
-        return errs
-    if "enum" in schema and value not in schema["enum"]:
-        errs.append(f"{path}: {value!r} not in enum {schema['enum']}")
-    if isinstance(value, str):
-        if "pattern" in schema and not re.search(schema["pattern"], value):
-            errs.append(f"{path}: {value!r} !~ {schema['pattern']}")
-        if "minLength" in schema and len(value) < schema["minLength"]:
-            errs.append(f"{path}: shorter than {schema['minLength']}")
-        if "maxLength" in schema and len(value) > schema["maxLength"]:
-            errs.append(f"{path}: longer than {schema['maxLength']}")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if "minimum" in schema and value < schema["minimum"]:
-            errs.append(f"{path}: {value} < {schema['minimum']}")
-        if "maximum" in schema and value > schema["maximum"]:
-            errs.append(f"{path}: {value} > {schema['maximum']}")
-        if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
-            errs.append(f"{path}: {value} <= {schema['exclusiveMinimum']}")
-    if isinstance(value, dict):
-        props = schema.get("properties", {})
-        for k in schema.get("required", []):
-            if k not in value:
-                errs.append(f"{path}: missing required {k!r}")
-        if schema.get("additionalProperties") is False:
-            for k in value:
-                if k not in props:
-                    errs.append(f"{path}: unexpected key {k!r}")
-        for k, v in value.items():
-            if k in props:
-                errs.extend(validate(v, props[k], root, f"{path}.{k}"))
-    if isinstance(value, list) and "items" in schema:
-        for i, v in enumerate(value):
-            errs.extend(validate(v, schema["items"], root, f"{path}[{i}]"))
-    return errs
+from utils.contract_schema import validate  # noqa: E402  驗證器正式版在 utils
 
 
 def _load(table: str):

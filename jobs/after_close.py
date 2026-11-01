@@ -62,6 +62,9 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
         else:
             logger.info("after_close: 觀察名單為空，個股日K與趨勢略過")
 
+        # 7. tradewind 回流：掃 inbox 的 events／account_snapshots JSONL 入庫（冪等；inbox 不存在＝0 筆）
+        job.step("ingest_events", lambda: _ingest_inbox(date, conn))
+
     return job.finish()
 
 
@@ -91,3 +94,10 @@ def _refresh_stock_trends(date: str, conn: sqlite3.Connection,
         except Exception as e:
             logger.error("_refresh_stock_trends %s failed: %s", stock_id, e)
     return any_ok
+
+
+def _ingest_inbox(date: str, conn) -> dict:
+    """掃 tradewind inbox 當日檔案入庫；回傳統計（沒有檔案也算成功）。"""
+    from db.events import ingest_inbox
+
+    return ingest_inbox(conn, session_date=date)

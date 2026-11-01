@@ -1,6 +1,7 @@
 """after_close job 測試。"""
 
 import sqlite3
+from pathlib import Path
 from unittest.mock import patch
 
 from db.schema import create_all_tables
@@ -65,8 +66,8 @@ def test_after_close_partial_failure(memory_db, monkeypatch, step_seam):
     assert result["results"]["taifex_oi"] is False
     assert result["results"]["twse_spot_close"] is True
     assert len(result["errors"]) == 1
-    # 收盤後 6 步：5 個市場面步驟 + 個股日K趨勢刷新（stock_trends）
-    assert call_count["n"] == 6
+    # 收盤後 7 步：5 個市場面步驟 + 個股日K趨勢刷新（stock_trends）+ tradewind 回流入庫（ingest_events）
+    assert call_count["n"] == 7
     # 拆出去的步驟不應再出現在 after_close
     for moved in ("twse_stock_close", "chip", "integration_chip", "fx_close"):
         assert moved not in result["results"]
@@ -127,3 +128,35 @@ def test_collectors_receive_injected_db_path(monkeypatch, tmp_path):
     verify_close.run_verify_close("2026-04-08", db)
 
     assert seen and set(seen) == {db}
+
+
+def test_after_close_ingests_inbox_step(memory_db, monkeypatch, step_seam, tmp_path):
+    """after_close 多一步 ingest_events：掃 inbox 當日檔案；inbox 空也算成功。"""
+    import json
+    from jobs import after_close
+    from config import settings
+    from db.events import events_list
+
+    seen = []
+
+    def mock_step(name, fn):
+        seen.append(name)
+        if name == "ingest_events":
+            return fn(), None            # 真的跑這一步
+        return True, None
+
+    step_seam(mock_step)
+    monkeypatch.setattr(after_close, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(settings, "TRADEWIND_INBOX_DIR", str(tmp_path))
+    fix = Path(__file__).resolve().parents[2] / "docs" / "contracts" / "fixtures" / "events.jsonl"
+    (tmp_path / "events" / "paper").mkdir(parents=True)
+    (tmp_path / "events" / "paper" / "2026-06-12.jsonl").write_text(fix.read_text(encoding="utf-8"), encoding="utf-8")
+
+    with patch("jobs.after_close.get_connection") as mock_conn:
+        mock_conn.return_value.__enter__ = lambda s: memory_db
+        mock_conn.return_value.__exit__ = lambda s, *a: None
+        result = after_close.run_after_close("2026-06-12")
+
+    assert "ingest_events" in seen
+    assert result["status"] == "completed"
+    assert len(events_list(memory_db, session_date="2026-06-12")) == 8

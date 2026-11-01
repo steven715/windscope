@@ -21,10 +21,13 @@ def cmd_init_db(args: argparse.Namespace) -> None:
         create_all_tables(conn)
         bt_count = import_broker_tags(conn)
         wl_count = watchlist_seed(conn)
+        from db.instruments import instruments_seed
+        in_count = instruments_seed(conn)
 
     print(f"Database initialized: {settings.DB_PATH}")
     print(f"  broker_tags: {bt_count} entries imported")
     print(f"  watchlist:   {wl_count} entries imported")
+    print(f"  instruments: {in_count} entries imported")
 
 
 def cmd_collect(args: argparse.Namespace) -> None:
@@ -444,6 +447,42 @@ def cmd_run(args: argparse.Namespace) -> None:
               f"{'✓' if v['hit_open'] else '✗'}")
 
 
+def cmd_targets(args: argparse.Namespace) -> None:
+    """契約 targets 的 CLI：build（盤前判斷→target）、list、lock。"""
+    import json as _json
+    from datetime import date as _date
+
+    from db.targets import target_lock, targets_list
+    from integration.targets_builder import build_premarket_target
+
+    with get_connection() as conn:
+        if args.action == "build":
+            d = args.arg or _date.today().isoformat()
+            rec = build_premarket_target(d, conn)
+            print(_json.dumps(rec, ensure_ascii=False, indent=2) if rec else f"{d}: 無盤前判斷")
+        elif args.action == "list":
+            for rec in targets_list(conn, session_date=args.arg):
+                print(f"{rec['target_id']}  {rec['valid_from'][:10]}  {rec['strategy_id']:15s} "
+                      f"{rec['instrument_id']:14s} w={rec['target_weight']:+.2f}  "
+                      f"locked={rec['locked_at'] or '-'}")
+        elif args.action == "lock":
+            if not args.arg:
+                print("lock 需要 target_id")
+                return
+            rec = target_lock(conn, args.arg)
+            print(f"locked_at={rec['locked_at']}" if rec else f"{args.arg}: 不存在")
+
+
+def cmd_ingest_events(args: argparse.Namespace) -> None:
+    """掃 tradewind inbox 入庫（冪等）。"""
+    import json as _json
+
+    from db.events import ingest_inbox
+
+    with get_connection() as conn:
+        print(_json.dumps(ingest_inbox(conn, args.inbox, args.date), ensure_ascii=False, indent=2))
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     """啟動 web server（內建排程器）。"""
     import uvicorn
@@ -792,6 +831,18 @@ def main() -> None:
     )
 
     # serve
+    targets_parser = subparsers.add_parser(
+        "targets", help="契約 targets：build <date> / list [date] / lock <target_id>"
+    )
+    targets_parser.add_argument("action", choices=["build", "list", "lock"])
+    targets_parser.add_argument("arg", nargs="?", help="date (build/list) 或 target_id (lock)")
+
+    ingest_parser = subparsers.add_parser(
+        "ingest-events", help="掃 tradewind inbox 的 events/account_snapshots JSONL 入庫"
+    )
+    ingest_parser.add_argument("--date", default=None, help="只掃該日檔案（預設全部）")
+    ingest_parser.add_argument("--inbox", default=None, help="inbox 目錄（預設 settings.TRADEWIND_INBOX_DIR）")
+
     serve_parser = subparsers.add_parser(
         "serve", help="Start the web server with built-in scheduler"
     )
@@ -846,6 +897,10 @@ def main() -> None:
         cmd_watchlist(args)
     elif args.command == "query":
         cmd_query(args)
+    elif args.command == "targets":
+        cmd_targets(args)
+    elif args.command == "ingest-events":
+        cmd_ingest_events(args)
     elif args.command == "serve":
         cmd_serve(args)
     else:

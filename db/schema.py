@@ -302,6 +302,108 @@ CREATE TABLE IF NOT EXISTS backtest_equity (
     price REAL,
     PRIMARY KEY (run_id, date)
 );
+
+-- ── 契約表（docs/contracts，ADR-0005／0006）────────────────────────────
+-- 商品主檔：只由 init-db 經 db/instruments.instruments_seed 灌種子，執行期以表為準。
+CREATE TABLE IF NOT EXISTS instruments (
+    instrument_id TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,          -- 契約 instruments 一筆的 JSON（schema 驗過）
+    asset_class TEXT,
+    tradable INTEGER,
+    active INTEGER,
+    as_of TEXT,
+    updated_at TEXT
+);
+
+-- 統一 K 線列（契約 bars）：新來源（即時串流落地、1m/tick）寫這裡；舊三張 raw 表經 bars_v 映射。
+CREATE TABLE IF NOT EXISTS bars (
+    instrument_id TEXT NOT NULL,
+    resolution TEXT NOT NULL,
+    session TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    ts TEXT NOT NULL,
+    open REAL, high REAL, low REAL, close REAL NOT NULL,
+    volume INTEGER, turnover REAL, open_interest INTEGER,
+    source TEXT NOT NULL,
+    published_at TEXT NOT NULL,
+    ingested_at TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (instrument_id, resolution, session, ts, revision)
+);
+CREATE INDEX IF NOT EXISTS idx_bars_lookup ON bars(instrument_id, resolution, session_date);
+
+-- 目標部位（契約 targets＝Insight＋Trade Plan）：只由 db/targets.py 讀寫。
+CREATE TABLE IF NOT EXISTS targets (
+    target_id TEXT PRIMARY KEY,
+    strategy_id TEXT NOT NULL,
+    rule_version TEXT NOT NULL,
+    instrument_id TEXT NOT NULL,
+    session_date TEXT NOT NULL,     -- valid_from 的日期（查詢用）
+    valid_from TEXT NOT NULL,
+    valid_until TEXT,
+    locked_at TEXT,
+    produced_at TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    payload TEXT NOT NULL,          -- 完整契約 JSON（含 trade_plan、invalidation）
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_targets_date ON targets(session_date, strategy_id);
+
+-- 事件回流（契約 events）：tradewind 寫、windscope 讀；只增不改，event_id 去重。
+CREATE TABLE IF NOT EXISTS events (
+    event_id TEXT PRIMARY KEY,
+    run_mode TEXT NOT NULL,
+    session_date TEXT NOT NULL,     -- ts 的日期
+    ts TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    action TEXT NOT NULL,
+    strategy_id TEXT,
+    target_id TEXT,
+    instrument_id TEXT,
+    payload TEXT NOT NULL,
+    ingested_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_date ON events(session_date, run_mode);
+
+-- 帳戶快照（契約 account_snapshots）：tradewind 寫；錢包／評分讀。
+CREATE TABLE IF NOT EXISTS account_snapshots (
+    snapshot_id TEXT PRIMARY KEY,
+    run_mode TEXT NOT NULL,
+    account_id TEXT NOT NULL,
+    session_date TEXT NOT NULL,     -- as_of 的日期
+    as_of TEXT NOT NULL,
+    equity REAL,
+    payload TEXT NOT NULL,
+    ingested_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_date ON account_snapshots(session_date, run_mode);
+"""
+
+# bars_v：契約 bars 的統一讀取視圖＝新 bars 表 ∪ 三張舊 raw 表（不搬資料，過渡用）。
+# 舊表沒有可知時刻，依契約規則推：日 K＝收盤時刻、夜盤＝05:00；ingested_at 取 collected_at。
+# 夜盤 ts 以「歸屬日前一日 15:00」近似（週一的夜盤實為上週五；精確值由 bars 表承載）。
+# 日期格式／時區正規化（+08:00）在 db/bars.py 讀取端做，view 只負責對映欄位。
+_BARS_VIEW_SQL = """
+DROP VIEW IF EXISTS bars_v;
+CREATE VIEW bars_v AS
+SELECT instrument_id, resolution, session, session_date, ts, open, high, low, close,
+       volume, turnover, open_interest, source, published_at, ingested_at, revision
+  FROM bars
+UNION ALL
+SELECT 'TWSE:TAIEX', '1d', 'regular', date, date || 'T09:00:00+08:00',
+       open, high, low, close, NULL, NULL, NULL, 'twse.raw_index',
+       date || 'T13:30:00+08:00', collected_at, 0
+  FROM raw_index WHERE close IS NOT NULL
+UNION ALL
+SELECT 'TWSE:' || stock_id, '1d', 'regular', date, date || 'T09:00:00+08:00',
+       open, high, low, close, volume, NULL, NULL, 'twse.raw_stock_daily',
+       date || 'T13:30:00+08:00', collected_at, 0
+  FROM raw_stock_daily WHERE close IS NOT NULL
+UNION ALL
+SELECT 'TAIFEX:TX', '1d', 'night', date, date(date, '-1 day') || 'T15:00:00+08:00',
+       NULL, NULL, NULL, night_close, night_volume, NULL, oi_net_foreign, 'taifex.raw_futures',
+       date || 'T05:00:00+08:00', collected_at, 0
+  FROM raw_futures WHERE night_close IS NOT NULL;
 """
 
 
@@ -343,6 +445,7 @@ def create_all_tables(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA_SQL)
     _migrate_columns(conn)
     _migrate_drop_columns(conn)
+    conn.executescript(_BARS_VIEW_SQL)   # view 每次重建，定義改了才會跟上
     logger.info("All tables created (or already exist)")
 
 
