@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "windscope/contracts/targets/0.1",
+  "title": "PortfolioTarget",
+  "description": "windscope → tradewind 的目標部位。是「希望的最終狀態」，不是訂單；冪等；風控只能縮小或歸零、不能翻向。",
+  "type": "object",
+  "required": [
+    "schema_version", "target_id", "strategy_id", "rule_version", "instrument_id",
+    "target_weight", "horizon", "produced_at", "valid_from", "valid_until", "inputs_ref"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+$" },
+    "target_id": {
+      "type": "string",
+      "minLength": 8,
+      "description": "確定性雜湊 sha256(strategy_id|instrument_id|valid_from|rule_version) 前 16 碼；重送同值"
+    },
+    "strategy_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "策略代碼：premarket_call / trend_signal / …"
+    },
+    "rule_version": { "type": "string", "description": "該策略的規則版本（v3、t2…）；不同版本績效分開記" },
+    "instrument_id": { "type": "string", "pattern": "^(TWSE|TPEX|TAIFEX):[A-Z0-9]+$" },
+    "target_weight": {
+      "type": "number",
+      "minimum": -1,
+      "maximum": 1,
+      "description": "目標曝險占 NAV 比例；正=多、負=空、0=空手/出場"
+    },
+    "target_quantity": {
+      "type": ["integer", "null"],
+      "description": "可選：策略直接指定數量（股/口）時填；與 target_weight 並存時以 quantity 為準"
+    },
+    "conviction": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "信心 0–1（盤前判斷 信心/5；趨勢 big_trend_confidence）；tradewind 可用來縮放，不可用來翻向"
+    },
+    "horizon": {
+      "type": "string",
+      "enum": ["intraday", "swing", "position"],
+      "description": "intraday=當日了結 / swing=數日到數週 / position=跟大勢"
+    },
+    "produced_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$" },
+    "valid_from": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
+      "description": "最早可據以行動的時刻（盤前判斷 = 當日 08:50）"
+    },
+    "valid_until": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
+      "description": "過期後不得再據以「新進」；是否平倉由策略另送 weight=0 決定。null=直到下一個同策略同商品 target 取代"
+    },
+    "reason": { "type": ["string", "null"], "maxLength": 200, "description": "一句話理由（給人看、給 LLM 讀）" },
+    "inputs_ref": {
+      "type": "object",
+      "description": "出處：讓 tradewind/事後稽核能回到 windscope 重導這個 target",
+      "required": ["source_table", "key"],
+      "additionalProperties": false,
+      "properties": {
+        "source_table": { "type": "string", "description": "signals / stock_trend_signals / …" },
+        "key": { "type": "object", "description": "該表主鍵，例如 {\"date\":\"2026-06-12\"} 或 {\"date\":…, \"stock_id\":…}" },
+        "inputs_hash": { "type": ["string", "null"], "description": "可選：盤前輸入的雜湊，用於重導比對" }
+      }
+    }
+  }
+}

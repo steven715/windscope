@@ -203,6 +203,36 @@ _Avoid_: 金字塔加碼
 **出場原因**（Exit reason）：
 大勢轉向、超買減碼、回測結束平倉三者之一。
 
+### 跨專案契約（windscope ⇄ tradewind）
+
+**契約**（Contract）：
+windscope 與 tradewind 唯一共同讀的介面定義：`docs/contracts/` 的 schema、fixture 與語意規則。改介面＝先改契約、兩邊 contract test 都綠。
+
+**商品**（Instrument）：
+可被報價或交易的標的，以 `{market}:{symbol}` 識別（`TWSE:2330`、`TAIFEX:TX`、`FX:USDTWD`）；主檔記資產類別、合約規格、交易時段、是否可交易。
+_Avoid_: 標的（未指明時）、股票（泛指時）
+
+**K 線列**（Bar）：
+契約中統一的價格列：商品、粒度、時段、歸屬交易日、開始時刻、原始 OHLCV、來源與可得時刻。**只放原始價**，還原是純函式輸出。
+
+**可得時刻**（Available-at）：
+系統實際取得某列資料的時刻。時點正確性規則：在決策時刻 t 的任何計算只能用可得時刻 ≤ t 的列。
+_Avoid_: 收集時間（口語可，契約用可得時刻）
+
+**時點正確性**（Point-in-time）：
+回測與模擬盤都只用「當時已知」的資料；由可得時刻保證，是兩邊結果能對得上的前提。
+_Avoid_: 無未來函數（口語可）
+
+**公司行為**（Corporate action）：
+除權息、分割、減資等影響價格連續性的事件；還原股價的唯一輸入。
+
+**目標部位**（Portfolio target）：
+windscope 送給 tradewind 的「希望的最終部位」：商品、占淨值權重（正多／負空／零空手）、信心、期間、出處。是狀態不是訂單；冪等；風控只能縮小或歸零、不能翻向。
+_Avoid_: 訂單、下單指令、交易訊號
+
+**共用策略庫**（Shared strategy library）：
+回測與交易引擎 import 的同一份純函式（`f(bars, params) -> signal`），不碰 DB 與網路；tradewind 不得自行重算特徵。
+
 ## Flagged ambiguities
 
 - 「訊號」單獨使用已禁用——一律說盤前判斷、籌碼觀察、趨勢訊號或籌碼傾向。

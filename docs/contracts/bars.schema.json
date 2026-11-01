@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "windscope/contracts/bars/0.1",
+  "title": "Bar",
+  "description": "統一 K 線列（原始價、未還原）。所有商品與解析度共用；時區 Asia/Taipei。",
+  "type": "object",
+  "required": ["instrument_id", "resolution", "session", "session_date", "ts", "close", "source", "available_at"],
+  "additionalProperties": false,
+  "properties": {
+    "instrument_id": {
+      "type": "string",
+      "pattern": "^(TWSE|TPEX|TAIFEX|FX):[A-Z0-9]+$",
+      "description": "{market}:{symbol}，見 README 代碼規則"
+    },
+    "resolution": {
+      "type": "string",
+      "enum": ["1d", "1h", "5m", "1m"],
+      "description": "bar 粒度"
+    },
+    "session": {
+      "type": "string",
+      "enum": ["regular", "night", "full"],
+      "description": "regular=日盤 / night=夜盤 / full=日夜合併"
+    },
+    "session_date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "歸屬交易日；夜盤歸次一交易日"
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
+      "description": "bar 開始時刻（ISO 8601，+08:00）"
+    },
+    "open": { "type": ["number", "null"] },
+    "high": { "type": ["number", "null"] },
+    "low": { "type": ["number", "null"] },
+    "close": { "type": "number", "description": "唯一必填的價格欄位" },
+    "volume": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "股票=股、期貨=口；指數/匯率為 null"
+    },
+    "turnover": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "成交金額（元），可選"
+    },
+    "open_interest": {
+      "type": ["integer", "null"],
+      "description": "期貨未平倉口數，可選"
+    },
+    "source": {
+      "type": "string",
+      "description": "資料來源代碼，例如 twse.STOCK_DAY、taifex.futDataDown、yahoo.chart、broker.shioaji"
+    },
+    "available_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
+      "description": "系統實際取得此列的時刻；決策時刻 t 只能用 available_at ≤ t 的列"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 0,
+      "description": "同一 (instrument_id, resolution, session, ts) 被來源重述時遞增；讀取取最大"
+    }
+  }
+}

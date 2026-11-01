@@ -41,3 +41,15 @@
 - **主力分點歷史**：分點明細無免費自動來源（需 FinMind Sponsor 或手動 CSV `分點匯入`）；
   外資動向與股價位置已可免費回補，分點維度暫維持手動。
 - **對外認證**：ngrok 對外目前無認證、且有會改資料的 POST 端點（見 auto-memory）。
+
+---
+
+## 跨專案：與 tradewind 的邊界與契約
+
+- 邊界決策：`docs/adr/0005-windscope-tradewind-boundary.md`（windscope＝資料＋研究層、tradewind＝交易引擎；
+  策略是共用純函式庫、不是資料交換；targets 是目標狀態不是訂單）。
+- 契約草案：`docs/contracts/`（bars／instruments／corporate_actions／targets 的 schema＋fixture＋語意規則），
+  `tests/test_docs/test_contracts.py` 鎖 fixture；tradewind 端應有對稱測試讀同一份 fixture。
+- windscope 端落地順序：① `bars`＋`instruments` 以 view 映射三張 raw 表 → ② `available_at` 語意、回測只讀 ≤t
+  → ③ 抽 `trend_signal` 為共用純函式庫（golden test 證明結果不變）→ ④ `targets` 表＋`/api/targets?since=`。
+- 待定事項列在 `docs/contracts/README.md` 末段，等 tradewind 上 GitHub 後在雙 repo session 定稿。
