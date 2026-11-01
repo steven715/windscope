@@ -78,7 +78,7 @@
 - 契約草案：`docs/contracts/`（bars／instruments／corporate_actions／targets 的 schema＋fixture＋語意規則），
   `tests/test_docs/test_contracts.py` 鎖 fixture；tradewind 端應有對稱測試讀同一份 fixture。
 - windscope 端落地順序：① ✅ `bars_v` 映射三張 raw 表＋`instruments` 表（`db/bars.py`、`db/instruments.py`、`/api/bars`、`/api/instruments`）
-  → ② `published_at/ingested_at` 已在契約與 view；回測改讀 `published_at ≤ t` **未做** → ③ 抽 `trend_signal` 為共用純函式庫（golden test）**未做**
+  → ② ✅ 時點正確性：`tests/test_strategylib/test_pit.py` 證明還原是尺度變換、事後事件不改 ≤t 的趨勢輸出（回測用整段還原序列無前視）→ ③ ✅ `strategylib/`（趨勢三態、還原、Playbook `pullback_hold p1`；golden＋純度測試；ADR-0007）
   → ④ ✅ `targets` 表＋`/api/targets`＋`POST /api/targets/{id}/lock`＋`integration/targets_builder`（掛 before_open）
   → ⑤ ✅ events／account_snapshots 入庫（`db/events.py`、`POST/GET /api/events`、after_close 掃 inbox）→ ⑥ 即時串流（WS）與 1m 落地：需券商行情源，**本機做**。
 - 待定事項列在 `docs/contracts/README.md` 末段，等 tradewind 上 GitHub 後在雙 repo session 定稿。

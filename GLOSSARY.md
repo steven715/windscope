@@ -303,8 +303,8 @@ tradewind → windscope 的反向流：Trade Management 狀態轉換、委託、
 windscope 送給 tradewind 的「希望的最終部位」＝一個 Insight 加一份 Trade Plan：商品、占淨值權重（正多／負空／零空手）、信心、期間、失效條件、交易計畫、出處。是狀態不是訂單；冪等；風控只能縮小或歸零、不能翻向。
 _Avoid_: 訂單、下單指令、交易訊號
 
-**共用策略庫**（Shared strategy library）：
-回測與交易引擎 import 的同一份純函式（`f(bars, params) -> signal`），不碰 DB 與網路；tradewind 不得自行重算特徵。
+**共用策略庫**（Shared strategy library, `strategylib/`）：
+回測與交易引擎 import 的同一份純函式（趨勢三態、還原、Playbook 程式），只 import 標準庫與自己、不碰 DB／網路／時鐘；門檻的單一真相在這裡，windscope settings 從它取值；tradewind 以 `strategylib-vX.Y.Z` tag 安裝，不得自行重算特徵（ADR-0007）。
 
 ## Flagged ambiguities
 

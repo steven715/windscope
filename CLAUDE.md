@@ -18,7 +18,7 @@ auto-memory（MEMORY.md）與 `docs/`。
 3. **所有外部請求走 `utils/http_client.http_get/http_post`**（內建 UA/timeout/退避 retry/禮貌延遲）；不要各自 `requests.get()`。
 4. **Collector 內 catch exception、記 log、回 `None`/`False`**；一個 collector 失敗不能讓整個 job 掛掉。不用 bare `except:`，至少 `except Exception as e:`。
 5. **絕不猜 parser 邏輯**：來源無法確認就留 stub（`collect()` 回 None）＋函式頂 `# TODO 狀態:STUB` block ＋記 `docs/data_sources.md`。寧可 stub 也不要寫一個會解析錯資料的 parser。
-6. **可調門檻全集中 `config/settings.py`**；調整任何訊號門檻必須 bump `SIGNAL_RULE_VERSION`（否則新舊規則命中率混在一起統計）。
+6. **可調門檻全集中 `config/settings.py`**；調整任何訊號門檻必須 bump `SIGNAL_RULE_VERSION`（否則新舊規則命中率混在一起統計）。**例外：趨勢層與 Playbook 的門檻單一真相在共用庫 `strategylib/`**（`trend.DEFAULTS`／`adjust.DEFAULT_GAP_PCT`／各 playbook `DEFAULT_PARAMS`），settings 的 `TREND_*` 只是從它取值；改那邊並 bump 該模組版本（ADR-0007）。
 7. **`/live` 盤中即時驗證唯讀**：不產生新訊號、不寫 DB。
 8. **時區 `Asia/Taipei`**：排程時間與「交易日/夜盤歸屬/前一交易日」等日期語意全依此（Docker 以 `TZ` 設定）。
 9. **不可逆動作先確認**：不要 force-push `main`、不要覆寫或刪除 `data/premarket.db`（線上資料）。
@@ -51,7 +51,8 @@ FastAPI + uvicorn + Jinja2 ・ APScheduler（取代 crontab）・ pytest。
 ## 結構（東西該放哪的意圖）
 
 - `collectors/` — Layer1 原始資料（twse/taifex/fx/chip/holiday），繼承 `base.BaseCollector`
-- `integration/` — Layer2 衍生指標（fx/futures/chip_metrics、summary）＋ Layer3 `premarket_call`（盤前判斷）／`chip_observation`（籌碼觀察）＋ Layer4 `verification` ＋ `live_*`
+- `strategylib/` — **windscope／tradewind 共用的純函式策略庫**（趨勢三態 `trend`、還原 `adjust`、Playbook 程式 `playbooks/`）：只 import 標準庫與自己，不碰 settings／DB／網路／時鐘；自帶 `pyproject.toml`，以 `strategylib-vX.Y.Z` tag 發布（ADR-0007）
+- `integration/` — Layer2 衍生指標（fx/futures/chip_metrics、summary）＋ Layer3 `premarket_call`（盤前判斷）／`chip_observation`（籌碼觀察）／`trend_signal`（薄層，規則在 strategylib）＋ Layer4 `verification` ＋ `live_*` ＋ `targets_builder`（盤前判斷→契約 target）
 - `server/` — `app.py`（工廠）/`scheduler.py`（排程登錄＋執行紀錄）/`routes/`/`templates/`
 - `jobs/` — 各時段 job：`after_night`/`before_open`/`afternoon_fx`/`verify_close`/`after_close`/`refresh_holidays`/`backfill`
 - `db/` — `schema.py`（含 `_migrate_columns`）/`connection.py`；`utils/` — `trading_calendar`/`http_client`/`notify`
@@ -84,6 +85,7 @@ FastAPI + uvicorn + Jinja2 ・ APScheduler（取代 crontab）・ pytest。
 | `utils/trading_calendar` | 週末排除、假日排除、前一/下一交易日 |
 | `jobs/*` | collector 失敗時 graceful degradation、休市/週末略過語意 |
 | `integration/premarket_call` | 兩票合成、信心調整（含各維度級別與效果）、夾限 1–5、rule_version |
+| `strategylib/*` | golden（重構前輸出逐根相同）、純度（import 白名單）、時點正確性（事後事件不改 ≤t 輸出）、每個 playbook 的觸發／停損／分批／runner／強制平倉／一天一次／鏡像 |
 | `integration/chip_observation` | 籌碼觀察：分點過濾分類、日期窗口、重算清舊 |
 | `integration/verification` | 三分類門檻邊界、雙基準命中、資料缺失、命中率統計 |
 | `server/*` | 各 route 回 200＋關鍵內容、API 區間查詢、空狀態、排程紀錄寫入/篩選/刪除 |
