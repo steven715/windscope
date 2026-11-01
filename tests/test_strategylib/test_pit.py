@@ -48,13 +48,28 @@ def test_future_dividends_do_not_change_past_outputs(data):
         # value_center 是絕對價位，會隨尺度變（這正是「只用當時已知事件」的差異），不比
 
 
-def test_value_center_is_the_only_scale_dependent_field(data):
-    """反證：若事後事件真的影響尺度，只有 value_center 會不同，其餘欄位不變。"""
+def test_value_center_scales_by_future_factors_and_nothing_else(data):
+    """反證：用整段（含未來事件）還原 vs 只用 ≤t 事件還原，第 t 根的 value_center 恰差「t 之後所有 factor 的乘積」，
+    其餘欄位不變——證明未來事件對 ≤t 的影響只是一個尺度常數。"""
     bars, divs = data["bars"], data["div_events"]
-    t = 420                                             # 在最後一次配息（第 650 根）之前
-    with_future, _ = back_adjust_with_events(bars[:t + 1], divs)            # 不可能：用了未來事件…
-    without, _ = back_adjust_with_events(bars[:t + 1], [d for d in divs if d["ex_date"] <= bars[t]["date"]])
-    assert with_future[t]["close"] == without[t]["close"]                  # …但 ≤t 不含未來 ex_date，無事件可套
-    s1 = evaluate_series(with_future, TrendParams(), GATE_PASS)[-1]
-    s2 = evaluate_series(without, TrendParams(), GATE_PASS)[-1]
-    assert s1 == s2
+    full_adj, _ = back_adjust_with_events(bars, divs)
+    full = evaluate_series(full_adj, TrendParams(), GATE_PASS)
+    differed = 0
+    for t in (300, 420, 600):                           # 都在最後一次配息（2025-11-27）之前
+        pit = _pit_signals_at(bars, divs, t)
+        future = [d["factor"] for d in divs if d["ex_date"] > bars[t]["date"]]
+        assert future, f"t={t} 應有未來事件才算得上反證"
+        scale = 1.0
+        for f in future:
+            scale *= f
+        assert scale != 1.0
+        if pit["value_center"] is not None and full[t]["value_center"] is not None:
+            assert full[t]["value_center"] == pytest.approx(pit["value_center"] * scale, abs=0.011)   # 兩邊各四捨五入到 0.01
+            assert full[t]["value_center"] != pit["value_center"]
+            differed += 1
+        for k in _CATEGORICAL:
+            assert pit[k] == full[t][k]
+        for k in _RATIO:
+            a, b = pit[k], full[t][k]
+            assert (a is None and b is None) or abs(a - b) <= 1e-4
+    assert differed >= 1, "至少一個檢查點要看得到尺度差，否則測試是空的"

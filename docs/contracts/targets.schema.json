@@ -187,7 +187,7 @@
         },
         "params": {
           "type": "object",
-          "description": "交給 Playbook 程式的參數（鍵由該 playbook 定義並版本化）；人讀欄位的機器版本放這裡，例如 {\"pullback_pct\": 0.3, \"confirm_bars\": 1}"
+          "description": "交給 Playbook 程式的參數（鍵由該 playbook 定義並版本化）；人讀欄位的機器版本放這裡，例如 {\"pullback_band\": 0.2, \"confirm_bars\": 1}"
         },
         "max_entries_per_day": {
           "type": "integer",

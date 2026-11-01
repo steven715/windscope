@@ -18,6 +18,16 @@ windscope 與 tradewind **共用的純函式策略庫**。回測（windscope）�
 - 改任何會改變輸出的規則 → bump 該模組的 `RULE_VERSION`／`VERSION`，並 bump 套件 `__version__`（不同版本的績效不混算）。
 - 決定性：同樣的輸入永遠得到同樣的輸出；回放一致性靠它。
 
+## Playbook 的呼叫契約
+
+- `step` 每收完一根 1 分 K 呼叫一次；`bars_1m` 是**本交易日日盤**的 1 分 K（舊→新），只支援 `session=regular`，夜盤回 `no_trade_hit`。
+- 5 分 K 依**時刻**分桶（`minute // 5`），桶的最後一分鐘收完才評估；缺一根 1 分 K 不會錯位。
+- `Action.kind` 字彙＝契約 `events.schema.json` 的 `plan/*` action（`armed`／`entered`／`scaled_out`／`stop_tightened`／
+  `exited`／`force_flat`／`no_trade_hit`／`chase_abandoned`／`expired`），tradewind 回流 events 不需對照表。
+- **成交價模型**：`Action.price` 是觸發價位（進場＝觸發桶 close；停損／分批若被該根 K 跳空穿越＝該根 open，取對自己不利的一邊）。
+  滑價、手續費、口數由呼叫端的撮合／風控層處理，Playbook 不管。
+- `max_entries_per_day > 1`：出場後（非強制平倉）回 `armed` 再找下一次觸發，到達上限才 `exited`。
+
 ## tradewind 怎麼用
 
 ```

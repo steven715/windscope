@@ -9,21 +9,28 @@
 from dataclasses import asdict, dataclass, field
 from typing import Protocol
 
-# 階段（與契約 events 的 plan/* action 對應）
+# 階段
 IDLE, ARMED, ENTERED, SCALED_OUT, EXITED, NO_TRADE = "idle", "armed", "entered", "scaled_out", "exited", "no_trade"
+# Action.kind 字彙＝契約 events.schema.json 的 plan/* action（tradewind 回流時直接用，不需對照）
+KINDS = ("armed", "entered", "scaled_out", "stop_tightened", "exited", "force_flat",
+         "no_trade_hit", "chase_abandoned", "expired")
 
 
 @dataclass
 class Action:
     """一個建議動作。price 為建議成交價（以該根 K 的價位計）；fraction 為部位比例（0–1）。"""
 
-    kind: str                    # no_trade | armed | enter | scale_out | tighten_stop | exit | expired
-    ts: str                      # 觸發的 K 棒結束時刻（契約格式）
+    kind: str                    # 見 KINDS（＝契約 events 的 plan/* action）
+    ts: str                      # 觸發的 K 棒結束時刻（契約格式 +08:00；只支援日盤，不跨日）
     price: float | None = None
     fraction: float | None = None
     stop_price: float | None = None
     reason: str | None = None
     r_multiple: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in KINDS:
+            raise ValueError(f"unknown action kind {self.kind!r}; expected one of {KINDS}")
 
     def as_dict(self) -> dict:
         """轉 dict（給 events.detail／測試）。"""
@@ -39,7 +46,9 @@ class PlanState:
     range_high: float | None = None  # 開盤區間
     range_low: float | None = None
     session_open: float | None = None
+    session_start: str | None = None   # HH:MM，開盤區間與桶對齊的基準
     bars_seen: int = 0
+    confirm_count: int = 0           # 連續符合觸發條件的桶數
     entries: int = 0
     entry_price: float | None = None
     stop_price: float | None = None

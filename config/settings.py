@@ -1,5 +1,11 @@
 import os
 
+# 共用純函式庫（ADR-0007）：趨勢／還原／Playbook 的門檻單一真相在它那裡，這裡只取值
+from strategylib.adjust import DEFAULT_GAP_PCT as _ADJUST_GAP_PCT
+from strategylib.playbooks.pullback_hold import DEFAULT_PARAMS as _PULLBACK_PARAMS
+from strategylib.trend import DEFAULTS as _TREND_DEFAULTS
+from strategylib.trend import RULE_VERSION as _TREND_RULE_VERSION
+
 # DB
 DB_PATH = os.environ.get("PREMARKET_DB", "data/premarket.db")
 
@@ -68,10 +74,6 @@ FOREIGN_BIG_NET = 10000             # 單日大買/大賣門檻（如「反手�
 # 規則本體與門檻的**單一真相在共用庫 strategylib.trend**（windscope／tradewind 共用，ADR-0007）；
 # 這裡只是取值供既有程式碼引用，不要在此另改數字——改門檻去 strategylib.trend.DEFAULTS 並 bump
 # 其 RULE_VERSION（不同版本的績效不混算）。fundamental_gate 目前無基本面資料源 → 一律 UNKNOWN。
-from strategylib.adjust import DEFAULT_GAP_PCT as _ADJUST_GAP_PCT  # noqa: E402
-from strategylib.trend import DEFAULTS as _TREND_DEFAULTS  # noqa: E402
-from strategylib.trend import RULE_VERSION as _TREND_RULE_VERSION  # noqa: E402
-
 TREND_RULE_VERSION = _TREND_RULE_VERSION
 TREND_MA_BIG = _TREND_DEFAULTS["ma_big"]
 TREND_MA_CENTER = _TREND_DEFAULTS["ma_center"]
@@ -131,8 +133,7 @@ PREMARKET_INVALIDATION_UNTIL = "09:30"
 PREMARKET_PLAYBOOK = {
     "playbook_id": "pullback_hold",
     "playbook_version": "p1",
-    "params": {"range_minutes": 5, "confirm_bars": 1, "gap_no_trade_pct": 1.5,
-               "entry_skip_until": "09:05", "no_entry_after": "11:30"},
+    "params": dict(_PULLBACK_PARAMS),          # 預設全取自 strategylib（不另存一份）；要覆蓋就改這裡的鍵
     "max_entries_per_day": 1,
     "entry": {"window_from": "09:05", "window_to": "10:30",
               "trigger": "5分K 回測開盤區間下緣不破後收高", "chase_limit_pts": 40},
