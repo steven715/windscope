@@ -122,6 +122,32 @@ BACKTEST_ANNUALIZATION_DAYS = 252      # 年化交易日數（Sharpe / CAGR）
 # 永不觸發＝永不進場。此為方法論「先拋棄基本面、只測技術面」的明確建模假設（見 roadmap）。
 BACKTEST_ASSUME_GATE_PASS = True
 
+# === 契約 I/O（docs/contracts v0.2，ADR-0005／0006）===
+# 盤前判斷 → 契約 target（Insight＋Trade Plan）。數值是 Playbook 參數的預設值，寫進每筆 target 的
+# trade_plan；改任一條請 bump PREMARKET_PLAYBOOK["playbook_version"]（不同版本績效分開記）。
+PREMARKET_TARGET_INSTRUMENT = "TAIFEX:TMF"   # 盤前判斷對應的可交易商品（微台）
+PREMARKET_TARGET_VALID_FROM = "08:50"
+PREMARKET_TARGET_VALID_UNTIL = "13:25"
+TARGET_LOCK_DEADLINE = "08:55"               # 08:55 未鎖定的 target，tradewind 視為中性；之後才鎖只記 warning
+# 失效條件：開盤 30 分內現貨跌破（偏多）／站上（偏空）前一交易日低點／高點
+PREMARKET_INVALIDATION_UNTIL = "09:30"
+PREMARKET_PLAYBOOK = {
+    "playbook_id": "pullback_hold",
+    "playbook_version": "p1",
+    "params": {"range_minutes": 5, "confirm_bars": 1, "gap_no_trade_pct": 1.5,
+               "entry_skip_until": "09:05", "no_entry_after": "11:30"},
+    "max_entries_per_day": 1,
+    "entry": {"window_from": "09:05", "window_to": "10:30",
+              "trigger": "5分K 回測開盤區間下緣不破後收高", "chase_limit_pts": 40},
+    "risk": {"r_pct": 1.0, "stop_pts": 30, "max_units": 10},
+    "scaling": [{"at_r": 1.0, "exit_fraction": 0.5, "move_stop_to": "breakeven"}],
+    "exit": {"runner_rule": "跌破前一根 5分K 低點出場", "force_flat_at": "13:25"},
+    "no_trade": ["開盤跳空 > 1.5%", "09:00–09:05 不進", "11:30 後不新進"],
+    "discretion_allowed": ["early_exit"],
+}
+# tradewind 回流的 inbox：{inbox}/events/{run_mode}/{date}.jsonl、{inbox}/account_snapshots/...
+TRADEWIND_INBOX_DIR = os.environ.get("TRADEWIND_INBOX", "data/inbox")
+
 # === Chip 自動來源（FinMind）===
 # 分點明細唯一可自動化的合法來源是 FinMind TaiwanStockTradingDailyReport，
 # 需要 Sponsor 等級的 token（https://finmindtrade.com）。未設定時自動來源停用，

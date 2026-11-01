@@ -77,6 +77,16 @@
   策略是共用純函式庫、不是資料交換；targets 是目標狀態不是訂單）。
 - 契約草案：`docs/contracts/`（bars／instruments／corporate_actions／targets 的 schema＋fixture＋語意規則），
   `tests/test_docs/test_contracts.py` 鎖 fixture；tradewind 端應有對稱測試讀同一份 fixture。
-- windscope 端落地順序：① `bars`＋`instruments` 以 view 映射三張 raw 表 → ② `available_at` 語意、回測只讀 ≤t
-  → ③ 抽 `trend_signal` 為共用純函式庫（golden test 證明結果不變）→ ④ `targets` 表＋`/api/targets?since=`。
+- windscope 端落地順序：① ✅ `bars_v` 映射三張 raw 表＋`instruments` 表（`db/bars.py`、`db/instruments.py`、`/api/bars`、`/api/instruments`）
+  → ② `published_at/ingested_at` 已在契約與 view；回測改讀 `published_at ≤ t` **未做** → ③ 抽 `trend_signal` 為共用純函式庫（golden test）**未做**
+  → ④ ✅ `targets` 表＋`/api/targets`＋`POST /api/targets/{id}/lock`＋`integration/targets_builder`（掛 before_open）
+  → ⑤ ✅ events／account_snapshots 入庫（`db/events.py`、`POST/GET /api/events`、after_close 掃 inbox）→ ⑥ 即時串流（WS）與 1m 落地：需券商行情源，**本機做**。
 - 待定事項列在 `docs/contracts/README.md` 末段，等 tradewind 上 GitHub 後在雙 repo session 定稿。
+
+---
+
+## UI 分離（ADR-0006）
+
+- 後端只出 JSON API（FastAPI＋OpenAPI）；UI 在獨立前端 repo（Vite＋TypeScript＋React），同一個前端吃 windscope／tradewind／錢包三個 API。
+- 本 repo 不再新增 Jinja 頁；既有頁面過渡期保留，**API-first**：先補每頁對應的 `/api/*`（`/stats` 已有 `/api/call-stats`），前端做到哪頁、哪頁的 Jinja 才下線。
+- 前端第一批只做兩頁：判斷有效性（windscope）、狀態頁＋kill switch（tradewind，按鈕走 ops）。

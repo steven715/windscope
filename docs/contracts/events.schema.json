@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "windscope/contracts/events/0.1",
+  "title": "Event (tradewind → windscope)",
+  "description": "反向流：tradewind 在執行過程中發生的每一件事，供 windscope 評分 Trade Plan、Trade Management、Risk Management 與 override。只增不改；每筆帶 run_mode，不同模式的事件不混算。",
+  "type": "object",
+  "required": ["schema_version", "event_id", "run_mode", "account_id", "ts", "recorded_at", "kind", "action", "versions"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^\\d+\\.\\d+$" },
+    "event_id": {
+      "type": "string",
+      "minLength": 8,
+      "description": "決定性 id（來源事件 seq ＋ 模組內計數），回放得到相同 id；去重鍵"
+    },
+    "run_mode": {
+      "type": "string",
+      "enum": ["backtest", "replay", "paper", "shioaji_sim", "shioaji_live"],
+      "description": "產生此事件的執行模式；windscope 依此分開統計（Paper 與實盤永不混算）"
+    },
+    "account_id": { "type": "string" },
+    "strategy_id": { "type": ["string", "null"], "pattern": "^[a-z][a-z0-9_]*$" },
+    "target_id": {
+      "type": ["string", "null"],
+      "description": "對應的 target；帳戶層事件（mode_change、risk_trip 的部分）可為 null"
+    },
+    "instrument_id": { "type": ["string", "null"], "pattern": "^(TWSE|TPEX|TAIFEX):[A-Z0-9]+$" },
+    "ts": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?\\+08:00$",
+      "description": "發生時刻（引擎時鐘；回測為模擬時間）"
+    },
+    "recorded_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,6})?\\+08:00$",
+      "description": "寫入紀錄的時刻（實時模式＝牆鐘）"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["plan", "order", "fill", "override", "risk", "mode", "health"],
+      "description": "plan＝Trade Management 狀態轉換；order＝委託生命週期；fill＝成交；override＝人的裁量；risk＝風控檢查或觸發；mode＝系統狀態切換；health＝資料心跳／對帳"
+    },
+    "action": {
+      "type": "string",
+      "description": "依 kind：plan→armed|entered|scaled_out|stop_tightened|invalidated|exited|force_flat|no_trade_hit|chase_abandoned|expired；order→submitted|accepted|rejected|cancelled|expired|unknown；fill→fill；override→early_exit|reduce；risk→check_pass|check_reject|daily_loss|weekly_loss|monthly_loss|stoploss_guard|profit_giveback|data_age|kill_switch；mode→NORMAL|REDUCE_ONLY|HALT；health→heartbeat_lost|heartbeat_restored|reconcile_ok|reconcile_mismatch"
+    },
+    "side": { "type": ["string", "null"], "enum": ["buy", "sell", null] },
+    "qty": { "type": ["number", "null"], "minimum": 0, "description": "口數／股數" },
+    "price": { "type": ["number", "null"] },
+    "r_multiple": {
+      "type": ["number", "null"],
+      "description": "此事件當下該 target 的未實現/已實現 R（以 trade_plan.risk 的 1R 計）；plan/fill/override 必填"
+    },
+    "reason": { "type": ["string", "null"], "maxLength": 200, "description": "一句話；override 必填" },
+    "detail": {
+      "type": ["object", "null"],
+      "description": "結構化細節（例如 risk 的檢查名稱與門檻、plan 的觸發值、order 的 client_order_id）"
+    },
+    "versions": {
+      "type": "object",
+      "required": ["execution_version", "risk_version", "engine_version"],
+      "additionalProperties": false,
+      "properties": {
+        "execution_version": { "type": "string" },
+        "risk_version": { "type": "string" },
+        "engine_version": { "type": "string" },
+        "cost_model": { "type": ["string", "null"], "description": "撮合與成本模型版本（paper/backtest）" }
+      }
+    }
+  }
+}

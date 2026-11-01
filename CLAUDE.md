@@ -2,7 +2,7 @@
 
 台股開盤前情報系統：常駐 server 每日閉環（收匯率/期貨/籌碼 → 算衍生指標 →
 08:50 產訊號判斷[偏多/偏空/中性＋信心＋理由] → 收盤雙基準三分類驗證、累積命中率）
-＋ server-rendered Web 畫面。**回測（Layer 5）**：拿趨勢訊號當動作重放歷史還原股價算績效
+＋ JSON API（UI 在獨立前端 repo；既有 Jinja 頁過渡期保留）。與交易引擎 tradewind 的邊界與契約見 `docs/adr/0005`、`docs/contracts/`。**回測（Layer 5）**：拿趨勢訊號當動作重放歷史還原股價算績效
 （純離線、唯讀，不影響訊號/排程；見 `docs/roadmap.md`、`integration/backtest.py`）。
 **不做**：下單/交易、盤中即時監控（除 `/live` 驗證觀察）、ML 模型。專案現況/決策脈絡見
 auto-memory（MEMORY.md）與 `docs/`。
@@ -13,7 +13,7 @@ auto-memory（MEMORY.md）與 `docs/`。
 
 專案硬約束，違反會破壞正確性或造成不可逆損失：
 
-1. **不用 pandas**；SQLite 只用 stdlib `sqlite3`、不用 ORM；Web 不用前端框架（Jinja server-render）。資料量極小，原生 Python 處理。
+1. **不用 pandas**；SQLite 只用 stdlib `sqlite3`、不用 ORM。資料量極小，原生 Python 處理。**後端只出 JSON API**（FastAPI＋OpenAPI schema）；UI 在獨立前端 repo（Vite＋TypeScript＋React），本 repo 不再新增 Jinja 頁面，既有 Jinja 頁過渡期保留、對應 `/api/*` 齊了才下線（ADR-0006）。
 2. **所有 DB 操作走 `db/connection.get_connection`**（context manager，自動 commit/rollback/close）；不要自己 `sqlite3.connect()`。測試傳 `":memory:"`。
 3. **所有外部請求走 `utils/http_client.http_get/http_post`**（內建 UA/timeout/退避 retry/禮貌延遲）；不要各自 `requests.get()`。
 4. **Collector 內 catch exception、記 log、回 `None`/`False`**；一個 collector 失敗不能讓整個 job 掛掉。不用 bare `except:`，至少 `except Exception as e:`。
@@ -24,6 +24,7 @@ auto-memory（MEMORY.md）與 `docs/`。
 9. **不可逆動作先確認**：不要 force-push `main`、不要覆寫或刪除 `data/premarket.db`（線上資料）。
 10. **每份設定/狀態只有「單一真相來源」＋單一存取入口**：不允許同一份配置在不同地方各自讀/寫、造成分岔。
     - watchlist：執行期一律以 **DB 的 `watchlist` 表**為準，表空就是觀察名單為空；`config/watchlist.json` 只是**初始種子**（只由 `init-db` 經 `watchlist_seed` 灌一次）。所有讀寫只走 `db/watchlist.py`（`watchlist_list`/`watchlist_get`/`watchlist_add`/`watchlist_remove`/`watchlist_seed`）；`tests/test_db/test_watchlist_single_entry.py` 會擋下其他地方對 `watchlist` 表的 SQL。
+    - instruments（商品主檔）：同 watchlist——執行期以 DB 的 `instruments` 表為準，`config/instruments.json` 只是種子（只由 `init-db` 經 `instruments_seed` 灌一次）；讀寫只走 `db/instruments.py`。契約表 `bars`／`bars_v`、`targets`、`events`／`account_snapshots` 各自只走 `db/bars.py`、`db/targets.py`、`db/events.py`；`tests/test_db/test_contract_single_entry.py` 會擋其他存取。
     - 通則：任何「檔案＋DB 兩種表示」的配置，讀取器要收斂到一個共用 helper、寫入只走一處；發現有第二個讀/寫路徑就是要修的 bug。新增這類配置前先跟我確認入口設計。
 
 ---
@@ -36,8 +37,8 @@ auto-memory（MEMORY.md）與 `docs/`。
   - bind-mount：`./config`（編輯即時生效、免 build）、`./data`、`./logs`（DB/log 跨重啟保留）。
   - **schema 自癒**：app 啟動時 `create_all_tables` 冪等建表＋PRAGMA-guard 的 ALTER migration，不用手動遷移 DB。
   - 只改 `.env`（token/chat_id）→ `docker compose up -d`（不必 `--build`）。
-- 常用 CLI：`python main.py serve | init-db | refresh-holidays | collect | backfill`。
-- **全新部署（空 DB）要手動跑一次 `init-db`** 灌觀察名單種子：容器啟動只建表，表空就是觀察名單為空、collector 不收個股。
+- 常用 CLI：`python main.py serve | init-db | refresh-holidays | collect | backfill | targets build|list|lock | ingest-events`。
+- **全新部署（空 DB）要手動跑一次 `init-db`** 灌觀察名單與商品主檔種子：容器啟動只建表，表空就是觀察名單為空、collector 不收個股；`instruments` 空則 `/api/instruments` 為空、tradewind 無規格可用。
 - 要單獨測某個 collector 又不想碰正式資料：`PREMARKET_DB=/tmp/t.db python main.py collect ...`。
 
 ---

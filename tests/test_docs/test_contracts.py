@@ -1,83 +1,18 @@
 """契約 fixture 必須符合 schema（docs/contracts）。
 
-純 stdlib 的 JSON Schema 子集驗證器（type/required/enum/pattern/min/max/properties/$ref 本檔內
-定義/additionalProperties），不引第三方。tradewind 端應有對稱的測試讀同一份 fixture。
+驗證器在 utils/contract_schema.py（stdlib JSON Schema 子集）；本檔鎖 fixture 與契約語意。
+tradewind 端應有對稱的測試讀同一份 fixture。
 """
 
 import json
-import re
 from pathlib import Path
 
 import pytest
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "docs" / "contracts"
-TABLES = ["bars", "instruments", "corporate_actions", "targets"]
+TABLES = ["bars", "instruments", "corporate_actions", "targets", "events", "account_snapshots"]
 
-_TYPES = {
-    "string": lambda v: isinstance(v, str),
-    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
-    "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
-    "boolean": lambda v: isinstance(v, bool),
-    "null": lambda v: v is None,
-    "object": lambda v: isinstance(v, dict),
-    "array": lambda v: isinstance(v, list),
-}
-
-
-def _resolve(schema: dict, root: dict) -> dict:
-    ref = schema.get("$ref")
-    if not ref:
-        return schema
-    assert ref.startswith("#/"), ref
-    node = root
-    for part in ref[2:].split("/"):
-        node = node[part]
-    return node
-
-
-def validate(value, schema: dict, root: dict, path: str = "$") -> list[str]:
-    """回傳違規訊息列表（空＝合法）。"""
-    schema = _resolve(schema, root)
-    errs: list[str] = []
-    types = schema.get("type")
-    if types is not None:
-        allowed = types if isinstance(types, list) else [types]
-        if not any(_TYPES[t](value) for t in allowed):
-            return [f"{path}: type {type(value).__name__} not in {allowed}"]
-    if value is None:
-        return errs
-    if "enum" in schema and value not in schema["enum"]:
-        errs.append(f"{path}: {value!r} not in enum {schema['enum']}")
-    if isinstance(value, str):
-        if "pattern" in schema and not re.search(schema["pattern"], value):
-            errs.append(f"{path}: {value!r} !~ {schema['pattern']}")
-        if "minLength" in schema and len(value) < schema["minLength"]:
-            errs.append(f"{path}: shorter than {schema['minLength']}")
-        if "maxLength" in schema and len(value) > schema["maxLength"]:
-            errs.append(f"{path}: longer than {schema['maxLength']}")
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-        if "minimum" in schema and value < schema["minimum"]:
-            errs.append(f"{path}: {value} < {schema['minimum']}")
-        if "maximum" in schema and value > schema["maximum"]:
-            errs.append(f"{path}: {value} > {schema['maximum']}")
-        if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
-            errs.append(f"{path}: {value} <= {schema['exclusiveMinimum']}")
-    if isinstance(value, dict):
-        props = schema.get("properties", {})
-        for k in schema.get("required", []):
-            if k not in value:
-                errs.append(f"{path}: missing required {k!r}")
-        if schema.get("additionalProperties") is False:
-            for k in value:
-                if k not in props:
-                    errs.append(f"{path}: unexpected key {k!r}")
-        for k, v in value.items():
-            if k in props:
-                errs.extend(validate(v, props[k], root, f"{path}.{k}"))
-    if isinstance(value, list) and "items" in schema:
-        for i, v in enumerate(value):
-            errs.extend(validate(v, schema["items"], root, f"{path}[{i}]"))
-    return errs
+from utils.contract_schema import validate  # noqa: E402  驗證器正式版在 utils
 
 
 def _load(table: str):
@@ -111,11 +46,11 @@ def test_validator_rejects_bad_rows():
 
 
 def test_targets_are_idempotent_by_key():
-    """同 (strategy_id, instrument_id, valid_from) 只能有一個 target_id。"""
+    """同 (strategy_id, instrument_id, valid_from, rule_version) 只能有一個 target_id。"""
     _, rows = _load("targets")
     seen: dict[tuple, str] = {}
     for r in rows:
-        key = (r["strategy_id"], r["instrument_id"], r["valid_from"])
+        key = (r["strategy_id"], r["instrument_id"], r["valid_from"], r["rule_version"])
         assert seen.setdefault(key, r["target_id"]) == r["target_id"], key
 
 
@@ -134,3 +69,43 @@ def test_night_bars_attribute_to_next_session_date():
     for b in bars:
         if b["session"] == "night":
             assert b["session_date"] > b["ts"][:10], b
+
+
+def test_events_reference_known_targets_and_tradable_instruments():
+    """events 的 target_id 必須存在於 targets fixture；instrument 必須可交易；event_id 唯一。"""
+    _, targets = _load("targets")
+    _, instruments = _load("instruments")
+    _, events = _load("events")
+    target_ids = {t["target_id"] for t in targets}
+    tradable = {i["instrument_id"] for i in instruments if i["tradable"]}
+    seen = set()
+    for e in events:
+        assert e["event_id"] not in seen, e["event_id"]
+        seen.add(e["event_id"])
+        if e["target_id"] is not None:
+            assert e["target_id"] in target_ids, e["target_id"]
+        if e["instrument_id"] is not None:
+            assert e["instrument_id"] in tradable, e["instrument_id"]
+        if e["kind"] == "override":
+            assert e["reason"], "override 必須有理由"
+            assert e["action"] in ("early_exit", "reduce")
+
+
+def test_stream_bars_never_partial():
+    """串流只推收完的 K 棒：K 棒的 published_at（可知時刻）不早於 ts + 粒度；tick 的 published_at = ts。"""
+    _, bars = _load("bars")
+    for b in bars:
+        if b["resolution"] == "tick":
+            assert b["published_at"] == b["ts"], b
+        elif b["resolution"] in ("1m", "5m"):
+            assert b["published_at"][11:16] > b["ts"][11:16], b
+        assert b["ingested_at"] >= b["published_at"], b   # 拿到不可能早於可知
+
+
+def test_targets_locked_and_single_entry():
+    """v0.2：每筆 target 有 locked_at（可 null）、trade_plan 帶 params 與 max_entries_per_day=1。"""
+    _, rows = _load("targets")
+    for r in rows:
+        assert "locked_at" in r
+        assert r["trade_plan"]["max_entries_per_day"] == 1
+        assert isinstance(r["trade_plan"]["params"], dict) and r["trade_plan"]["params"]

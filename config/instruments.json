@@ -1,0 +1,229 @@
+[
+  {
+    "instrument_id": "TWSE:2330",
+    "market": "TWSE",
+    "symbol": "2330",
+    "name": "台積電",
+    "asset_class": "equity",
+    "currency": "TWD",
+    "tradable": true,
+    "tick_size": 1.0,
+    "lot_size": 1000,
+    "multiplier": 1,
+    "price_limit_pct": 10,
+    "underlying": null,
+    "expiry": null,
+    "roll_rule": null,
+    "sessions": {
+      "regular": {
+        "open": "09:00",
+        "close": "13:30"
+      }
+    },
+    "active": true,
+    "as_of": "2026-06-01",
+    "initial_margin": null,
+    "maintenance_margin": null,
+    "margin_source": null
+  },
+  {
+    "instrument_id": "TWSE:0050",
+    "market": "TWSE",
+    "symbol": "0050",
+    "name": "元大台灣50",
+    "asset_class": "etf",
+    "currency": "TWD",
+    "tradable": true,
+    "tick_size": 0.05,
+    "lot_size": 1000,
+    "multiplier": 1,
+    "price_limit_pct": 10,
+    "underlying": "TWSE:TAIEX",
+    "expiry": null,
+    "roll_rule": null,
+    "sessions": {
+      "regular": {
+        "open": "09:00",
+        "close": "13:30"
+      }
+    },
+    "active": true,
+    "as_of": "2026-06-01",
+    "initial_margin": null,
+    "maintenance_margin": null,
+    "margin_source": null
+  },
+  {
+    "instrument_id": "TWSE:TAIEX",
+    "market": "TWSE",
+    "symbol": "TAIEX",
+    "name": "加權股價指數",
+    "asset_class": "index",
+    "currency": "TWD",
+    "tradable": false,
+    "tick_size": null,
+    "lot_size": null,
+    "multiplier": null,
+    "price_limit_pct": null,
+    "underlying": null,
+    "expiry": null,
+    "roll_rule": null,
+    "sessions": {
+      "regular": {
+        "open": "09:00",
+        "close": "13:30"
+      }
+    },
+    "active": true,
+    "as_of": "2026-06-01",
+    "initial_margin": null,
+    "maintenance_margin": null,
+    "margin_source": null
+  },
+  {
+    "instrument_id": "TAIFEX:TX",
+    "market": "TAIFEX",
+    "symbol": "TX",
+    "name": "台指期（連續）",
+    "asset_class": "future",
+    "currency": "TWD",
+    "tradable": true,
+    "tick_size": 1.0,
+    "lot_size": 1,
+    "multiplier": 200,
+    "price_limit_pct": 10,
+    "underlying": "TWSE:TAIEX",
+    "expiry": null,
+    "roll_rule": "days_before_expiry:3",
+    "sessions": {
+      "regular": {
+        "open": "08:45",
+        "close": "13:45"
+      },
+      "night": {
+        "open": "15:00",
+        "close": "05:00"
+      }
+    },
+    "active": true,
+    "as_of": "2026-06-01",
+    "initial_margin": 184000,
+    "maintenance_margin": 141000,
+    "margin_source": "taifex.margin_table"
+  },
+  {
+    "instrument_id": "TAIFEX:TXF202606",
+    "market": "TAIFEX",
+    "symbol": "TXF202606",
+    "name": "台指期 2026/06",
+    "asset_class": "future",
+    "currency": "TWD",
+    "tradable": true,
+    "tick_size": 1.0,
+    "lot_size": 1,
+    "multiplier": 200,
+    "price_limit_pct": 10,
+    "underlying": "TWSE:TAIEX",
+    "expiry": "2026-06-17",
+    "roll_rule": null,
+    "sessions": {
+      "regular": {
+        "open": "08:45",
+        "close": "13:45"
+      },
+      "night": {
+        "open": "15:00",
+        "close": "05:00"
+      }
+    },
+    "active": true,
+    "as_of": "2026-06-01",
+    "initial_margin": 184000,
+    "maintenance_margin": 141000,
+    "margin_source": "taifex.margin_table"
+  },
+  {
+    "instrument_id": "TAIFEX:TMF",
+    "market": "TAIFEX",
+    "symbol": "TMF",
+    "name": "微型臺指期（連續）",
+    "asset_class": "future",
+    "currency": "TWD",
+    "tradable": true,
+    "tick_size": 1.0,
+    "lot_size": 1,
+    "multiplier": 10,
+    "price_limit_pct": 10,
+    "underlying": "TWSE:TAIEX",
+    "expiry": null,
+    "roll_rule": "days_before_expiry:3",
+    "sessions": {
+      "regular": {
+        "open": "08:45",
+        "close": "13:45"
+      },
+      "night": {
+        "open": "15:00",
+        "close": "05:00"
+      }
+    },
+    "active": true,
+    "as_of": "2026-06-01",
+    "initial_margin": 11500,
+    "maintenance_margin": 8800,
+    "margin_source": "taifex.margin_table"
+  },
+  {
+    "instrument_id": "TAIFEX:TMF202606",
+    "market": "TAIFEX",
+    "symbol": "TMF202606",
+    "name": "微型臺指期 2026/06",
+    "asset_class": "future",
+    "currency": "TWD",
+    "tradable": true,
+    "tick_size": 1.0,
+    "lot_size": 1,
+    "multiplier": 10,
+    "price_limit_pct": 10,
+    "underlying": "TWSE:TAIEX",
+    "expiry": "2026-06-17",
+    "roll_rule": null,
+    "sessions": {
+      "regular": {
+        "open": "08:45",
+        "close": "13:45"
+      },
+      "night": {
+        "open": "15:00",
+        "close": "05:00"
+      }
+    },
+    "active": true,
+    "as_of": "2026-06-01",
+    "initial_margin": 11500,
+    "maintenance_margin": 8800,
+    "margin_source": "taifex.margin_table"
+  },
+  {
+    "instrument_id": "FX:USDTWD",
+    "market": "FX",
+    "symbol": "USDTWD",
+    "name": "美元/新台幣",
+    "asset_class": "fx",
+    "currency": "TWD",
+    "tradable": false,
+    "tick_size": null,
+    "lot_size": null,
+    "multiplier": null,
+    "price_limit_pct": null,
+    "underlying": null,
+    "expiry": null,
+    "roll_rule": null,
+    "sessions": {},
+    "active": true,
+    "as_of": "2026-06-01",
+    "initial_margin": null,
+    "maintenance_margin": null,
+    "margin_source": null
+  }
+]

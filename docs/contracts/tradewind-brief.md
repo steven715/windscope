@@ -3,6 +3,7 @@
 > 給 tradewind 本機 session 的開場文件。它看不到 windscope 這邊的討論，所以這份要能獨立閱讀。
 > 對應的決策紀錄在 windscope repo：`docs/adr/0005-windscope-tradewind-boundary.md`；契約在 `docs/contracts/`。
 > 層名（已定案）：**Insight**（市場觀點）→ **Playbook／Trade Plan**（戰術手冊／交易計畫）→ **Trade Management**（持倉管理）→ **Risk Management**（風控）→ **Execution**，反向 **Events**。
+> **2026-11-01 更新**：六項待裁決已定（tradewind `docs/review-2026-11-01.md`、ADR-0008／0009／0010）；本簡報 §4 的目錄與 asyncio 建議作廢，以 tradewind 自己的 CLAUDE.md 為準。契約已升 v0.2。
 
 ---
 
@@ -32,7 +33,8 @@ tradewind **不做**：抓歷史資料、重算特徵、自訂還原規則、產
 | `instruments` | windscope → tradewind | 合約規格（tick、乘數、保證金來源、時段、換月規則）全部讀主檔，不寫死 |
 | `corporate_actions` | windscope → tradewind | 只在需要還原時透過共用純函式庫用；tradewind 不自己算 |
 | `targets` | windscope → tradewind | Insight（權重、信心、有效期、`invalidation`）＋ `trade_plan`（Playbook 填出的當日實例）；冪等：同 key 重送同值 |
-| `events` | **tradewind → windscope** | **尚未定義**，由 tradewind 這邊先提草案（見 §5） |
+| `events` | **tradewind → windscope** | 已定義（`events.schema.json`）；每日 JSONL 寫檔回流，`POST /api/events` 之後再做 |
+| `account_snapshots` | **tradewind → windscope／錢包** | 已占位；券商回報的帳戶快照每日寫檔 |
 
 五條語意規則（詳見 README）：時區 `Asia/Taipei`；`available_at` 時點正確性；bars 只放原始價；targets 是目標狀態不是訂單；衍生資料不過契約。
 

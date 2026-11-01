@@ -1,2 +1,2 @@
-{"instrument_id": "TWSE:2330", "ex_date": "2026-06-12", "kind": "cash_dividend", "factor": 0.99596, "cash_amount": 4.0, "ratio": null, "source": "finmind.TaiwanStockDividendResult", "available_at": "2026-06-13T18:40:00+08:00"}
-{"instrument_id": "TWSE:0050", "ex_date": "2025-06-18", "kind": "split", "factor": 0.25, "cash_amount": null, "ratio": 4.0, "source": "windscope.price_gap_detect", "available_at": "2025-06-18T18:35:00+08:00"}
+{"instrument_id": "TWSE:2330", "ex_date": "2026-06-12", "kind": "cash_dividend", "factor": 0.99596, "cash_amount": 4.0, "ratio": null, "source": "finmind.TaiwanStockDividendResult", "published_at": "2026-06-13T18:40:00+08:00", "ingested_at": "2026-06-13T18:40:00+08:00"}
+{"instrument_id": "TWSE:0050", "ex_date": "2025-06-18", "kind": "split", "factor": 0.25, "cash_amount": null, "ratio": 4.0, "source": "windscope.price_gap_detect", "published_at": "2025-06-18T18:35:00+08:00", "ingested_at": "2025-06-18T18:35:00+08:00"}

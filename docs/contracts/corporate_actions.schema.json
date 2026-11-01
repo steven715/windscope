@@ -1,26 +1,70 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "windscope/contracts/corporate_actions/0.1",
+  "$id": "windscope/contracts/corporate_actions/0.2",
   "title": "CorporateAction",
   "description": "公司行為（參考資料）。還原股價 = f(bars, corporate_actions) 的純函式輸出，契約只傳事件、不傳還原後價格。",
   "type": "object",
-  "required": ["instrument_id", "ex_date", "kind", "factor", "source", "available_at"],
+  "required": [
+    "instrument_id",
+    "ex_date",
+    "kind",
+    "factor",
+    "source",
+    "published_at",
+    "ingested_at"
+  ],
   "additionalProperties": false,
   "properties": {
-    "instrument_id": { "type": "string", "pattern": "^(TWSE|TPEX):[A-Z0-9]+$" },
-    "ex_date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "instrument_id": {
+      "type": "string",
+      "pattern": "^(TWSE|TPEX):[A-Z0-9]+$"
+    },
+    "ex_date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
     "kind": {
       "type": "string",
-      "enum": ["cash_dividend", "stock_dividend", "split", "reverse_split", "capital_reduction"]
+      "enum": [
+        "cash_dividend",
+        "stock_dividend",
+        "split",
+        "reverse_split",
+        "capital_reduction"
+      ]
     },
     "factor": {
       "type": "number",
       "exclusiveMinimum": 0,
       "description": "除權息後價 / 除權息前價 的比例（與現行 stock_dividends.factor 同義）；分割 1:2 → 0.5"
     },
-    "cash_amount": { "type": ["number", "null"], "minimum": 0, "description": "現金股利（元/股），可選" },
-    "ratio": { "type": ["number", "null"], "description": "配股/分割比例，可選" },
-    "source": { "type": "string" },
-    "available_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$" }
+    "cash_amount": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "現金股利（元/股），可選"
+    },
+    "ratio": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "配股/分割比例，可選"
+    },
+    "source": {
+      "type": "string"
+    },
+    "published_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
+      "description": "可知時刻：公司行為公告可被知道的時刻（來源沒給時依公告規則推算並在 source 註明）"
+    },
+    "ingested_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
+      "description": "取得時刻：系統實際拿到的時刻"
+    }
   }
 }

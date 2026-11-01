@@ -1,0 +1,127 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "windscope/contracts/account_snapshots/0.1",
+  "title": "AccountSnapshot (tradewind → windscope / wallet)",
+  "description": "券商回報的帳戶快照（tradewind 01-objects 的 AccountSnapshot）。tradewind 只用它對帳；windscope 與未來的個人資產彙總專案用它看部位與權益。只增不改，每筆帶 run_mode。",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "snapshot_id",
+    "run_mode",
+    "account_id",
+    "account_kind",
+    "as_of",
+    "ingested_at",
+    "source",
+    "equity",
+    "positions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "snapshot_id": {
+      "type": "string",
+      "minLength": 8
+    },
+    "run_mode": {
+      "type": "string",
+      "enum": [
+        "backtest",
+        "replay",
+        "paper",
+        "shioaji_sim",
+        "shioaji_live"
+      ]
+    },
+    "account_id": {
+      "type": "string"
+    },
+    "account_kind": {
+      "type": "string",
+      "enum": [
+        "FUTURES",
+        "STOCK"
+      ]
+    },
+    "as_of": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
+      "description": "快照代表的時刻"
+    },
+    "ingested_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "broker",
+        "sim"
+      ]
+    },
+    "cash_balance": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "equity": {
+      "type": "number",
+      "description": "期貨＝權益數；證券＝現金＋持倉市值"
+    },
+    "unrealized_pnl": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "initial_margin_used": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "available_margin": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "positions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "instrument_id",
+          "qty"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "instrument_id": {
+            "type": "string",
+            "pattern": "^(TWSE|TPEX|TAIFEX):[A-Z0-9]+$"
+          },
+          "qty": {
+            "type": "number",
+            "description": "帶正負；期貨空單為負"
+          },
+          "avg_price": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "market_value": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}
