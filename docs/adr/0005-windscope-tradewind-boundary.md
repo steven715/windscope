@@ -1,6 +1,7 @@
 # ADR-0005：windscope（資料＋研究層）與 tradewind（交易引擎）的邊界
 
 - **狀態**：Proposed（等 tradewind 上 GitHub、雙 repo session 定稿後改 Accepted）
+- **層名**（2026-11-01 定案）：Insight → Playbook/Trade Plan → Trade Management → Risk Management → Execution，反向 Events。
 - **日期**：2026-11-01
 - **脈絡背景**：使用者釐清長期目標後，把專案定位成兩層：windscope 是「只要有原始資料就能
   重導一切」的基礎設施＋研究層；tradewind 是接真行情、跑模擬盤、最終自動化交易的引擎
@@ -42,8 +43,15 @@ tradewind 需要在每根新 bar 上算的任何東西（趨勢三態、乖離�
 與 windscope 回測**同一份 code**（`f(bars, params) -> signal`，不碰 DB、不碰網路）。windscope 現有的
 `trend_signal.evaluate_series` 已是這個形狀，是第一個要抽出來的。tradewind **不得**自己重寫特徵。
 
-### 4. targets 的語意
+### 4. targets 的語意：Insight ＋ Trade Plan
 
+- 一筆 target ＝ 一個 **Insight**（對市場的主張：方向、信心、有效期、**失效條件**；可對可錯、與帳戶無關）
+  ＋ 一份 **Trade Plan**（對行動的約束：由 **Playbook** 模板填出的當日實例，帶帳戶參數；盤前鎖定）。
+  兩者分開，才分得出「判斷錯」還是「執行差」。LEAN 把後者拆散在 Portfolio Construction 與 Risk 裡、
+  又沒有失效條件的一級概念，所以會發生停損平倉後 rebalance 又買回。
+- tradewind 的 **Trade Management** 只能做 Trade Plan 列出的動作、停損只能收緊、不能翻向；
+  裁量只在 `discretion_allowed` 內，且每次記成 override 回流。
+- **Risk Management** 是帳戶層級、與策略無關：停手線、連停、回吐、資料心跳、kill switch（不自動重啟）。
 - 是「希望的最終部位」（占 NAV 的權重，正多負空零空手），不是訂單；冪等（同 key 重送同值）。
 - tradewind 負責把現況調到目標；風控**只能縮小或歸零，不能翻向**。
 - 每筆帶 `strategy_id`／`rule_version`／`inputs_ref`，績效按版本分開記、可回 windscope 重導。
