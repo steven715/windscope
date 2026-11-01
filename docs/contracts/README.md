@@ -11,7 +11,7 @@
 | `instruments.schema.json` | windscope 產、兩邊讀 | 商品主檔：代碼規則、資產類別、合約規格、交易時段 |
 | `corporate_actions.schema.json` | windscope 產、兩邊讀 | 公司行為（除權息／分割）：還原股價的唯一來源 |
 | `targets.schema.json` | **windscope → tradewind** | 目標部位＝**Insight**（主張：方向/信心/有效期/失效）＋**Trade Plan**（行動約束：怎麼進/多大/何時減/何時認錯/什麼不做）；是最終狀態，不是訂單 |
-| `events`（待定義） | **tradewind → windscope** | 反向流：成交、Trade Plan 動作、override、風控觸發；由 tradewind 先提草案 |
+| `events.schema.json` | **tradewind → windscope** | 反向流：Trade Management 狀態轉換、委託、成交、override、風控、系統狀態、健康；每筆帶 `run_mode`，Paper 與實盤永不混算 |
 
 `fixtures/*.jsonl` 是每張表的範例列；兩個 repo 的 contract test 都讀同一份 fixture。
 
@@ -20,7 +20,7 @@
 1. **時區固定 `Asia/Taipei`**。所有 `ts`／`*_at` 都是帶 `+08:00` 的 ISO 8601；`session_date` 是 `YYYY-MM-DD`。
 2. **時點正確性（point-in-time）**：每一列都有 `available_at`＝系統**實際拿到它的時刻**。任何在決策時刻 `t` 做的計算，只能用 `available_at ≤ t` 的列。回測與模擬盤都遵守這條，兩邊才對得上。
 3. **bars 只放原始價**。還原（除權息／分割）是 `f(bars, corporate_actions)` 的純函式輸出，由共用策略庫算，不落在契約裡。這樣同一份 bars 能被不同還原方式重算。
-4. **targets 是目標狀態，不是訂單**。同一組 `(strategy_id, instrument_id, valid_from)` 重送必須得到同一個 target（冪等）；tradewind 負責把「現在部位」調到「目標部位」，怎麼下單、分幾筆是 tradewind 的事。**Insight 與 Trade Plan 分開**：Insight 可對可錯、與帳戶無關；Trade Plan 由 Playbook 模板填出、帶帳戶參數、盤前鎖定。Trade Management 只能做 Trade Plan 列出的動作、停損只能收緊；Risk Management **只能縮小或歸零，不能翻向**。
+4. **targets 是目標狀態，不是訂單**。同一組 `(strategy_id, instrument_id, valid_from, rule_version)` 重送必須得到同一個 target（冪等；`target_id` 就是這四欄的雜湊）；tradewind 負責把「現在部位」調到「目標部位」，怎麼下單、分幾筆是 tradewind 的事。**Insight 與 Trade Plan 分開**：Insight 可對可錯、與帳戶無關；Trade Plan 由 Playbook 模板填出、帶帳戶參數、盤前鎖定。Trade Management 只能做 Trade Plan 列出的動作、停損只能收緊；Risk Management **只能縮小或歸零，不能翻向**。
 5. **衍生資料不過契約**。`daily_metrics`、趨勢訊號的中間值、信心加減分細節都留在 windscope；tradewind 要用到的特徵，透過共用純函式庫 import 同一份 code 重算，不透過資料交換。
 
 ## 代碼規則（`instrument_id`）
@@ -36,6 +36,19 @@
 | `TAIFEX:TX` | 台指期**連續**（換月規則在 instruments） |
 | `TAIFEX:TXF202606` | 台指期特定月份合約 |
 | `FX:USDTWD` | 匯率（不可交易，參考用） |
+
+## 串流與回放（bars）
+
+- 串流推兩種東西：**逐筆 tick**（`resolution=tick`）與**已收完的 1 分 K**（在 `end` 時刻發出，`available_at ≥ ts + 1m`）。
+  **絕不推未收完的 K 棒**：否則回放只剩最後一版，做不到逐筆相同。較粗週期（5m、15m…）由消費端自行合成。
+- 歷史回放用同一份 schema、同一個順序（先 tick 後該分鐘的 1m bar）；tradewind 的引擎只看到一條迭代器。
+- `invalidation.conditions[].field=last` 指最新 tick 的成交價；只有 1m bar 可用時退回最近收完那根的 close。
+- 心跳：串流每 N 秒（起始 5）送一筆 `{"heartbeat": ts}`；消費端的 data-age 規則以它為準。
+
+## 保證金
+
+`instruments.initial_margin / maintenance_margin`（TWD/口）由 windscope 依期交所公告更新，`as_of` 為生效日；
+tradewind 算口數時取「`trade_plan.risk` 反推的口數」與「可用保證金÷原始保證金×緩衝」的較小者。fixture 的數字為示意。
 
 ## 時段與歸屬
 
@@ -76,5 +89,5 @@
 - [ ] `target_weight` 的基準是淨值（NAV）還是可用現金？v0 定 **NAV**。
 - [ ] `valid_until` 到期時 tradewind 是「自動平倉」還是「只停止新進」？v0 定 **只停止新進**，平倉由策略明確送 `weight=0`。
 - [x] ~~要不要在 targets 帶 `stop_hint`~~ → 已以 `trade_plan.risk.stop_pts`（初始停損，只能收緊）與 `invalidation`（失效≠停損）取代。
-- [ ] `events` 反向流的 schema：由 tradewind 提草案（欄位建議見 `tradewind-brief.md` §5）。
+- [x] ~~`events` 反向流的 schema~~ → 已起草 `events.schema.json`（kind/action 對照 tradewind 01-objects 的 Fill、OrderEvent、RiskDecision、SystemEvent），等 tradewind 端對稱測試。
 - [ ] 盤前判斷目前沒有失效條件，產 Insight 時 `invalidation` 要從哪裡來（價差門檻反推？夜盤低點？）。

@@ -26,10 +26,10 @@
 
 | | windscope | tradewind |
 |---|---|---|
-| 擁有 | 原始資料（bars）、參考資料（instruments、corporate_actions、交易日曆）、衍生指標、回測、驗證與統計、**targets 的產出** | 行情源 adapter、帳本（部位／現金／成交）、PortfolioTarget 的落實（目標→訂單）、風控、模擬成交、之後的真下單 |
-| 時間性 | 歷史、離線、可重算 | 實時、線上、有狀態 |
+| 擁有 | 原始資料（bars，**含行情串接與即時串流**）、參考資料（instruments、corporate_actions、交易日曆）、衍生指標、回測、驗證與統計、**targets 的產出**、events 的入庫與評分 | 訂閱 bars 串流、Trade Plan 載入、Trade Management、Risk Management、帳本（部位／現金／成交）、目標→訂單、模擬成交、之後的真下單、events 回流 |
+| 時間性 | 歷史可重算；**盤中常駐只做行情串接與落地**（不決策） | 實時、線上、有狀態 |
 | 真相來源 | `f(raw, config)` | 帳本 |
-| 不做 | 下單、帳本、盤中常駐（`/live` 唯讀除外） | 重算特徵、自己抓歷史資料、自己定義還原規則 |
+| 不做 | 下單、帳本、盤中決策（`/live` 唯讀） | 重算特徵、自己接行情、自己抓歷史資料、自己定義還原規則 |
 
 ### 2. 介面只有一份，放 `docs/contracts/`
 

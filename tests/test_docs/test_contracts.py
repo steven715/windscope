@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 CONTRACTS = Path(__file__).resolve().parents[2] / "docs" / "contracts"
-TABLES = ["bars", "instruments", "corporate_actions", "targets"]
+TABLES = ["bars", "instruments", "corporate_actions", "targets", "events"]
 
 _TYPES = {
     "string": lambda v: isinstance(v, str),
@@ -111,11 +111,11 @@ def test_validator_rejects_bad_rows():
 
 
 def test_targets_are_idempotent_by_key():
-    """同 (strategy_id, instrument_id, valid_from) 只能有一個 target_id。"""
+    """同 (strategy_id, instrument_id, valid_from, rule_version) 只能有一個 target_id。"""
     _, rows = _load("targets")
     seen: dict[tuple, str] = {}
     for r in rows:
-        key = (r["strategy_id"], r["instrument_id"], r["valid_from"])
+        key = (r["strategy_id"], r["instrument_id"], r["valid_from"], r["rule_version"])
         assert seen.setdefault(key, r["target_id"]) == r["target_id"], key
 
 
@@ -134,3 +134,31 @@ def test_night_bars_attribute_to_next_session_date():
     for b in bars:
         if b["session"] == "night":
             assert b["session_date"] > b["ts"][:10], b
+
+
+def test_events_reference_known_targets_and_tradable_instruments():
+    """events 的 target_id 必須存在於 targets fixture；instrument 必須可交易；event_id 唯一。"""
+    _, targets = _load("targets")
+    _, instruments = _load("instruments")
+    _, events = _load("events")
+    target_ids = {t["target_id"] for t in targets}
+    tradable = {i["instrument_id"] for i in instruments if i["tradable"]}
+    seen = set()
+    for e in events:
+        assert e["event_id"] not in seen, e["event_id"]
+        seen.add(e["event_id"])
+        if e["target_id"] is not None:
+            assert e["target_id"] in target_ids, e["target_id"]
+        if e["instrument_id"] is not None:
+            assert e["instrument_id"] in tradable, e["instrument_id"]
+        if e["kind"] == "override":
+            assert e["reason"], "override 必須有理由"
+            assert e["action"] in ("early_exit", "reduce")
+
+
+def test_stream_bars_never_partial():
+    """串流只推收完的 K 棒：1m bar 的 available_at 不早於 ts + 1 分鐘（tick 除外）。"""
+    _, bars = _load("bars")
+    for b in bars:
+        if b["resolution"] == "1m":
+            assert b["available_at"][11:16] > b["ts"][11:16], b

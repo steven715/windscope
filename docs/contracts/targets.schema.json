@@ -28,7 +28,7 @@
     "target_id": {
       "type": "string",
       "minLength": 8,
-      "description": "確定性雜湊 sha256(strategy_id|instrument_id|valid_from|rule_version) 前 16 碼；重送同值"
+      "description": "確定性雜湊 sha256(strategy_id|instrument_id|valid_from|rule_version) 前 16 碼；冪等鍵＝這四個欄位（同一天同策略同商品、規則版本不變 → 同一個 target）"
     },
     "strategy_id": {
       "type": "string",
@@ -200,7 +200,7 @@
                 "null"
               ],
               "minimum": 0,
-              "description": "追價上限（點），超過放棄"
+              "description": "追價上限（該商品價格單位），超過放棄"
             }
           }
         },
@@ -221,7 +221,7 @@
             "stop_pts": {
               "type": "number",
               "exclusiveMinimum": 0,
-              "description": "初始停損距離（點）；Trade Management 只能收緊"
+              "description": "初始停損距離，單位＝該商品的價格單位（期貨＝指數點、現股＝元）；Trade Management 只能收緊"
             },
             "max_units": {
               "type": [
