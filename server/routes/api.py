@@ -201,7 +201,6 @@ def query_stats(request: Request, last_n: int = 20) -> dict:
         return get_verification_stats(conn, last_n=last_n)
 
 
-<<<<<<< HEAD
 # ── 契約 I/O（docs/contracts v0.2）：JSON 信封 {schema_version, count, records} ─────────────
 
 
@@ -312,7 +311,8 @@ def query_snapshots(request: Request, date: str | None = None,
     with get_connection(request.app.state.db_path) as conn:
         rows = snapshots_list(conn, date, run_mode, max(1, min(limit, _MAX_ROWS)))
     return _envelope("account_snapshots", rows)
-=======
+
+
 @router.get("/call-stats")
 def query_call_stats(request: Request, rule_version: str | None = None,
                      date_from: str | None = None, date_to: str | None = None,
@@ -326,9 +326,6 @@ def query_call_stats(request: Request, rule_version: str | None = None,
     with get_connection(request.app.state.db_path) as conn:
         return build_call_stats(conn, rule_version or None, date_from or None,
                                 date_to or None, cost_bps)
->>>>>>> origin/main
-
-
 @router.get("/live")
 def query_live(request: Request) -> dict:
     """盤中即時驗證：當日訊號 + 即時加權指數雙基準比對。讀背景快取，瞬間返回。"""
