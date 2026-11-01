@@ -1,0 +1,353 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "windscope/contracts/targets/0.1",
+  "title": "PortfolioTarget (Insight + Trade Plan)",
+  "description": "windscope → tradewind 的目標部位。Insight（對市場的主張：方向/信心/有效期/失效）＋ Trade Plan（對行動的約束：怎麼進、多大、何時減、何時認錯、什麼不做）。是「希望的最終狀態」不是訂單；冪等；Risk Management 只能縮小或歸零、不能翻向。",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "target_id",
+    "strategy_id",
+    "rule_version",
+    "instrument_id",
+    "target_weight",
+    "horizon",
+    "produced_at",
+    "valid_from",
+    "valid_until",
+    "inputs_ref",
+    "invalidation",
+    "trade_plan"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "target_id": {
+      "type": "string",
+      "minLength": 8,
+      "description": "確定性雜湊 sha256(strategy_id|instrument_id|valid_from|rule_version) 前 16 碼；重送同值"
+    },
+    "strategy_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "策略代碼：premarket_call / trend_signal / …"
+    },
+    "rule_version": {
+      "type": "string",
+      "description": "該策略的規則版本（v3、t2…）；不同版本績效分開記"
+    },
+    "instrument_id": {
+      "type": "string",
+      "pattern": "^(TWSE|TPEX|TAIFEX):[A-Z0-9]+$"
+    },
+    "target_weight": {
+      "type": "number",
+      "minimum": -1,
+      "maximum": 1,
+      "description": "目標曝險占 NAV 比例；正=多、負=空、0=空手/出場"
+    },
+    "target_quantity": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "可選：策略直接指定數量（股/口）時填；與 target_weight 並存時以 quantity 為準"
+    },
+    "conviction": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "信心 0–1（盤前判斷 信心/5；趨勢 big_trend_confidence）；tradewind 可用來縮放，不可用來翻向"
+    },
+    "horizon": {
+      "type": "string",
+      "enum": [
+        "intraday",
+        "swing",
+        "position"
+      ],
+      "description": "intraday=當日了結 / swing=數日到數週 / position=跟大勢"
+    },
+    "produced_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$"
+    },
+    "valid_from": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
+      "description": "最早可據以行動的時刻（盤前判斷 = 當日 08:50）"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
+      "description": "過期後不得再據以「新進」；是否平倉由策略另送 weight=0 決定。null=直到下一個同策略同商品 target 取代"
+    },
+    "invalidation": {
+      "type": "object",
+      "description": "Insight 的失效條件：成立代表「這個主張已不成立」→ 未進場撤單、已進場出場。與停損不同（停損是錯了虧多少走）。",
+      "required": [
+        "text"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "人可讀、可事後核對的一句話"
+        },
+        "conditions": {
+          "type": "array",
+          "description": "可機器判定的子條件，任一成立即失效；省略代表只有人工判定",
+          "items": {
+            "type": "object",
+            "required": [
+              "instrument_id",
+              "field",
+              "op",
+              "value"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "instrument_id": {
+                "type": "string",
+                "pattern": "^(TWSE|TPEX|TAIFEX|FX):[A-Z0-9]+$"
+              },
+              "field": {
+                "type": "string",
+                "enum": [
+                  "close",
+                  "low",
+                  "high",
+                  "last"
+                ]
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "<",
+                  "<=",
+                  ">",
+                  ">="
+                ]
+              },
+              "value": {
+                "type": "number"
+              },
+              "until": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\+08:00$",
+                "description": "只在此時刻前檢查（例如「開盤 30 分內」）；null＝整個有效期"
+              }
+            }
+          }
+        }
+      }
+    },
+    "trade_plan": {
+      "type": "object",
+      "description": "Trade Plan：由 Playbook（模板，策略層、有版本）填出的當日實例，帶帳戶參數；盤前鎖定、盤中只執行。數值的預設來源是 windscope settings，這裡放的是這一筆實際採用的值。",
+      "required": [
+        "playbook_id",
+        "playbook_version",
+        "risk"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "playbook_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "模板代碼，例如 pullback_hold"
+        },
+        "playbook_version": {
+          "type": "string",
+          "description": "模板版本；改任一規則就 bump"
+        },
+        "entry": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "window_from": {
+              "type": "string",
+              "pattern": "^\\d{2}:\\d{2}$"
+            },
+            "window_to": {
+              "type": "string",
+              "pattern": "^\\d{2}:\\d{2}$"
+            },
+            "trigger": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "觸發條件（v0 為可核對的文字，v1 再結構化）"
+            },
+            "chase_limit_pts": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "description": "追價上限（點），超過放棄"
+            }
+          }
+        },
+        "risk": {
+          "type": "object",
+          "required": [
+            "r_pct",
+            "stop_pts"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "r_pct": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 5,
+              "description": "1R 占 NAV 的 %"
+            },
+            "stop_pts": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "初始停損距離（點）；Trade Management 只能收緊"
+            },
+            "max_units": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "description": "口數/張數上限；tradewind 依保證金與 r_pct 取較小者"
+            }
+          }
+        },
+        "scaling": {
+          "type": "array",
+          "description": "分批規則，依 at_r 遞增",
+          "items": {
+            "type": "object",
+            "required": [
+              "at_r",
+              "exit_fraction"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "at_r": {
+                "type": "number",
+                "description": "未實現達幾 R 時觸發"
+              },
+              "exit_fraction": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "move_stop_to": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "breakeven",
+                  "prev_bar_low",
+                  "prev_bar_high",
+                  null
+                ],
+                "description": "同時把停損移到哪"
+              }
+            }
+          }
+        },
+        "exit": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "runner_rule": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 200,
+              "description": "剩餘部位的出場規則（裁量只允許在這裡提早出場）"
+            },
+            "force_flat_at": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^\\d{2}:\\d{2}$",
+              "description": "intraday 強制平倉時刻"
+            }
+          }
+        },
+        "no_trade": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "description": "不做條件，寫成可核對的句子（命中任一就不新進）"
+        },
+        "discretion_allowed": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "early_exit",
+              "reduce"
+            ]
+          },
+          "description": "允許的裁量動作；加碼與翻向永遠不在此列"
+        }
+      }
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 200,
+      "description": "一句話理由（給人看、給 LLM 讀）"
+    },
+    "inputs_ref": {
+      "type": "object",
+      "description": "出處：讓 tradewind/事後稽核能回到 windscope 重導這個 target",
+      "required": [
+        "source_table",
+        "key"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source_table": {
+          "type": "string",
+          "description": "signals / stock_trend_signals / …"
+        },
+        "key": {
+          "type": "object",
+          "description": "該表主鍵，例如 {\"date\":\"2026-06-12\"} 或 {\"date\":…, \"stock_id\":…}"
+        },
+        "inputs_hash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "可選：盤前輸入的雜湊，用於重導比對"
+        }
+      }
+    }
+  }
+}

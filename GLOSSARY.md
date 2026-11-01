@@ -240,6 +240,65 @@ _Avoid_: 金字塔加碼
 **出場原因**（Exit reason）：
 大勢轉向、超買減碼、回測結束平倉三者之一。
 
+### 跨專案契約（windscope ⇄ tradewind）
+
+**契約**（Contract）：
+windscope 與 tradewind 唯一共同讀的介面定義：`docs/contracts/` 的 schema、fixture 與語意規則。改介面＝先改契約、兩邊 contract test 都綠。
+
+**商品**（Instrument）：
+可被報價或交易的標的，以 `{market}:{symbol}` 識別（`TWSE:2330`、`TAIFEX:TX`、`FX:USDTWD`）；主檔記資產類別、合約規格、交易時段、是否可交易。
+_Avoid_: 標的（未指明時）、股票（泛指時）
+
+**K 線列**（Bar）：
+契約中統一的價格列：商品、粒度、時段、歸屬交易日、開始時刻、原始 OHLCV、來源與可得時刻。**只放原始價**，還原是純函式輸出。
+
+**可得時刻**（Available-at）：
+系統實際取得某列資料的時刻。時點正確性規則：在決策時刻 t 的任何計算只能用可得時刻 ≤ t 的列。
+_Avoid_: 收集時間（口語可，契約用可得時刻）
+
+**時點正確性**（Point-in-time）：
+回測與模擬盤都只用「當時已知」的資料；由可得時刻保證，是兩邊結果能對得上的前提。
+_Avoid_: 無未來函數（口語可）
+
+**公司行為**（Corporate action）：
+除權息、分割、減資等影響價格連續性的事件；還原股價的唯一輸入。
+
+**Insight**（市場觀點）：
+對市場的主張：方向、信心、有效期（`valid_from/until`）與**失效條件**（`invalidation`），不含任何「我要怎麼做」。可被打分對／錯。盤前判斷與趨勢訊號都是 Insight 的生產者。對應 LEAN 的 Insight，多了失效條件。
+_Avoid_: 訊號、命題、預測
+
+**失效條件**（Invalidation）：
+Insight 不再成立的條件；成立時未進場撤單、已進場出場。與停損不同：停損是「錯了虧多少走」，失效是「這個機會已經不存在」。
+
+**Playbook**（戰術手冊）：
+策略層的 Trade Plan **模板**，有版本（`playbook_id`／`playbook_version`）；規定進場窗口與觸發、追價上限、1R 與停損、分批、runner 出場、不做條件、允許的裁量動作。
+_Avoid_: 預案模板、SOP
+
+**Trade Plan**（交易計畫）：
+由 Playbook 填出的**當日實例**，帶帳戶參數（口數、金額）；盤前鎖定、盤中只執行。可被打分「有沒有照做」與「有沒有幫助」（同一組進場有／無 Trade Plan 的回撤差）。
+_Avoid_: 預案、計畫（未指明時）
+
+**Trade Management**（持倉管理）：
+tradewind 在盤中依 Trade Plan 對持倉做的動作：觸發進場、失效出場、分批、停損只收緊、runner 出場。只能讀少數狀態變數、只能做 Trade Plan 列出的動作、**不能翻向**；裁量只允許在 `discretion_allowed` 列出的動作，且每次都記成 override。
+_Avoid_: 盤中反應、盤中應對、風控（那是帳戶層）
+
+**Risk Management**（風控）：
+帳戶層級、與策略無關的保護：日／週／月停手線、連續停損次數、獲利回吐線、資料心跳（data-age）、kill switch（觸發後不自動重啟）。只能縮小或歸零部位，不能翻向。與 LEAN 的 per-position Risk Model 不同層。
+_Avoid_: 保護層、停損（那是 Trade Plan 的參數）
+
+**Override**（裁量介入）：
+在 Trade Management 中人為做出 Trade Plan 允許範圍內的動作（例如提早出場）；每次都回流為一筆 event，與「照計畫做」分開統計，沒加分就收回該項裁量。
+
+**Events**（事件回流）：
+tradewind → windscope 的反向流：成交、Trade Plan 動作、override、風控觸發，每筆帶 `target_id`；是評分 Trade Plan、Trade Management 與風控的唯一依據。
+
+**目標部位**（Portfolio target）：
+windscope 送給 tradewind 的「希望的最終部位」＝一個 Insight 加一份 Trade Plan：商品、占淨值權重（正多／負空／零空手）、信心、期間、失效條件、交易計畫、出處。是狀態不是訂單；冪等；風控只能縮小或歸零、不能翻向。
+_Avoid_: 訂單、下單指令、交易訊號
+
+**共用策略庫**（Shared strategy library）：
+回測與交易引擎 import 的同一份純函式（`f(bars, params) -> signal`），不碰 DB 與網路；tradewind 不得自行重算特徵。
+
 ## Flagged ambiguities
 
 - 「訊號」單獨使用已禁用——一律說盤前判斷、籌碼觀察、趨勢訊號或籌碼傾向。

@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "windscope/contracts/instruments/0.1",
+  "title": "Instrument",
+  "description": "商品主檔（參考資料）。tradewind 的成交模擬與風控讀這裡的規格，不自己猜。",
+  "type": "object",
+  "required": ["instrument_id", "market", "symbol", "asset_class", "currency", "tradable", "as_of"],
+  "additionalProperties": false,
+  "properties": {
+    "instrument_id": { "type": "string", "pattern": "^(TWSE|TPEX|TAIFEX|FX):[A-Z0-9]+$" },
+    "market": { "type": "string", "enum": ["TWSE", "TPEX", "TAIFEX", "FX"] },
+    "symbol": { "type": "string", "pattern": "^[A-Z0-9]+$" },
+    "name": { "type": ["string", "null"], "description": "顯示名稱（中文可）" },
+    "asset_class": {
+      "type": "string",
+      "enum": ["equity", "etf", "index", "future", "fx"]
+    },
+    "currency": { "type": "string", "enum": ["TWD", "USD"] },
+    "tradable": {
+      "type": "boolean",
+      "description": "false 代表只供參考/計算（指數、匯率），tradewind 不得對其產生部位"
+    },
+    "tick_size": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+    "lot_size": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "股票整張=1000 股；期貨=1 口"
+    },
+    "multiplier": {
+      "type": ["number", "null"],
+      "exclusiveMinimum": 0,
+      "description": "期貨每點價值（台指期 200、小台 50、微台 10）；股票為 1"
+    },
+    "price_limit_pct": {
+      "type": ["number", "null"],
+      "description": "漲跌幅限制 %（台股 10；期貨 10；無限制為 null）"
+    },
+    "underlying": {
+      "type": ["string", "null"],
+      "description": "期貨/ETF 的標的 instrument_id（台指期 → TWSE:TAIEX）"
+    },
+    "expiry": {
+      "type": ["string", "null"],
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "特定月份合約的最後交易日；連續合約與現貨為 null"
+    },
+    "roll_rule": {
+      "type": ["string", "null"],
+      "description": "連續合約換月規則代碼（例如 days_before_expiry:3）。v0 待定，由 tradewind 決定"
+    },
+    "sessions": {
+      "type": "object",
+      "description": "交易時段（HH:MM，Asia/Taipei）；夜盤 close 小於 open 代表跨日",
+      "additionalProperties": false,
+      "properties": {
+        "regular": { "$ref": "#/$defs/session" },
+        "night": { "$ref": "#/$defs/session" }
+      }
+    },
+    "active": { "type": "boolean", "default": true },
+    "as_of": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "description": "此筆主檔資料生效日"
+    }
+  },
+  "$defs": {
+    "session": {
+      "type": "object",
+      "required": ["open", "close"],
+      "additionalProperties": false,
+      "properties": {
+        "open": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+        "close": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" }
+      }
+    }
+  }
+}
