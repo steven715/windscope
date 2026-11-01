@@ -54,6 +54,9 @@ def run_before_open(date: str, db_path: str | None = None) -> dict:
         # 5. Layer 3: 盤前判斷 + 籌碼觀察（休市日跳過，不寫 signals 表）
         if trading:
             signal = job.step("signal", lambda: _compute_signals(date, conn))
+            # 5b. 契約 target（Insight＋Trade Plan）：有盤前判斷才產；失敗不影響訊號與摘要
+            if signal:
+                job.step("target", lambda: _build_target(date, conn))
 
         # 6. 產出 daily summary 文字摘要（交易日附盤前判斷區塊；休市日只更新匯率統計）
         summary_text = job.step("summary", lambda: _generate_summary(date, conn))
@@ -101,6 +104,13 @@ def _compute_signals(date: str, conn: sqlite3.Connection) -> dict | None:
     result = compute_premarket_call(date, conn)
     refresh_chip_observations(date, conn)  # 分點＋外資籌碼觀察（只看 date 之前）
     return result
+
+
+def _build_target(date: str, conn: sqlite3.Connection) -> dict | None:
+    """盤前判斷 → 契約 target 寫入 targets 表（None＝失敗）。"""
+    from integration.targets_builder import build_premarket_target
+
+    return build_premarket_target(date, conn)
 
 
 def _generate_summary(date: str, conn: sqlite3.Connection) -> str | None:

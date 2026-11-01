@@ -301,3 +301,32 @@ def test_before_open_computes_signal_and_summary_once(memory_db, monkeypatch):
     assert counts == {"signal": 1, "summary": 1}
     assert result["summary"] == "摘要\n訊號"
     assert result["results"]["signal"] is True
+
+
+def test_before_open_builds_contract_target_after_signal(memory_db, monkeypatch):
+    """交易日有盤前判斷 → 多一步 target 寫入 targets 表（契約 v0.2）。"""
+    from jobs import before_open
+    from db.targets import targets_list
+
+    monkeypatch.setattr(before_open, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(before_open, "notify", lambda *a, **k: None)
+    monkeypatch.setattr(before_open, "_compute_fx", lambda d, c: True)
+    import collectors.fx as fx_mod
+    monkeypatch.setattr(fx_mod.FXCollector, "collect_and_save_pair", lambda self, *a, **k: True)
+    monkeypatch.setattr(fx_mod.FXCollector, "collect_twd_intraday", lambda self: None)
+    memory_db.execute(
+        "INSERT INTO daily_metrics (date, fx_delta_twd, fx_direction, futures_spread_adjusted) "
+        "VALUES ('2026-06-12', -0.15, 'bullish', 150.0)")
+    memory_db.execute("INSERT INTO raw_index (date, low, high, close) VALUES ('2026-06-11', 22850, 23010, 22980)")
+    memory_db.commit()
+
+    with patch("jobs.before_open.get_connection") as mock_conn:
+        mock_conn.return_value.__enter__ = lambda s: memory_db
+        mock_conn.return_value.__exit__ = lambda s, *a: None
+        result = before_open.run_before_open("2026-06-12")
+
+    assert result["results"]["signal"] is True
+    assert result["results"]["target"] is True
+    targets = targets_list(memory_db, session_date="2026-06-12")
+    assert len(targets) == 1 and targets[0]["strategy_id"] == "premarket_call"
+    assert targets[0]["invalidation"]["conditions"][0]["value"] == 22850.0
