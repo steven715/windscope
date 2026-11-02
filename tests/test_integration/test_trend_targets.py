@@ -45,9 +45,15 @@ def _sig(db, date=D, stock="2330", big="UP", action="關注建倉區", position=
                    "VALUES (?, ?, ?, ?, ?, ?, 1)", (date, stock, close, close, close, close))
 
 
-def test_tranche_weights_three_equal_by_default():
-    assert settings.BACKTEST_MAX_UNITS == 3 and settings.BACKTEST_TRANCHE_SIZING == "equal"
+def test_cumulative_weight_follows_backtest_tranches(monkeypatch):
+    monkeypatch.setattr(settings, "BACKTEST_ENTRY_MODE", "scaled")
+    monkeypatch.setattr(settings, "BACKTEST_MAX_UNITS", 3)
+    monkeypatch.setattr(settings, "BACKTEST_TRANCHE_SIZING", "equal")
     assert [cumulative_weight(u) for u in (0, 1, 2, 3, 4)] == [0.0, 0.3333, 0.6667, 1.0, 1.0]
+    monkeypatch.setattr(settings, "BACKTEST_TRANCHE_SIZING", "decreasing")
+    assert [cumulative_weight(u) for u in (1, 2, 3)] == [0.5, 0.8333, 1.0]
+    monkeypatch.setattr(settings, "BACKTEST_ENTRY_MODE", "single")
+    assert [cumulative_weight(u) for u in (1, 2)] == [1.0, 1.0]
 
 
 def test_decide_units_mirrors_backtest_branches():
@@ -60,6 +66,9 @@ def test_decide_units_mirrors_backtest_branches():
     assert decide_units(2, "UP", "觀望", "減倉", None)[0] == 1
     assert decide_units(2, "FLAT", "震盪不操作", "持有", None)[0] == 0
     assert decide_units(0, "DOWN", "迴避", "—", None)[0] == 0
+    assert decide_units(0, "UP", "關注建倉區", "可加倉", None, gate_fail=True)[0] == 0   # 閘門 FAIL：不開
+    assert decide_units(1, "UP", "觀望", "可加倉", 9, gate_fail=True)[0] == 1          # 不加
+    assert decide_units(2, "UP", "觀望", "減倉", None, gate_fail=True)[0] == 1         # 但准減
 
 
 def test_first_entry_target_matches_contract(db):
@@ -67,7 +76,7 @@ def test_first_entry_target_matches_contract(db):
     rec = build_trend_target(D, "2330", db, produced_at=f"{D}T18:45:10+08:00")
     assert validate_record("targets", rec) == []
     assert rec["strategy_id"] == STRATEGY_ID and rec["instrument_id"] == "TWSE:2330"
-    assert rec["target_weight"] == 0.3333 and rec["conviction"] == 0.72 and rec["horizon"] == "swing"
+    assert rec["target_weight"] == 0.3333 and rec["conviction"] is None and rec["horizon"] == "swing"
     assert rec["valid_from"] == f"{NEXT}T09:00:00+08:00" and rec["valid_until"] is None and rec["locked_at"] is None
     assert rec["rule_version"] == f"t2-{settings.BACKTEST_RULE_VERSION}"
     inv = rec["invalidation"]["conditions"][0]
@@ -118,8 +127,9 @@ def test_trim_carries_previous_plan_and_one_tranche_trim_means_flat(db):
 
 
 def test_trend_exit_emits_weight_zero_with_previous_plan(db):
+    """DOWN 日的 big_trend_confidence 是負斜率、且那天可能沒有收盤價列——出場 target 仍要發得出來。"""
     _sig(db); first = build_trend_target(D, "2330", db)
-    _sig(db, date="2026-06-15", big="FLAT", action="震盪不操作", position="持有", close=950.0, center=None)
+    _sig(db, date="2026-06-15", big="FLAT", action="震盪不操作", position="持有", close=None, center=None, conf=-0.0312)
     rec = build_trend_target("2026-06-15", "2330", db)
     assert rec["target_weight"] == 0.0 and rec["inputs_ref"]["key"]["units"] == 0
     assert rec["trade_plan"] == first["trade_plan"] and rec["invalidation"] == first["invalidation"]
@@ -139,6 +149,12 @@ def test_gate_unknown_assumed_pass_but_fail_blocks(db, monkeypatch):
     monkeypatch.setattr(settings, "BACKTEST_ASSUME_GATE_PASS", True)
     _sig(db, gate="FAIL", action="迴避")
     assert build_trend_target(D, "2330", db) is None
+    # 已持有時閘門轉 FAIL：不加碰、仍准減
+    _sig(db, gate="PASS"); build_trend_target(D, "2330", db)
+    _sig(db, date="2026-06-17", gate="FAIL", action="迴避", position="可加倉", close=975.0)
+    assert build_trend_target("2026-06-17", "2330", db) is None
+    _sig(db, date="2026-06-18", gate="FAIL", action="迴避", position="減倉", small="超買遠離", close=1100.0)
+    assert build_trend_target("2026-06-18", "2330", db)["target_weight"] == 0.0
 
 
 def test_no_entry_when_close_already_below_invalidation(db, caplog):
@@ -179,3 +195,24 @@ def test_build_all_watchlist_isolates_failures(db, monkeypatch):
     monkeypatch.setattr(tt, "build_trend_target", boom)
     recs = build_trend_targets(D, db)
     assert [r["instrument_id"] for r in recs] == ["TWSE:2330"]
+
+
+def test_same_day_rerun_with_changed_signal_overwrites_stale_target(db, caplog):
+    _sig(db); first = build_trend_target(D, "2330", db)                           # 先發了第 1 批
+    _sig(db, action="觀望")                                                       # 補資料後重算：今天其實不該進
+    again = build_trend_target(D, "2330", db)
+    assert again["target_id"] == first["target_id"] and again["target_weight"] == 0.0
+    assert again["inputs_ref"]["key"]["units"] == 0 and "覆蓋" in again["reason"] and "覆蓋" in caplog.text
+    assert validate_record("targets", again) == [] and len(targets_list(db)) == 1
+    # 隔天的狀態從覆蓋後的那筆（0 批）出發：再出現關注建倉區 → 第 1 批，不是第 2 批
+    _sig(db, date="2026-06-15", close=985.0)
+    nxt = build_trend_target("2026-06-15", "2330", db)
+    assert nxt["inputs_ref"]["key"]["units"] == 1 and nxt["target_weight"] == 0.3333
+
+
+def test_rebuilding_earlier_day_warns_about_later_targets(db, caplog):
+    _sig(db); build_trend_target(D, "2330", db)
+    _sig(db, date="2026-06-17", action="觀望", position="可加倉", close=975.0); build_trend_target("2026-06-17", "2330", db)
+    _sig(db, action="觀望")
+    build_trend_target(D, "2330", db)
+    assert "狀態只往前重放" in caplog.text

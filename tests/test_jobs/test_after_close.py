@@ -85,7 +85,7 @@ def test_after_close_skips_trends_when_watchlist_empty(memory_db, monkeypatch, s
         mock_conn.return_value.__exit__ = lambda s, *a: None
         result = after_close.run_after_close("2026-04-08")
 
-    assert "stock_trends" not in result["results"]
+    assert "stock_trends" not in result["results"] and "trend_targets" not in result["results"]
     assert result["status"] == "completed"
 
 

@@ -59,12 +59,15 @@ class BacktestParams:
         return self.entry_mode != "single"
 
 
-def _tranche_weights(units: int, sizing: str) -> list[float]:
+def tranche_weights(units: int, sizing: str) -> list[float]:
     """每批佔用資金比例（和為 1）。equal 均分；decreasing 遞減 (n,n-1,…,1)/Σ ＝ ½⅓⅙…。"""
     units = max(1, units)
     raw = [float(units - i) for i in range(units)] if sizing == "decreasing" else [1.0] * units
     total = sum(raw)
     return [r / total for r in raw]
+
+
+_tranche_weights = tranche_weights   # 舊名；integration/trend_targets 與測試用公開名
 
 
 def _days(d1: str, d2: str) -> int:
@@ -86,7 +89,7 @@ def run_backtest(bars: list[dict], params: BacktestParams | None = None,
     p = params or BacktestParams()
     gate = GATE_PASS if p.assume_gate_pass else GATE_UNKNOWN
     max_units = p.effective_max_units
-    weights = _tranche_weights(max_units, p.tranche_sizing)
+    weights = tranche_weights(max_units, p.tranche_sizing)
     capital = float(p.initial_capital)
     fee_rate = p.fee_bps / 10000.0
     tax_rate = p.tax_bps / 10000.0
