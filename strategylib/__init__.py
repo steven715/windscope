@@ -5,4 +5,4 @@
 「回測跑 production 邏輯」才成立。版本見 __version__；門檻改了就 bump 對應模組的 RULE_VERSION。
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
