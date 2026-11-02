@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "windscope-strategylib"
-version = "0.1.0"
+version = "0.2.0"
 description = "windscope / tradewind 共用的純函式策略庫：趨勢三態、還原股價、Playbook 程式"
 requires-python = ">=3.10"
 dependencies = []

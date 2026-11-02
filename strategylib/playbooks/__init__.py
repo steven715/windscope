@@ -1,10 +1,11 @@
 """Playbook 程式註冊表：契約 `trade_plan.playbook_id`／`playbook_version` → 可執行的純函式物件。"""
 
-from strategylib.playbooks import pullback_hold
+from strategylib.playbooks import pullback_hold, trend_pullback
 from strategylib.playbooks.base import Action, Playbook, PlanState
 
 _REGISTRY: dict[tuple[str, str], Playbook] = {
     (pullback_hold.PLAYBOOK_ID, pullback_hold.VERSION): pullback_hold.PullbackHold(),
+    (trend_pullback.PLAYBOOK_ID, trend_pullback.VERSION): trend_pullback.TrendPullback(),
 }
 
 

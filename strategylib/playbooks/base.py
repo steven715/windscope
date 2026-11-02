@@ -47,6 +47,12 @@ class PlanState:
     range_low: float | None = None
     session_open: float | None = None
     session_start: str | None = None   # HH:MM，開盤區間與桶對齊的基準
+    session_date: str | None = None    # 目前處理中的交易日（跨日 Playbook 用來偵測換日）
+    days_held: int = 0                 # 跨日 Playbook：持倉經過的交易日數（進場日＝0）
+    day_low: float | None = None       # 當日至今最低／最高（跨日 Playbook 的移停基準）
+    day_high: float | None = None
+    prev_day_low: float | None = None  # 前一交易日的最低／最高
+    prev_day_high: float | None = None
     bars_seen: int = 0
     confirm_count: int = 0           # 連續符合觸發條件的桶數
     entries: int = 0
