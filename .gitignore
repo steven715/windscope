@@ -5,3 +5,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 .env
+# strategylib 打包產物
+build/
+dist/
+*.egg-info/

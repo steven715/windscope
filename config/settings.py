@@ -1,5 +1,11 @@
 import os
 
+# 共用純函式庫（ADR-0007）：趨勢／還原／Playbook 的門檻單一真相在它那裡，這裡只取值
+from strategylib.adjust import DEFAULT_GAP_PCT as _ADJUST_GAP_PCT
+from strategylib.playbooks.pullback_hold import DEFAULT_PARAMS as _PULLBACK_PARAMS
+from strategylib.trend import DEFAULTS as _TREND_DEFAULTS
+from strategylib.trend import RULE_VERSION as _TREND_RULE_VERSION
+
 # DB
 DB_PATH = os.environ.get("PREMARKET_DB", "data/premarket.db")
 
@@ -65,32 +71,25 @@ FOREIGN_CUM_NET_MIN = 3000          # 連續期間累計張數門檻（過濾雜
 FOREIGN_BIG_NET = 10000             # 單日大買/大賣門檻（如「反手大買」）
 
 # === 個股趨勢訊號層（Layer 3b，spec v2：三態趨勢＋順大勢逆小勢）===
-# 純技術面，資料來源＝個股還原日K OHLC（raw_stock_daily）。與市場訊號的
-# SIGNAL_RULE_VERSION 各自獨立版本，命中率統計才不會混版；調整任一門檻請 bump
-# TREND_RULE_VERSION。門檻皆為起始值須回測（回測優先序：FLAT 三症狀 → confirm_bars
-# → 超買 bias）。fundamental_gate 目前無基本面資料源 → 一律 UNKNOWN（保守：不放行建倉）。
-# t1→t2 (2026-07-05): 趨勢改用還原股價（偵測分割/大除權缺口按比例回推 + 免費配息比例
-#   細調），修正 0050 等分割/配息股在除權息期間趨勢失真。屬 spec §6.1「需還原股價」的
-#   資料修正，非改判讀門檻。
-TREND_RULE_VERSION = "t2"
-TREND_MA_BIG = 240              # 年線（大勢方向）；台股慣例 240、A股 250
-TREND_MA_CENTER = 20           # 月線＝價值中樞（源修正，非季線）
-TREND_MA_FAST = 5              # 小勢回升偵測（5日）
-TREND_SLOPE_LOOKBACK = 20      # 年線斜率量測窗
-TREND_SLOPE_DEADBAND = 0.02    # 走平死區
-TREND_CROSS_WINDOW = 20        # 穿越/箱型量測窗
-TREND_CROSS_THRESH = 4         # 反復穿越月線次數門檻
-TREND_BOX_EPS = 0.06           # 箱型寬門檻（不創新高低）
-TREND_CONFIRM_BARS = 3         # 遲滯確認（連續同態幾根才切換 state）
-TREND_OVERBOUGHT_BIAS = 0.15   # 超買乖離（源留白，須自訂+回測）
+# 規則本體與門檻的**單一真相在共用庫 strategylib.trend**（windscope／tradewind 共用，ADR-0007）；
+# 這裡只是取值供既有程式碼引用，不要在此另改數字——改門檻去 strategylib.trend.DEFAULTS 並 bump
+# 其 RULE_VERSION（不同版本的績效不混算）。fundamental_gate 目前無基本面資料源 → 一律 UNKNOWN。
+TREND_RULE_VERSION = _TREND_RULE_VERSION
+TREND_MA_BIG = _TREND_DEFAULTS["ma_big"]
+TREND_MA_CENTER = _TREND_DEFAULTS["ma_center"]
+TREND_MA_FAST = _TREND_DEFAULTS["ma_fast"]
+TREND_SLOPE_LOOKBACK = _TREND_DEFAULTS["slope_lookback"]
+TREND_SLOPE_DEADBAND = _TREND_DEFAULTS["slope_deadband"]
+TREND_CROSS_WINDOW = _TREND_DEFAULTS["cross_window"]
+TREND_CROSS_THRESH = _TREND_DEFAULTS["cross_thresh"]
+TREND_BOX_EPS = _TREND_DEFAULTS["box_eps"]
+TREND_CONFIRM_BARS = _TREND_DEFAULTS["confirm_bars"]
+TREND_OVERBOUGHT_BIAS = _TREND_DEFAULTS["overbought_bias"]
 # 回補歷史 K 線月數：暖機需 MA_BIG(240)+SLOPE_LOOKBACK(20)=260 根（約 13 個月），
 # 取 16 個月（~300+ 交易日）留安全邊際（月含假日、暖機門檻才穩）。
 TREND_BACKFILL_MONTHS = 16
-# 還原股價：單日收盤變動 > 此比例＝公司行為缺口（股票分割/大除權）。台股有 ±10%
-# 漲跌幅限制，故單日 >11% 必非市場波動→按 close[i]/close[i-1] 比例回推歷史價。
-# 配息（<10%，價格看不出）另用免費 FinMind TaiwanStockDividendResult 的 after/before 比例細調。
-# 註：極少數無漲跌幅限制的槓桿/反向/外國 ETF 可能誤判（會在來源說明標註）。
-TREND_ADJUST_GAP_PCT = 0.11
+# 還原股價：單日收盤變動 > 此比例＝公司行為缺口（真相在 strategylib.adjust.DEFAULT_GAP_PCT）
+TREND_ADJUST_GAP_PCT = _ADJUST_GAP_PCT
 
 # === Verification (Layer 4) ===
 VERIFY_FLAT_BAND_PCT = 0.3          # |漲跌幅| <= 0.3% 視為「平」
@@ -134,8 +133,7 @@ PREMARKET_INVALIDATION_UNTIL = "09:30"
 PREMARKET_PLAYBOOK = {
     "playbook_id": "pullback_hold",
     "playbook_version": "p1",
-    "params": {"range_minutes": 5, "confirm_bars": 1, "gap_no_trade_pct": 1.5,
-               "entry_skip_until": "09:05", "no_entry_after": "11:30"},
+    "params": dict(_PULLBACK_PARAMS),          # 預設全取自 strategylib（不另存一份）；要覆蓋就改這裡的鍵
     "max_entries_per_day": 1,
     "entry": {"window_from": "09:05", "window_to": "10:30",
               "trigger": "5分K 回測開盤區間下緣不破後收高", "chase_limit_pts": 40},

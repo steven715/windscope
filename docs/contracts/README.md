@@ -89,7 +89,7 @@ tradewind 算口數時取「`trade_plan.risk` 反推的口數」與「可用保�
 
 - [ ] 期貨連續合約 `TAIFEX:TX`／`TMF` 的換月規則：到期前 N 日切／成交量切？v0 先寫在 instruments 的 `roll_rule`，值由 tradewind 決定。
 - [ ] 個人資產彙總（錢包）專案：獨立 repo，讀 `account_snapshots`＋bars 價格＋其他券商／銀行唯讀 API；等 tradewind 到券商模擬階段有真快照再開（tradewind ADR-0010）。
-- [ ] Playbook 共用純函式庫的 repo 位置與發布方式（windscope 子目錄＋git tag，或 monorepo；ADR-0005 §5 的回頭條件）。
+- [x] ~~Playbook 共用純函式庫的位置與發布~~ → `strategylib/`（windscope 子目錄、`pyproject.toml`、tag `strategylib-vX.Y.Z`）；`pullback_hold p1` 已是程式（`strategylib.playbooks`），ADR-0007。
 - [x] ~~`target_weight` 的基準~~ → 期貨：方向與相對強度、口數由 `trade_plan.risk` 反推；現股：NAV 權重（已定）。
 - [ ] `valid_until` 到期時 tradewind 是「自動平倉」還是「只停止新進」？v0 定 **只停止新進**，平倉由策略明確送 `weight=0`。
 - [x] ~~要不要在 targets 帶 `stop_hint`~~ → 已以 `trade_plan.risk.stop_pts`（初始停損，只能收緊）與 `invalidation`（失效≠停損）取代。

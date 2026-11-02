@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "windscope-strategylib"
+version = "0.1.0"
+description = "windscope / tradewind 共用的純函式策略庫：趨勢三態、還原股價、Playbook 程式"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.setuptools]
+packages = ["strategylib", "strategylib.playbooks"]
+package-dir = { "strategylib" = "." }
