@@ -78,9 +78,11 @@
 - 契約草案：`docs/contracts/`（bars／instruments／corporate_actions／targets 的 schema＋fixture＋語意規則），
   `tests/test_docs/test_contracts.py` 鎖 fixture；tradewind 端應有對稱測試讀同一份 fixture。
 - windscope 端落地順序：① ✅ `bars_v` 映射三張 raw 表＋`instruments` 表（`db/bars.py`、`db/instruments.py`、`/api/bars`、`/api/instruments`）
-  → ② ✅ 時點正確性：`tests/test_strategylib/test_pit.py` 證明還原是尺度變換、事後事件不改 ≤t 的趨勢輸出（回測用整段還原序列無前視）→ ③ ✅ `strategylib/`（趨勢三態、還原、Playbook `pullback_hold p1`；golden＋純度測試；ADR-0007）→ ④ ✅ Playbook `trend_pullback p1`（個股波段執行：開盤進場、停損跨日、分批；strategylib 0.2.0）→ ⑤ `stock_trend_signals` → targets builder（關注建倉區／可加倉／減倉／大勢轉向各發一筆新 target，weight 依批次）
+  → ② ✅ 時點正確性：`tests/test_strategylib/test_pit.py` 證明還原是尺度變換、事後事件不改 ≤t 的趨勢輸出（回測用整段還原序列無前視）→ ③ ✅ `strategylib/`（趨勢三態、還原、Playbook `pullback_hold p1`；golden＋純度測試；ADR-0007）
   → ④ ✅ `targets` 表＋`/api/targets`＋`POST /api/targets/{id}/lock`＋`integration/targets_builder`（掛 before_open）
-  → ⑤ ✅ events／account_snapshots 入庫（`db/events.py`、`POST/GET /api/events`、after_close 掃 inbox）→ ⑥ 即時串流（WS）與 1m 落地：需券商行情源，**本機做**。
+  → ⑤ ✅ events／account_snapshots 入庫（`db/events.py`、`POST/GET /api/events`、after_close 掃 inbox）
+  → ⑥ ✅ Playbook `trend_pullback p1`（個股波段執行：窗口內第一根 1 分 K 收完進場、停損跨日、分批；strategylib 0.2.0）
+  → ⑦ `stock_trend_signals` → targets builder（關注建倉區／可加倉／減倉／大勢轉向各發一筆新 target，weight 依批次）→ ⑧ 即時串流（WS）與 1m 落地：需券商行情源，**本機做**。
 - 待定事項列在 `docs/contracts/README.md` 末段，等 tradewind 上 GitHub 後在雙 repo session 定稿。
 
 ---
