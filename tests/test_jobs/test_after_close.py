@@ -66,8 +66,8 @@ def test_after_close_partial_failure(memory_db, monkeypatch, step_seam):
     assert result["results"]["taifex_oi"] is False
     assert result["results"]["twse_spot_close"] is True
     assert len(result["errors"]) == 1
-    # 收盤後 7 步：5 個市場面步驟 + 個股日K趨勢刷新（stock_trends）+ tradewind 回流入庫（ingest_events）
-    assert call_count["n"] == 7
+    # 收盤後 8 步：5 個市場面步驟 + 個股日K趨勢刷新（stock_trends）+ 趨勢 targets（trend_targets）+ tradewind 回流入庫（ingest_events）
+    assert call_count["n"] == 8
     # 拆出去的步驟不應再出現在 after_close
     for moved in ("twse_stock_close", "chip", "integration_chip", "fx_close"):
         assert moved not in result["results"]
@@ -85,7 +85,7 @@ def test_after_close_skips_trends_when_watchlist_empty(memory_db, monkeypatch, s
         mock_conn.return_value.__exit__ = lambda s, *a: None
         result = after_close.run_after_close("2026-04-08")
 
-    assert "stock_trends" not in result["results"]
+    assert "stock_trends" not in result["results"] and "trend_targets" not in result["results"]
     assert result["status"] == "completed"
 
 

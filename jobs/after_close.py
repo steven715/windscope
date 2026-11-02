@@ -59,6 +59,8 @@ def run_after_close(date: str, db_path: str | None = None) -> dict:
         #    觀察名單為空 → 整步略過、不計失敗
         if watchlist_list(conn=conn):
             job.step("stock_trends", lambda: _refresh_stock_trends(date, conn, db_path))
+            # 6b. 趨勢訊號 → 契約 target（批數有變才發；沒變也算成功）
+            job.step("trend_targets", lambda: _build_trend_targets(date, conn))
         else:
             logger.info("after_close: 觀察名單為空，個股日K與趨勢略過")
 
@@ -94,6 +96,13 @@ def _refresh_stock_trends(date: str, conn: sqlite3.Connection,
         except Exception as e:
             logger.error("_refresh_stock_trends %s failed: %s", stock_id, e)
     return any_ok
+
+
+def _build_trend_targets(date: str, conn: sqlite3.Connection) -> int:
+    """個股趨勢訊號 → 契約 targets（strategy_id=trend_signal）；回傳發出的筆數（0 也算成功）。"""
+    from integration.trend_targets import build_trend_targets
+
+    return len(build_trend_targets(date, conn))
 
 
 def _ingest_inbox(date: str, conn: sqlite3.Connection) -> dict:

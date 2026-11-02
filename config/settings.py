@@ -3,6 +3,7 @@ import os
 # 共用純函式庫（ADR-0007）：趨勢／還原／Playbook 的門檻單一真相在它那裡，這裡只取值
 from strategylib.adjust import DEFAULT_GAP_PCT as _ADJUST_GAP_PCT
 from strategylib.playbooks.pullback_hold import DEFAULT_PARAMS as _PULLBACK_PARAMS
+from strategylib.playbooks.trend_pullback import DEFAULT_PARAMS as _TREND_PULLBACK_PARAMS
 from strategylib.trend import DEFAULTS as _TREND_DEFAULTS
 from strategylib.trend import RULE_VERSION as _TREND_RULE_VERSION
 
@@ -142,6 +143,24 @@ PREMARKET_PLAYBOOK = {
     "exit": {"runner_rule": "跌破前一根 5分K 低點出場", "force_flat_at": "13:25"},
     "no_trade": ["開盤跳空 > 1.5%", "09:00–09:05 不進", "11:30 後不新進"],
     "discretion_allowed": ["early_exit"],
+}
+# 個股趨勢訊號 → 契約 target（strategy_id=trend_signal，integration/trend_targets.py）。批次規則（幾批、注碼、
+# 加碼冷卻、超買減碼、閘門假設）**與回測同一組 BACKTEST_***：回測跑的就是 targets 會發的動作；target 的
+# rule_version＝"{趨勢 RULE_VERSION}-{BACKTEST_RULE_VERSION}"，改批次規則 bump BACKTEST_RULE_VERSION。
+TREND_TARGET_VALID_FROM = "09:00"          # 訊號收盤後算，次一交易日此時起生效；valid_until 無（波段）
+TREND_TARGET_INVALIDATION_PCT = 2.0        # 失效＝收盤跌破價值中樞（月線）此 % 以上；停損距離＝收盤到此價位
+TREND_PLAYBOOK = {
+    "playbook_id": "trend_pullback",
+    "playbook_version": "p1",
+    "params": dict(_TREND_PULLBACK_PARAMS),    # 預設全取自 strategylib；要覆蓋就改這裡的鍵
+    "max_entries_per_day": 1,
+    "entry": {"window_from": "09:00", "window_to": "13:00",
+              "trigger": "回踩月線企穩（small_turn_up）後次日：進場窗口內第一根 1 分 K 收完以 close 成交", "chase_limit_pts": None},
+    "risk": {"r_pct": 1.0, "stop_pts": None, "max_units": None},     # stop_pts／max_units 每筆由 builder 填
+    "scaling": [{"at_r": 2.0, "exit_fraction": 0.33, "move_stop_to": "breakeven"}],
+    "exit": {"runner_rule": "大勢離開 UP／失效 → 新 target weight=0（Playbook 不判趨勢）；停損跨日保留", "force_flat_at": None},
+    "no_trade": ["內功閘門 FAIL", "收盤已在失效價位之下不開新倉"],
+    "discretion_allowed": ["early_exit", "reduce"],
 }
 # tradewind 回流的 inbox：{inbox}/events/{run_mode}/{date}.jsonl、{inbox}/account_snapshots/...
 TRADEWIND_INBOX_DIR = os.environ.get("TRADEWIND_INBOX", "data/inbox")

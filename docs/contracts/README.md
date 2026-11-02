@@ -81,7 +81,7 @@ tradewind 算口數時取「`trade_plan.risk` 反推的口數」與「可用保�
 | `stock_info` | instruments | **已實作** `instruments` 表＋`config/instruments.json` 種子（`db/instruments.py`、`GET /api/instruments`）；`stock_info` 仍供舊頁面用 |
 | `stock_dividends(factor)` | corporate_actions | `kind` 先全填 `cash_dividend`，factor 直接搬 |
 | `signals`（盤前判斷） | targets `strategy_id=premarket_call` | **已實作**（`integration/targets_builder.py`，掛在 before_open）：偏多/偏空/中性 → `target_weight` ±信心/5／0，`horizon=intraday`，`valid_from` 08:50、`valid_until` 13:25；`invalidation`＝開盤 30 分內跌破/站上前日低/高點；`trade_plan` 取 `settings.PREMARKET_PLAYBOOK` |
-| `stock_trend_signals` | targets `strategy_id=trend_signal` | 關注建倉區→進、可加倉→加、減倉→減、大勢離開 UP→0（每次變動＝新 target）；`horizon=swing`；`invalidation`＝跌破價值中樞 N%；`trade_plan` 用 Playbook `trend_pullback p1`（窗口內第一根 1 分 K 收完進場、停損跨日、分批；已是程式，strategylib 0.2.0）。**targets builder 尚未實作**（只有 premarket_call 的） |
+| `stock_trend_signals` | targets `strategy_id=trend_signal` | 關注建倉區→進、可加倉→加、減倉→減、大勢離開 UP→0（每次變動＝新 target）；`horizon=swing`；`invalidation`＝跌破價值中樞 N%；`trade_plan` 用 Playbook `trend_pullback p1`（窗口內第一根 1 分 K 收完進場、停損跨日、分批；strategylib 0.2.0）。**已實作** `integration/trend_targets.py`（掛在 after_close）：批數規則與回測同一組 `BACKTEST_*`（3 批均分、加碼冷卻 3 日、超買減碼、閘門假設 PASS），批數有變才發一筆（weight＝累積批次權重、次一交易日 09:00 生效、`valid_until` null）；失效＝收盤跌破月線 2%，停損距離＝收盤到失效價位；閘門 FAIL 不開倉不加碼、只准減／出；`conviction` 不填（趨勢訊號的信心是年線斜率，不是 0–1）；`rule_version`＝`{t2}-{b1}`；狀態（units／last_add_date）記在上一筆 target 的 `inputs_ref.key`，只往前重放（重算某日覆蓋該日 target，不回頭改後面日期） |
 
 映射的權重數字（信心 3 = 多少 weight、建倉一批多大、1R 幾 %）**預設值放 `config/settings.py`**；契約的 `trade_plan` 放的是這一筆實際採用的值，讓 tradewind 不必知道 windscope 的 settings。
 
