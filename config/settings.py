@@ -162,6 +162,17 @@ TREND_PLAYBOOK = {
     "no_trade": ["內功閘門 FAIL", "收盤已在失效價位之下不開新倉"],
     "discretion_allowed": ["early_exit", "reduce"],
 }
+# === 即時行情串流（契約 README「串流與回放」；ADR-0005 ⑧）===
+# MARKET_SOURCE：none（預設，/ws/bars 只送心跳）／replay（回放 JSONL，CLI `stream` 用）／shioaji（📌 STUB，本機驗證後才能用）
+MARKET_SOURCE = os.environ.get("MARKET_SOURCE", "none")
+STREAM_INSTRUMENTS = ["TAIFEX:TMF"]          # 訂閱哪些商品（instruments 主檔要有，時段歸屬用它的 sessions）
+STREAM_HEARTBEAT_SECONDS = 5                 # 閒置多久送一筆 {"heartbeat": ts}（契約起始值 5）
+STREAM_PERSIST_TICKS = False                 # tick 量大且有損（契約 ts 只到秒，同秒多筆互相覆蓋），預設只落地 1m
+STREAM_FLUSH_SECONDS = 1.0                   # 時鐘驅動 flush 的間隔：沒有後續 tick 的分鐘也在結束時刻發出
+STREAM_REPLAY_JSONL = os.environ.get("STREAM_REPLAY_JSONL", "")   # MARKET_SOURCE=replay 時 server 回放的 JSONL
+STREAM_REPLAY_DELAY_SECONDS = float(os.environ.get("STREAM_REPLAY_DELAY", "0"))
+SHIOAJI_API_KEY = os.environ.get("SHIOAJI_API_KEY", "")
+SHIOAJI_SECRET = os.environ.get("SHIOAJI_SECRET", "")
 # tradewind 回流的 inbox：{inbox}/events/{run_mode}/{date}.jsonl、{inbox}/account_snapshots/...
 TRADEWIND_INBOX_DIR = os.environ.get("TRADEWIND_INBOX", "data/inbox")
 

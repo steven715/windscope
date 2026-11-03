@@ -488,6 +488,26 @@ def cmd_ingest_events(args: argparse.Namespace) -> None:
         print(_json.dumps(ingest_inbox(conn, args.inbox, args.date), ensure_ascii=False, indent=2))
 
 
+def cmd_stream(args: argparse.Namespace) -> None:
+    """把 JSONL 的 tick／1m 列回放進 bars 表（離線整合、本機演練；不需要 server）。"""
+    from collectors.market_stream import ReplaySource, StreamRunner
+    from db.bars import bars_from_jsonl
+    from server.stream import StreamHub
+
+    rows = [r for r in bars_from_jsonl(args.jsonl) if r["resolution"] in ("tick", "1m")]
+    source = ReplaySource(rows, args.delay)
+    runner = StreamRunner(source, StreamHub(), instruments=args.instruments or None,
+                          persist_ticks=args.persist_ticks, clock_flush=False)
+    runner.start()
+    source.wait()
+    from integration.bar_builder import _minute_end
+    last = max((r["ts"] for r in rows), default=None)
+    runner.stop(now=_minute_end(last) if last else None)              # 以最後一筆之後一分鐘當時鐘：回放當天的也收得掉
+    print(f"replayed {source.replayed}/{len(source)} usable rows: {runner.ticks} ticks, {runner.bars} 1m bars written, "
+          f"{runner.dropped} dropped")
+
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     """啟動 web server（內建排程器）。"""
     import uvicorn
@@ -851,6 +871,12 @@ def main() -> None:
     ingest_parser.add_argument("--date", default=None, help="只掃該日檔案（預設全部）")
     ingest_parser.add_argument("--inbox", default=None, help="inbox 目錄（預設 settings.TRADEWIND_INBOX_DIR）")
 
+    stream_parser = subparsers.add_parser("stream", help="回放 JSONL 的 tick／1m 進 bars 表（MARKET_SOURCE=replay 的離線版）")
+    stream_parser.add_argument("--jsonl", required=True, help="契約 bars 列的 JSONL（tick 或 1m）")
+    stream_parser.add_argument("--instruments", nargs="*", default=None, help="只回放這些商品（預設 settings.STREAM_INSTRUMENTS）")
+    stream_parser.add_argument("--delay", type=float, default=0.0, help="每筆之間停幾秒（0＝同步跑完）")
+    stream_parser.add_argument("--persist-ticks", action="store_true", help="tick 也落地（預設只落 1m）")
+
     serve_parser = subparsers.add_parser(
         "serve", help="Start the web server with built-in scheduler"
     )
@@ -907,6 +933,8 @@ def main() -> None:
         cmd_query(args)
     elif args.command == "targets":
         cmd_targets(args)
+    elif args.command == "stream":
+        cmd_stream(args)
     elif args.command == "ingest-events":
         cmd_ingest_events(args)
     elif args.command == "serve":

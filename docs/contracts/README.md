@@ -44,7 +44,11 @@
   **絕不推未收完的 K 棒**：否則回放只剩最後一版，做不到逐筆相同。較粗週期（5m、15m…）由消費端自行合成。
 - 歷史回放用同一份 schema、同一個順序（先 tick 後該分鐘的 1m bar）；tradewind 的引擎只看到一條迭代器。
 - `invalidation.conditions[].field=last` 指最新 tick 的成交價；只有 1m bar 可用時退回最近收完那根的 close。
-- 心跳：串流每 N 秒（起始 5）送一筆 `{"heartbeat": ts}`；消費端的 data-age 規則以它為準。
+- 心跳：串流**閒置** N 秒（起始 5）就送一筆 `{"heartbeat": ts}`（有資料在流時不另送）；消費端的 data-age 以「最近一筆訊息（資料或心跳）」算。
+- K 棒的 `published_at` 一律＝結束時刻（可知時刻）；若該分鐘之後一段時間沒成交，這根 K 會在時鐘走到結束時刻時由串流端收掉發出
+  （起始每秒檢查一次），所以實際收到的時間可能晚於 `published_at` 幾秒。
+- **端點**：`ws://{host}/ws/bars?instruments=TAIFEX:TMF,…`（不給＝全部）；每筆一個 JSON 物件（契約 bars 列或心跳）。
+  來源沒開（`MARKET_SOURCE=none`）只會收到心跳；歷史用 `GET /api/bars?resolution=1m|tick`。
 
 ## 保證金
 
