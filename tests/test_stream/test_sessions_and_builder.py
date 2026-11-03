@@ -77,3 +77,13 @@ def test_builder_separates_sessions_and_midnight():
     assert out[0]["ts"] == "2026-06-12T15:00:00+08:00" and out[0]["session"] == "night" and out[0]["session_date"] == "2026-06-15"
     out = b.flush("2026-06-13T00:00:00+08:00")
     assert out[0]["ts"] == "2026-06-12T23:59:00+08:00" and out[0]["published_at"] == "2026-06-13T00:00:00+08:00"
+
+
+def test_late_tick_after_flush_is_dropped_not_reopened():
+    b = BarBuilder("TAIFEX:TMF", FUT)
+    b.on_tick(_tick("2026-06-12T09:23:10+08:00", 100, 5), "x")
+    assert b.flush("2026-06-12T09:24:00+08:00")[0]["volume"] == 5          # 時鐘收掉 09:23
+    assert b.on_tick(_tick("2026-06-12T09:23:58+08:00", 101, 1), "x") == []   # 交易所時間戳晚到：丟，不重開
+    out = b.on_tick(_tick("2026-06-12T09:24:30+08:00", 102, 1), "x")
+    assert out == []                                                       # 09:23 不會再發第二次
+    assert b.flush("2026-06-12T09:25:00+08:00")[0]["ts"] == "2026-06-12T09:24:00+08:00"

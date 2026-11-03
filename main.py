@@ -494,12 +494,18 @@ def cmd_stream(args: argparse.Namespace) -> None:
     from db.bars import bars_from_jsonl
     from server.stream import StreamHub
 
-    records = [r for r in bars_from_jsonl(args.jsonl) if r["resolution"] in ("tick", "1m")]
-    runner = StreamRunner(ReplaySource(records, args.delay), StreamHub(), instruments=args.instruments or None,
-                          persist_ticks=args.persist_ticks)
+    rows = [r for r in bars_from_jsonl(args.jsonl) if r["resolution"] in ("tick", "1m")]
+    source = ReplaySource(rows, args.delay)
+    runner = StreamRunner(source, StreamHub(), instruments=args.instruments or None,
+                          persist_ticks=args.persist_ticks, clock_flush=False)
     runner.start()
-    runner.stop()
-    print(f"replayed {len(records)} rows: {runner.ticks} ticks, {runner.bars} 1m bars written to bars")
+    source.wait()
+    from integration.bar_builder import _minute_end
+    last = max((r["ts"] for r in rows), default=None)
+    runner.stop(now=_minute_end(last) if last else None)              # 以最後一筆之後一分鐘當時鐘：回放當天的也收得掉
+    print(f"replayed {source.replayed}/{len(source)} usable rows: {runner.ticks} ticks, {runner.bars} 1m bars written, "
+          f"{runner.dropped} dropped")
+
 
 
 def cmd_serve(args: argparse.Namespace) -> None:

@@ -29,15 +29,15 @@ def _minute_end(ts: str) -> str:
     return f"{ts[:11]}{h:02d}:{m:02d}:00{ts[19:]}"
 
 
-def tick_record(instrument_id: str, ts: str, price: float, volume: float, sessions: dict,
+def tick_record(instrument_id: str, ts: str, price: float, volume: float | None, sessions: dict,
                 ingested_at: str, source: str) -> dict | None:
-    """把一筆成交組成契約 tick 列（resolution=tick、只有 close）；時段外回 None。"""
+    """把一筆成交組成契約 tick 列（resolution=tick、只有 close）；ts 須已是契約格式；時段外回 None；volume None → 0（契約 tick 的量必填）。"""
     session, session_date = attribute(sessions, ts)
     if session is None:
         logger.warning("tick %s@%s outside any session; dropped", instrument_id, ts)
         return None
     return {"instrument_id": instrument_id, "resolution": "tick", "session": session, "session_date": session_date,
-            "ts": ts, "open": None, "high": None, "low": None, "close": float(price), "volume": int(volume),
+            "ts": ts, "open": None, "high": None, "low": None, "close": float(price), "volume": int(volume or 0),
             "turnover": None, "open_interest": None, "source": source, "published_at": ts, "ingested_at": ingested_at,
             "revision": 0}
 
@@ -49,13 +49,14 @@ class BarBuilder:
         self.instrument_id = instrument_id
         self.sessions = sessions
         self._cur: dict | None = None            # 正在累積的那分鐘
+        self._last_closed: str | None = None     # 最後收掉的那分鐘的 ts：之後再來的同分鐘 tick 一律丟（一根只發一次）
 
     def on_tick(self, tick: dict, now: str) -> list[dict]:
-        """餵一筆契約 tick 列；回傳因此收完的 K（0 或 1 根）。亂序（早於目前分鐘）的 tick 丟掉並記 WARNING。"""
+        """餵一筆契約 tick 列；回傳因此收完的 K（0 或 1 根）。亂序（早於目前分鐘、或屬於已收掉的分鐘）的 tick 丟掉並記 WARNING。"""
         start = _minute_start(tick["ts"])
         out: list[dict] = []
-        if self._cur is not None and start < self._cur["ts"]:
-            logger.warning("tick %s@%s older than current minute %s; dropped", self.instrument_id, tick["ts"], self._cur["ts"])
+        if (self._cur is not None and start < self._cur["ts"]) or (self._last_closed is not None and start <= self._last_closed):
+            logger.warning("tick %s@%s belongs to a closed/older minute; dropped", self.instrument_id, tick["ts"])
             return out
         if self._cur is not None and (start != self._cur["ts"] or tick["session"] != self._cur["session"]):
             out.append(self._close(now))
@@ -77,5 +78,6 @@ class BarBuilder:
 
     def _close(self, now: str) -> dict:
         bar, self._cur = self._cur, None
+        self._last_closed = bar["ts"]
         bar["ingested_at"] = max(now, bar["published_at"])
         return bar

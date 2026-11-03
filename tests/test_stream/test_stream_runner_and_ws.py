@@ -45,19 +45,19 @@ def test_hub_pubsub_filter_and_overflow():
     assert hub.dropped == 1                                                 # 慢訂閱者滿了：丟，不擋來源
 
 
-def test_replay_runner_builds_identical_1m_and_persists(db_path):
+def test_replay_runner_forwards_1m_rows_unchanged_and_persists(db_path):
     rows = [r for r in _fixture_rows() if r["instrument_id"] == "TAIFEX:TMF" and r["resolution"] == "1m"]
     hub = StreamHub()
     sid = hub.subscribe()
-    runner = StreamRunner(ReplaySource(rows), hub, db_path, instruments=["TAIFEX:TMF"])
-    assert runner.start() and runner.ticks == 4                             # 1 根 1m 拆成開高低收四筆
+    runner = StreamRunner(ReplaySource(rows), hub, db_path, instruments=["TAIFEX:TMF"], clock_flush=False)
+    assert runner.start() and runner.ticks == 0 and runner.bars == 1        # 1m 列直接推，不拆成假 tick
     runner.stop()
     got = []
     while (r := hub.get(sid, 0.01)) is not None:
         got.append(r)
     kinds = [r["resolution"] for r in got]
-    assert kinds.count("tick") == 4 and kinds.count("1m") == 1
-    bar = next(r for r in got if r["resolution"] == "1m")
+    assert kinds == ["1m"]
+    bar = got[0]
     src = rows[0]
     assert (bar["ts"], bar["open"], bar["high"], bar["low"], bar["close"], bar["volume"]) == \
            (src["ts"], src["open"], src["high"], src["low"], src["close"], src["volume"])
@@ -69,15 +69,22 @@ def test_replay_runner_builds_identical_1m_and_persists(db_path):
     conn.close()
     both = [r for r in _fixture_rows() if r["instrument_id"] == "TAIFEX:TMF" and r["resolution"] in ("tick", "1m")]
     src2 = ReplaySource(both)                                               # 同一分鐘 tick 與 1m 都有 → 只用 tick
-    assert [r["resolution"] for r in src2._records] == ["tick"]
+    assert [r["resolution"] for r in src2._records] == ["tick"] and len(src2) == 1
+    runner2 = StreamRunner(src2, StreamHub(), db_path, instruments=["TAIFEX:TMF"], clock_flush=False)
+    runner2.start(); runner2.stop(now="2026-06-12T09:21:00+08:00")        # 以最後一筆之後一分鐘當時鐘 → 收掉 09:20
+    assert runner2.ticks == 1 and runner2.bars == 1
 
 
 def test_runner_drops_unknown_instrument_and_persist_failure_does_not_kill_stream(db_path, caplog, monkeypatch):
     hub = StreamHub()
-    runner = StreamRunner(ReplaySource([]), hub, db_path, instruments=["TAIFEX:TMF"])
+    runner = StreamRunner(ReplaySource([]), hub, db_path, instruments=["TAIFEX:TMF"], clock_flush=False)
     runner.on_tick("TWSE:9999", "2026-06-12T09:00:00+08:00", 1.0, 1)        # 不在訂閱名單
     runner.on_tick("TAIFEX:TMF", "2026-06-12T14:00:00+08:00", 1.0, 1)       # 時段外
-    assert runner.ticks == 0 and hub.published == 0 and "outside any session" in caplog.text
+    runner.on_tick("TAIFEX:TMF", "not a time", 1.0, 1)                      # 壞時刻
+    assert runner.ticks == 0 and hub.published == 0 and "outside any session" in caplog.text and "unparseable" in caplog.text
+    runner.on_tick("TAIFEX:TMF", "2026-06-12T09:00:00.123+08:00", 23000.0, None)   # 毫秒、volume None → 正規化、0
+    assert hub.last_record["ts"] == "2026-06-12T09:00:00+08:00" and hub.last_record["volume"] == 0 and runner.ticks == 1
+    hub.published = 0; runner.ticks = 0
     monkeypatch.setattr("collectors.market_stream.bars_upsert", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk")))
     runner.on_tick("TAIFEX:TMF", "2026-06-12T09:00:01+08:00", 23000.0, 1)
     runner.on_tick("TAIFEX:TMF", "2026-06-12T09:01:01+08:00", 23001.0, 1)   # 收掉 09:00 → 落地失敗 → 只記 ERROR
@@ -119,7 +126,36 @@ def test_cli_stream_replays_jsonl_into_bars(db_path, tmp_path, monkeypatch, caps
     monkeypatch.setattr("sys.argv", ["main.py", "stream", "--jsonl", str(p)])
     cli.main()
     out = capsys.readouterr().out
-    assert "1 1m bars written" in out
+    assert "1 1m bars written" in out and "1/1 usable rows" in out
     conn = sqlite3.connect(db_path)
     assert len(bars_query(conn, "TAIFEX:TMF", "1m", "2026-06-12", "2026-06-12")) == 1
     conn.close()
+
+
+def test_replay_with_delay_runs_to_completion_and_clock_flush_emits_last_bar(db_path, monkeypatch):
+    monkeypatch.setattr(settings, "STREAM_FLUSH_SECONDS", 0.05)
+    rows = [r for r in _fixture_rows() if r["instrument_id"] == "TAIFEX:TMF" and r["resolution"] == "tick"]
+    rows = rows + [{**rows[0], "ts": "2026-06-12T09:20:30+08:00", "published_at": "2026-06-12T09:20:30+08:00"}]
+    src = ReplaySource(rows, delay_sec=0.02)
+    runner = StreamRunner(src, StreamHub(), db_path, instruments=["TAIFEX:TMF"])      # clock_flush 預設開
+    assert runner.start()
+    src.wait(5)
+    import time
+    time.sleep(0.2)                                                        # 時鐘（牆鐘 ≥ 09:21）把 09:20 收掉
+    assert src.replayed == 2 and runner.ticks == 2 and runner.bars == 1
+    runner.stop()
+    assert runner.bars == 1                                                # stop 不會再發一次
+
+
+def test_start_market_stream_never_breaks_server_boot(db_path, monkeypatch, caplog):
+    from collectors.market_stream import start_market_stream
+    hub = StreamHub()
+    monkeypatch.setattr(settings, "MARKET_SOURCE", "bloomberg")
+    assert start_market_stream(hub, db_path) is None and "unknown MARKET_SOURCE" in caplog.text
+    monkeypatch.setattr(settings, "MARKET_SOURCE", "replay")
+    monkeypatch.setattr(settings, "STREAM_REPLAY_JSONL", "")
+    assert start_market_stream(hub, db_path) is None and "needs STREAM_REPLAY_JSONL" in caplog.text
+    monkeypatch.setattr(settings, "MARKET_SOURCE", "shioaji")
+    assert start_market_stream(hub, db_path) is None and "stub" in caplog.text
+    monkeypatch.setattr(settings, "MARKET_SOURCE", "none")
+    assert start_market_stream(hub, db_path) is None

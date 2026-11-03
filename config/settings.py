@@ -167,7 +167,10 @@ TREND_PLAYBOOK = {
 MARKET_SOURCE = os.environ.get("MARKET_SOURCE", "none")
 STREAM_INSTRUMENTS = ["TAIFEX:TMF"]          # 訂閱哪些商品（instruments 主檔要有，時段歸屬用它的 sessions）
 STREAM_HEARTBEAT_SECONDS = 5                 # 閒置多久送一筆 {"heartbeat": ts}（契約起始值 5）
-STREAM_PERSIST_TICKS = False                 # tick 量大，預設只落地 1m；要留 tick 再開
+STREAM_PERSIST_TICKS = False                 # tick 量大且有損（契約 ts 只到秒，同秒多筆互相覆蓋），預設只落地 1m
+STREAM_FLUSH_SECONDS = 1.0                   # 時鐘驅動 flush 的間隔：沒有後續 tick 的分鐘也在結束時刻發出
+STREAM_REPLAY_JSONL = os.environ.get("STREAM_REPLAY_JSONL", "")   # MARKET_SOURCE=replay 時 server 回放的 JSONL
+STREAM_REPLAY_DELAY_SECONDS = float(os.environ.get("STREAM_REPLAY_DELAY", "0"))
 SHIOAJI_API_KEY = os.environ.get("SHIOAJI_API_KEY", "")
 SHIOAJI_SECRET = os.environ.get("SHIOAJI_SECRET", "")
 # tradewind 回流的 inbox：{inbox}/events/{run_mode}/{date}.jsonl、{inbox}/account_snapshots/...

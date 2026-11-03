@@ -32,13 +32,10 @@ def create_app(db_path: str | None = None,
             app.state.scheduler = create_scheduler(app.state.db_path)
             app.state.scheduler.start()
             logger.info("Scheduler started")
-            # 即時行情：有設 MARKET_SOURCE 才接；來源起不來（shioaji 仍是 stub）只記 ERROR，server 照常
-            from collectors.market_stream import StreamRunner, make_source
+            # 即時行情：有設 MARKET_SOURCE 才接；來源起不來（shioaji 仍是 stub、名稱打錯）只記 ERROR，server 照常
+            from collectors.market_stream import start_market_stream
 
-            source = make_source(settings.MARKET_SOURCE)
-            if source is not None:
-                runner = StreamRunner(source, app.state.hub, app.state.db_path)
-                app.state.stream = runner if runner.start() else None
+            app.state.stream = start_market_stream(app.state.hub, app.state.db_path)
         yield
         if app.state.stream is not None:
             app.state.stream.stop()
