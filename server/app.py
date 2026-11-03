@@ -32,7 +32,16 @@ def create_app(db_path: str | None = None,
             app.state.scheduler = create_scheduler(app.state.db_path)
             app.state.scheduler.start()
             logger.info("Scheduler started")
+            # 即時行情：有設 MARKET_SOURCE 才接；來源起不來（shioaji 仍是 stub）只記 ERROR，server 照常
+            from collectors.market_stream import StreamRunner, make_source
+
+            source = make_source(settings.MARKET_SOURCE)
+            if source is not None:
+                runner = StreamRunner(source, app.state.hub, app.state.db_path)
+                app.state.stream = runner if runner.start() else None
         yield
+        if app.state.stream is not None:
+            app.state.stream.stop()
         if app.state.scheduler is not None:
             app.state.scheduler.shutdown(wait=False)
             logger.info("Scheduler stopped")
@@ -40,15 +49,19 @@ def create_app(db_path: str | None = None,
     app = FastAPI(title="台股開盤前情報系統", lifespan=lifespan)
     app.state.db_path = db_path or settings.DB_PATH
     app.state.scheduler = None
+    app.state.stream = None
 
     from pathlib import Path
 
     from fastapi.staticfiles import StaticFiles
 
-    from server.routes import api, pages
+    from server.routes import api, pages, stream
+    from server.stream import StreamHub
 
+    app.state.hub = StreamHub()
     app.include_router(pages.router)
     app.include_router(api.router, prefix="/api")
+    app.include_router(stream.router)
 
     static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")

@@ -45,6 +45,8 @@
 - 歷史回放用同一份 schema、同一個順序（先 tick 後該分鐘的 1m bar）；tradewind 的引擎只看到一條迭代器。
 - `invalidation.conditions[].field=last` 指最新 tick 的成交價；只有 1m bar 可用時退回最近收完那根的 close。
 - 心跳：串流每 N 秒（起始 5）送一筆 `{"heartbeat": ts}`；消費端的 data-age 規則以它為準。
+- **端點**：`ws://{host}/ws/bars?instruments=TAIFEX:TMF,…`（不給＝全部）；每筆一個 JSON 物件（契約 bars 列或心跳）。
+  來源沒開（`MARKET_SOURCE=none`）只會收到心跳；歷史用 `GET /api/bars?resolution=1m|tick`。
 
 ## 保證金
 

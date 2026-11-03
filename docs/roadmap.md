@@ -82,7 +82,10 @@
   → ④ ✅ `targets` 表＋`/api/targets`＋`POST /api/targets/{id}/lock`＋`integration/targets_builder`（掛 before_open）
   → ⑤ ✅ events／account_snapshots 入庫（`db/events.py`、`POST/GET /api/events`、after_close 掃 inbox）
   → ⑥ ✅ Playbook `trend_pullback p1`（個股波段執行：窗口內第一根 1 分 K 收完進場、停損跨日、分批；strategylib 0.2.0）
-  → ⑦ ✅ `stock_trend_signals` → targets builder（`integration/trend_targets.py`，掛 after_close；批數規則與回測同一組 `BACKTEST_*`，批數有變才發一筆新 target，weight＝累積批次權重；狀態在上一筆 target 的 `inputs_ref.key`）→ ⑧ 即時串流（WS）與 1m 落地：需券商行情源，**本機做**。
+  → ⑦ ✅ `stock_trend_signals` → targets builder（`integration/trend_targets.py`，掛 after_close；批數規則與回測同一組 `BACKTEST_*`，批數有變才發一筆新 target，weight＝累積批次權重；狀態在上一筆 target 的 `inputs_ref.key`）→ ⑧ 即時串流（WS）與 1m 落地：✅ 雲端能做的部分（2026-11-03）——`integration/market_sessions`（時段歸屬，夜盤歸次一交易日）、
+  `integration/bar_builder`（tick → 只在分鐘結束發出的 1m）、`collectors/market_stream`（`StreamRunner`：tick 推 hub、1m 推 hub＋落 `bars`；
+  `ReplaySource` 回放；`ShioajiSource` 📌 STUB）、`server/stream.StreamHub`＋`/ws/bars`（tick／1m／心跳）、CLI `stream --jsonl`；
+  **本機剩**：`ShioajiSource` 實作與驗證（清單在 `docs/data_sources.md` 八）、`.env` 設 `MARKET_SOURCE=shioaji`。
 - 待定事項列在 `docs/contracts/README.md` 末段，等 tradewind 上 GitHub 後在雙 repo session 定稿。
 
 ---

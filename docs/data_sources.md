@@ -342,3 +342,19 @@
 | 2026-06-15 | 台銀匯率 CSV 修正：UTF-8 BOM + 台銀改 flcsv 格式（即期買入＝第一個「即期」欄），修正前對 live 資料 100% 失效（見 3.1）。新增 MIS 盤中即時加權指數（1.2c，VERIFIED），供 `/live` 盤中即時驗證觀察。|
 | 2026-06-30 | **TWD 隔夜 delta 改用離岸 USDTWD=X 晨對晨**（新增 3.4）：發現在岸 08:45 牌價開盤前＝前收、delta≈0，FX 維度從未投票。改用 `intraday_fx` 離岸晨對晨，門檻 0.1→0.05，bump `SIGNAL_RULE_VERSION` v2→v3。在岸 `quote_0845`/`close_16` 仍續收（顯示／CNY・KRW／日圓溫度計用）。另修：verify_close 新增 `backfill_unverified` 自癒步驟，補回因指數延遲發布而漏驗的訊號日（如 06-25）。|
 | 2026-10-09 | 交易日曆改為純日曆：`get_previous_trading_day` 移除「從 raw_futures/raw_institutional 有資料的日子推導」捷徑（07-17 因 07-15/16 停機漏收而誤用 07-14 當基準），漏收改由下游當缺料降級；新增 1.6「已知缺口」。|
+
+
+---
+
+## 八、即時行情串流（永豐 Shioaji）
+
+### 8.1 微台逐筆成交（tick → 1 分 K）
+
+| 項目 | 內容 |
+|------|------|
+| 用途 | `/ws/bars` 即時串流（tick ＋ 已收完的 1m）、`bars` 表落地 1m（tradewind 回放與 Paper 的行情源） |
+| 來源 | 永豐金證券 Shioaji API（Python SDK `shioaji`）；需 API Key／Secret（`SHIOAJI_API_KEY`／`SHIOAJI_SECRET`） |
+| 程式 | `collectors/market_stream.py::ShioajiSource` |
+| 狀態 | 📌 STUB（2026-11-03）：雲端連不到券商、無憑證；`start()` 回 False、記 ERROR。合成、落地、串流、回放（`ReplaySource`）已驗證 |
+| 本機驗證清單 | 1. `pip install shioaji`，登入只要行情（不簽署下單憑證）；確認與 tradewind 的下單登入是否能分開（ADR-0007 決定 2 ⚠）。2. 找合約：`TAIFEX:TMF` → 微台近月，近月對應規則寫進 `instruments.roll_rule`。3. 訂閱逐筆（Tick），callback 的時間欄位是交易所時間還是本機時間、精度到秒還是毫秒；轉成 `+08:00` 契約格式。4. 夜盤的 tick 是否也來，`session_date` 歸屬對不對（`integration/market_sessions`）。5. 斷線重連、每日連線上限、登入逾時的行為。6. 跑完一天，`bars` 表的 1m 與券商自己的 `kbars` 對帳（量與 OHLC）。 |
+| 備註 | 驗證通過後把 `MARKET_SOURCE=shioaji` 寫進 `.env`，server 啟動時自動接；排程外（週末）來源起不來只記 ERROR，server 照常 |
