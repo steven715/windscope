@@ -29,6 +29,14 @@ def db_path(tmp_path: Path) -> str:
     return str(p)
 
 
+@pytest.fixture(autouse=True)
+def replay_db(tmp_path: Path, monkeypatch) -> str:
+    """演練 DB 一律在 tmp（不碰 data/）。"""
+    p = str(tmp_path / "replay.db")
+    monkeypatch.setattr(settings, "REPLAY_DB_PATH", p)
+    return p
+
+
 def _fixture_rows() -> list[dict]:
     return [json.loads(ln) for ln in FIX.read_text(encoding="utf-8").splitlines() if ln.strip()]
 
@@ -45,7 +53,8 @@ def test_hub_pubsub_filter_and_overflow():
     assert hub.dropped == 1                                                 # 慢訂閱者滿了：丟，不擋來源
 
 
-def test_replay_runner_forwards_1m_rows_unchanged_and_persists(db_path):
+def test_replay_runner_forwards_1m_rows_unchanged_and_persists_to_the_rehearsal_db(db_path, replay_db, monkeypatch):
+    monkeypatch.setattr(settings, "DB_PATH", db_path)
     rows = [r for r in _fixture_rows() if r["instrument_id"] == "TAIFEX:TMF" and r["resolution"] == "1m"]
     hub = StreamHub()
     sid = hub.subscribe()
@@ -62,11 +71,14 @@ def test_replay_runner_forwards_1m_rows_unchanged_and_persists(db_path):
     assert (bar["ts"], bar["open"], bar["high"], bar["low"], bar["close"], bar["volume"]) == \
            (src["ts"], src["open"], src["high"], src["low"], src["close"], src["volume"])
     assert bar["published_at"] == "2026-06-12T09:21:00+08:00" and bar["session_date"] == "2026-06-12"
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(replay_db)
     stored = bars_query(conn, "TAIFEX:TMF", "1m", "2026-06-12", "2026-06-12")
     assert len(stored) == 1 and stored[0]["close"] == src["close"] and stored[0]["source"] == "windscope.bar_builder"
     assert bars_query(conn, "TAIFEX:TMF", "tick", "2026-06-12", "2026-06-12") == []   # 預設不落 tick
     conn.close()
+    main = sqlite3.connect(db_path)                                         # 正式 DB 的 bars 表沒有被演練寫到
+    assert main.execute("SELECT COUNT(*) FROM bars").fetchone()[0] == 0
+    main.close()
     both = [r for r in _fixture_rows() if r["instrument_id"] == "TAIFEX:TMF" and r["resolution"] in ("tick", "1m")]
     src2 = ReplaySource(both)                                               # 同一分鐘 tick 與 1m 都有 → 只用 tick
     assert [r["resolution"] for r in src2._records] == ["tick"] and len(src2) == 1
@@ -116,7 +128,7 @@ def test_ws_bars_streams_records_and_heartbeats(db_path, monkeypatch):
         assert hub.subscribers == 0                                          # 斷線後退訂
 
 
-def test_cli_stream_replays_jsonl_into_bars(db_path, tmp_path, monkeypatch, capsys):
+def test_cli_stream_replays_jsonl_into_the_rehearsal_db(db_path, replay_db, tmp_path, monkeypatch, capsys):
     import main as cli
     monkeypatch.setenv("PREMARKET_DB", db_path)
     monkeypatch.setattr(settings, "DB_PATH", db_path)
@@ -126,10 +138,13 @@ def test_cli_stream_replays_jsonl_into_bars(db_path, tmp_path, monkeypatch, caps
     monkeypatch.setattr("sys.argv", ["main.py", "stream", "--jsonl", str(p)])
     cli.main()
     out = capsys.readouterr().out
-    assert "1 1m bars written" in out and "1/1 usable rows" in out
-    conn = sqlite3.connect(db_path)
+    assert "1 1m bars written" in out and "1/1 usable rows" in out and replay_db in out
+    conn = sqlite3.connect(replay_db)
     assert len(bars_query(conn, "TAIFEX:TMF", "1m", "2026-06-12", "2026-06-12")) == 1
     conn.close()
+    main = sqlite3.connect(db_path)
+    assert main.execute("SELECT COUNT(*) FROM bars").fetchone()[0] == 0
+    main.close()
 
 
 def test_replay_with_delay_runs_to_completion_and_clock_flush_emits_last_bar(db_path, monkeypatch):
@@ -159,3 +174,38 @@ def test_start_market_stream_never_breaks_server_boot(db_path, monkeypatch, capl
     assert start_market_stream(hub, db_path) is None and "stub" in caplog.text
     monkeypatch.setattr(settings, "MARKET_SOURCE", "none")
     assert start_market_stream(hub, db_path) is None
+
+
+def test_replay_writes_are_refused_on_the_production_db(db_path, monkeypatch, caplog):
+    """寫入口的保險：replay=True 寫正式 DB 一律拒絕；演練 DB 設定成正式 DB（設定錯）時，串流照跑、不落地、記 ERROR。"""
+    from db.bars import bars_upsert
+    monkeypatch.setattr(settings, "DB_PATH", db_path)
+    row = next(r for r in _fixture_rows() if r["instrument_id"] == "TAIFEX:TMF" and r["resolution"] == "1m")
+    conn = sqlite3.connect(db_path)
+    with pytest.raises(ValueError, match="production DB"):
+        bars_upsert(conn, [row], replay=True)
+    assert bars_upsert(conn, [row]) == 1                                     # 真來源照常寫
+    conn.rollback()
+    conn.close()
+    monkeypatch.setattr(settings, "REPLAY_DB_PATH", db_path)
+    hub = StreamHub()
+    runner = StreamRunner(ReplaySource([row]), hub, db_path, instruments=["TAIFEX:TMF"], clock_flush=False)
+    assert runner.start() and runner.bars == 1
+    runner.stop()
+    assert "production DB" in caplog.text
+    main = sqlite3.connect(db_path)
+    assert main.execute("SELECT COUNT(*) FROM bars").fetchone()[0] == 0
+    main.close()
+
+
+def test_non_replay_sources_still_persist_to_the_main_db(db_path, monkeypatch):
+    class Live:
+        name = "shioaji"
+
+        def start(self, on_tick, on_bar):
+            return True
+
+        def stop(self):
+            pass
+    runner = StreamRunner(Live(), StreamHub(), db_path, instruments=["TAIFEX:TMF"], clock_flush=False)
+    assert runner.persist_db == db_path and not runner.replay

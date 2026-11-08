@@ -171,6 +171,9 @@ STREAM_PERSIST_TICKS = False                 # tick 量大且有損（契約 ts 
 STREAM_FLUSH_SECONDS = 1.0                   # 時鐘驅動 flush 的間隔：沒有後續 tick 的分鐘也在結束時刻發出
 STREAM_REPLAY_JSONL = os.environ.get("STREAM_REPLAY_JSONL", "")   # MARKET_SOURCE=replay 時 server 回放的 JSONL
 STREAM_REPLAY_DELAY_SECONDS = float(os.environ.get("STREAM_REPLAY_DELAY", "0"))
+# 串流演練（ReplaySource）落地的 DB：一律跟正式 DB 分開（bars 主鍵不含 source，寫進正式 DB 會蓋掉同一分鐘的真資料）。
+# 要讓 /api/bars 讀演練資料：另開一個 server，PREMARKET_DB 指到這個檔。
+REPLAY_DB_PATH = os.environ.get("REPLAY_DB", "data/replay.db")
 SHIOAJI_API_KEY = os.environ.get("SHIOAJI_API_KEY", "")
 SHIOAJI_SECRET = os.environ.get("SHIOAJI_SECRET", "")
 # tradewind 回流的 inbox：{inbox}/events/{run_mode}/{date}.jsonl、{inbox}/account_snapshots/...

@@ -2,14 +2,17 @@
 
 讀取走 `bars_v`（新 bars 表 ∪ 三張舊 raw 表的映射），輸出一律是契約 `bars` 的 dict 形狀，
 時刻正規化為 `YYYY-MM-DDTHH:MM:SS+08:00`（舊表的 collected_at 沒有時區、可能帶微秒）。
-寫入只進 `bars` 表（新來源：串流落地、tick／1m），每筆以契約驗過。
+寫入只進 `bars` 表（新來源：串流落地、tick／1m），每筆以契約驗過。串流演練（replay=True）只准寫演練 DB（REPLAY_DB），
+寫正式 DB 一律拒絕：bars 主鍵不含 source，演練資料會蓋掉同一分鐘的真資料。
 """
 
 import json
 import logging
+import os
 import sqlite3
 from datetime import datetime
 
+from config import settings
 from utils.contract_schema import require_valid
 from utils.tw_time import TW
 
@@ -78,8 +81,23 @@ def bars_query(conn: sqlite3.Connection, instrument_id: str, resolution: str = "
     return [_row_to_record(r) for r in rows]
 
 
-def bars_upsert(conn: sqlite3.Connection, records: list[dict]) -> int:
-    """寫入 bars 表（新來源）。每筆先驗契約；回傳寫入筆數。"""
+def _db_file(conn: sqlite3.Connection) -> str:
+    """連線的主資料庫檔（絕對路徑；記憶體 DB 回空字串）。"""
+    row = next((r for r in conn.execute("PRAGMA database_list") if r[1] == "main"), None)
+    return os.path.realpath(row[2]) if row and row[2] else ""
+
+
+def is_main_db(conn: sqlite3.Connection) -> bool:
+    """這條連線是不是正式 DB（settings.DB_PATH）。"""
+    f = _db_file(conn)
+    return bool(f) and f == os.path.realpath(settings.DB_PATH)
+
+
+def bars_upsert(conn: sqlite3.Connection, records: list[dict], *, replay: bool = False) -> int:
+    """寫入 bars 表（新來源）。每筆先驗契約；回傳寫入筆數。replay=True（串流演練）時拒寫正式 DB（raise ValueError）：
+    演練資料只能進 settings.REPLAY_DB_PATH。"""
+    if replay and is_main_db(conn):
+        raise ValueError(f"replay bars must not be written to the production DB ({settings.DB_PATH}); use REPLAY_DB")
     n = 0
     for rec in records:
         rec = {**rec, "revision": rec.get("revision", 0)}

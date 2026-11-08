@@ -503,8 +503,8 @@ def cmd_stream(args: argparse.Namespace) -> None:
     from integration.bar_builder import _minute_end
     last = max((r["ts"] for r in rows), default=None)
     runner.stop(now=_minute_end(last) if last else None)              # 以最後一筆之後一分鐘當時鐘：回放當天的也收得掉
-    print(f"replayed {source.replayed}/{len(source)} usable rows: {runner.ticks} ticks, {runner.bars} 1m bars written, "
-          f"{runner.dropped} dropped")
+    print(f"replayed {source.replayed}/{len(source)} usable rows: {runner.ticks} ticks, {runner.bars} 1m bars written "
+          f"to {runner.persist_db} (rehearsal DB, not the production DB), {runner.dropped} dropped")
 
 
 
@@ -871,7 +871,7 @@ def main() -> None:
     ingest_parser.add_argument("--date", default=None, help="只掃該日檔案（預設全部）")
     ingest_parser.add_argument("--inbox", default=None, help="inbox 目錄（預設 settings.TRADEWIND_INBOX_DIR）")
 
-    stream_parser = subparsers.add_parser("stream", help="回放 JSONL 的 tick／1m 進 bars 表（MARKET_SOURCE=replay 的離線版）")
+    stream_parser = subparsers.add_parser("stream", help="串流演練：回放 JSONL 的 tick／1m，落地到演練 DB（REPLAY_DB，不碰正式 DB）")
     stream_parser.add_argument("--jsonl", required=True, help="契約 bars 列的 JSONL（tick 或 1m）")
     stream_parser.add_argument("--instruments", nargs="*", default=None, help="只回放這些商品（預設 settings.STREAM_INSTRUMENTS）")
     stream_parser.add_argument("--delay", type=float, default=0.0, help="每筆之間停幾秒（0＝同步跑完）")

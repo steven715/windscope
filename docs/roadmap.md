@@ -86,6 +86,10 @@
   `integration/bar_builder`（tick → 只在分鐘結束發出的 1m）、`collectors/market_stream`（`StreamRunner`：tick 推 hub、1m 推 hub＋落 `bars`；
   `ReplaySource` 回放；`ShioajiSource` 📌 STUB）、`server/stream.StreamHub`＋`/ws/bars`（tick／1m／心跳）、CLI `stream --jsonl`；
   **本機剩**：`ShioajiSource` 實作與驗證（清單在 `docs/data_sources.md` 八）、`.env` 設 `MARKET_SOURCE=shioaji`。
+  → ⑧-b ✅ 串流演練隔離（2026-11-08）：`ReplaySource` 的落地一律寫演練 DB（`REPLAY_DB`，預設 `data/replay.db`），
+  `db/bars.bars_upsert(replay=True)` 拒寫正式 DB（bars 主鍵不含 source，演練會蓋掉同一分鐘的真資料）；Shioaji 落地前必須先有這條。
+  名詞（與 tradewind 12-engine 一致）：**串流演練**＝ReplaySource 回放進 /ws/bars；**歷史回測**＝tradewind 讀 /api/bars 跑 backtest；
+  **事件重放**＝tradewind 重放錄下的外部事件、比對輸出（未實作）。
   → ⑨ ✅ `GET /api/calendar?date_from=&date_to=`（2026-11-08）：`market_holidays` 的休市日＋有資料的年份（唯讀、非契約表；讀表入口在
   `utils/trading_calendar.holidays_between`）。tradewind 的 paper 排程每天開盤前拉一次算交易日與換月日（假日單一真相在這裡）。
 - 待定事項列在 `docs/contracts/README.md` 末段，等 tradewind 上 GitHub 後在雙 repo session 定稿。

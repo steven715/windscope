@@ -8,6 +8,8 @@
 Runner：來源的 ts 先經 db/bars.normalize_ts 正規化（壞時刻丟掉並記 WARNING）、每筆都過契約驗證才推；時段歸屬用主檔 sessions；
 時鐘驅動的 flush（clock_flush=True 時每秒看一次）讓沒有後續 tick 的分鐘也在結束時刻發出。
 tick 落地（STREAM_PERSIST_TICKS）是有損的：契約 ts 只到秒，同一秒多筆 tick 會互相覆蓋；預設關。
+**串流演練隔離**：來源是 ReplaySource 時，落地一律寫 settings.REPLAY_DB_PATH（第一次寫時建表），讀主檔（sessions）仍用 db_path；
+演練 DB 解析到正式 DB（設定錯）就不落地、記 ERROR。bars_upsert(replay=True) 也會擋住寫進正式 DB。
 """
 
 import logging
@@ -19,6 +21,7 @@ from config import settings
 from db.bars import bars_upsert, normalize_ts
 from db.connection import get_connection
 from db.instruments import instrument_get
+from db.schema import create_all_tables
 from integration.bar_builder import BarBuilder, tick_record
 from utils.contract_schema import validate_record
 from utils.tw_time import now_tw_iso
@@ -117,10 +120,13 @@ class StreamRunner:
 
     def __init__(self, source: MarketSource, hub, db_path: str | None = None,
                  instruments: list[str] | None = None, persist_ticks: bool | None = None,
-                 clock_flush: bool = True) -> None:
+                 clock_flush: bool = True, persist_db: str | None = None) -> None:
         self.source = source
         self.hub = hub
-        self.db_path = db_path
+        self.db_path = db_path                                          # 讀主檔（sessions）
+        self.replay = source.name == "replay"
+        self.persist_db = persist_db or (settings.REPLAY_DB_PATH if self.replay else db_path)   # 演練一律寫演練 DB
+        self._schema_ready = not self.replay
         self.instruments = list(instruments or settings.STREAM_INSTRUMENTS)
         self.persist_ticks = settings.STREAM_PERSIST_TICKS if persist_ticks is None else persist_ticks
         self.clock_flush = clock_flush
@@ -208,14 +214,17 @@ class StreamRunner:
 
     def _persist(self, records: list[dict]) -> None:
         try:
-            with get_connection(self.db_path) as conn:
-                bars_upsert(conn, records)
+            with get_connection(self.persist_db) as conn:
+                if not self._schema_ready:                              # 演練 DB 可能是新檔：第一次寫時建表（冪等）
+                    create_all_tables(conn)
+                    self._schema_ready = True
+                bars_upsert(conn, records, replay=self.replay)
         except Exception as e:                                        # 落地失敗不能讓串流掛掉
-            logger.error("bars persist failed: %s", e)
+            logger.error("bars persist failed (%s): %s", self.persist_db, e)
 
     def start(self) -> bool:
         """啟動來源（來源丟例外也只記 ERROR）；clock_flush 時啟動每秒 flush 的執行緒。"""
-        logger.info("market stream start: source=%s instruments=%s", self.source.name, self.instruments)
+        logger.info("market stream start: source=%s instruments=%s persist=%s", self.source.name, self.instruments, self.persist_db)
         try:
             ok = self.source.start(self.on_tick, self.on_bar)
         except Exception as e:
