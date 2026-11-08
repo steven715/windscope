@@ -587,7 +587,11 @@ def stats_page(request: Request, rule_version: str | None = None,
 
     with get_connection(request.app.state.db_path) as conn:
         stats = build_call_stats(conn, rule_version, date_from, date_to)
-        trade = build_trade_stats(conn, None, None, None, date_from, date_to, trades_limit=20)
+        try:                                                         # 交易成績壞了不能讓整頁 500（上面的判斷統計照常）
+            trade = build_trade_stats(conn, None, None, None, date_from, date_to, trades_limit=20)
+        except Exception as e:
+            logger.error("trade stats failed: %s: %s", type(e).__name__, e)
+            trade = {"groups": [], "accounts": [], "error": f"{type(e).__name__}: {e}"}
 
     verdict_label, verdict_css = _VERDICT_LABELS[stats["assessment"]["verdict"]]
     return templates.TemplateResponse(request, "stats.html", {

@@ -1,5 +1,6 @@
-"""integration/trade_stats（依成交打分）：分批出場的加權 R、未平倉不算、出場原因（停損／失效／目標／override 分開）、
-同日重跑分開、run_mode 不混、版本混用標記、Insight 對錯對到驗證、帳戶權益曲線、沒資料；/api/trade-stats 與 /stats 頁。"""
+"""integration/trade_stats（依成交打分，一筆交易＝一段部位）：分批出場的加權 R、風控平倉（成交沒有 target）、趨勢加碼／減碼被淨額、
+同日重跑只看最後一次（跨日不切半）、日期區間不切半、到期沒成交、翻向、出場原因（停損／失效／目標／override／flatten）、
+版本分組、Insight 對錯（開倉方向 vs 當天漲跌）、帳戶曲線（基準、含入出金）、/api/trade-stats 與 /stats 頁（壞了不 500）。"""
 
 import json
 import sqlite3
@@ -10,14 +11,15 @@ from fastapi.testclient import TestClient
 
 from config import settings
 from db.events import events_ingest, snapshots_ingest
+from db.instruments import instruments_seed
 from db.schema import create_all_tables
 from db.targets import target_put
-from integration.trade_stats import build_trade_stats, build_trades, exit_reason
+from integration.trade_stats import build_trade_stats, exit_reason, latest_runs, system_exit_reason
 from server.app import create_app
 
 FIX = Path(__file__).resolve().parents[2] / "docs" / "contracts" / "fixtures"
-D = "2026-06-12"
-TGT = "0765ce4b0c35f0c0"
+D, D2, D3 = "2026-06-12", "2026-06-15", "2026-06-16"
+TGT = "0765ce4b0c35f0c0"                      # fixture：premarket_call、TAIFEX:TMF、做多（weight 0.6）、stop_pts 30、pullback_hold/p1
 
 
 def _fixture(name: str) -> list[dict]:
@@ -28,31 +30,30 @@ _SEQ = [0]
 
 
 def _ev(kind, action, ts, side=None, qty=None, price=None, r=None, reason=None, target=TGT, run="", mode="paper",
-        engine="g13", strategy="premarket_call", detail=None):
+        engine="g13", day=D, order_reason=None):
     _SEQ[0] += 1
-    return {"schema_version": "0.1", "event_id": f"sim-fut-01-e{_SEQ[0]:04d}{run}", "run_mode": mode, "account_id": "sim-fut-01",
-            "strategy_id": strategy, "target_id": target, "instrument_id": "TAIFEX:TMF", "ts": f"{D}T{ts}:00+08:00",
-            "recorded_at": f"{D}T{ts}:00+08:00", "kind": kind, "action": action, "side": side, "qty": qty, "price": price,
-            "r_multiple": r, "reason": reason, "detail": detail if detail is not None else ({"commission": 10, "tax": 2} if kind == "fill" else None),
+    det = ({"commission": 10, "tax": 2, "order_reason": order_reason} if kind == "fill" else None)
+    return {"schema_version": "0.1", "event_id": f"sim-fut-01-e{_SEQ[0]:05d}{run}", "run_mode": mode, "account_id": "sim-fut-01",
+            "strategy_id": "premarket_call" if target else None, "target_id": target, "instrument_id": "TAIFEX:TMF",
+            "ts": f"{day}T{ts}:00+08:00", "recorded_at": f"{day}T{ts}:00+08:00", "kind": kind, "action": action, "side": side,
+            "qty": qty, "price": price, "r_multiple": r, "reason": reason, "detail": det,
             "versions": {"execution_version": "e3", "risk_version": "r8", "engine_version": engine, "cost_model": "sim-c4/cost-c2"}}
 
 
-def _trade(entry_ts, exits, end, target=TGT, **kw):
-    """一筆交易：進場 buy 10 → 出場（[(ts, qty, r)]）→ 終局事件 end＝(kind, action, reason)。"""
-    rows = [_ev("plan", "entered", entry_ts, "buy", 10, 23000.0, 0.0, target=target, **kw),
-            _ev("fill", "fill", entry_ts, "buy", 10, 23000.0, 0.0, target=target, **kw)]
-    for ts, q, r in exits:
-        rows.append(_ev("fill", "fill", ts, "sell", q, 23000.0 + 30 * (r or 0), r, target=target, **kw))
-    if end:
-        rows.append(_ev(end[0], end[1], exits[-1][0], "sell", exits[-1][1], None, exits[-1][2], end[2], target=target, **kw))
-    return rows
+def _fill(ts, side, qty, price, **kw):
+    return _ev("fill", "fill", ts, side, qty, price, 0.0, **kw)
+
+
+def _setup(conn):
+    create_all_tables(conn)
+    instruments_seed(conn)
+    target_put(conn, _fixture("targets")[0])
 
 
 @pytest.fixture
 def db() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
-    create_all_tables(conn)
-    target_put(conn, _fixture("targets")[0])
+    _setup(conn)
     yield conn
     conn.close()
 
@@ -62,70 +63,130 @@ def _ingest(conn, rows):
     assert res["invalid"] == 0, res["errors"][:2]
 
 
-def test_exit_reason_classification():
-    assert exit_reason("override", "early_exit", "x") == "override"
-    assert exit_reason("plan", "invalidated", "期貨跌破") == "invalidated"
-    assert exit_reason("plan", "force_flat", "force_flat") == "force_flat"
-    assert [exit_reason("plan", "exited", r) for r in ("stop", "runner", "scaled_out_all", "superseded by abc", "flatten")] == [
-        "stop", "target", "target", "superseded", "other"]
+def _trades(db, **kw):
+    return build_trade_stats(db, **kw)["trades"]
 
 
-def test_weighted_r_reasons_overrides_insight_and_versions(db):
-    rows = (_trade("09:20", [("10:00", 3, 1.0), ("11:00", 7, -0.5)], ("plan", "exited", "runner"))            # (3×1 − 7×0.5)/10＝−0.05（不是單純平均 0.25）
-            + _trade("09:21", [("09:40", 10, -1.0)], ("plan", "exited", "stop"), target="t-stop")
-            + _trade("09:22", [("09:50", 10, -0.3)], ("plan", "invalidated", "期貨跌破夜盤低點"), target="t-inv")
-            + _trade("09:23", [("10:10", 10, 0.73)], ("override", "early_exit", "done"), target="t-ovr", engine="g12")
-            + _trade("09:24", [], None, target="t-open"))
-    _ingest(db, rows)
-    db.execute("INSERT INTO verifications (date, hit_day) VALUES (?, 1)", (D,))
+def test_reason_classifiers():
+    assert exit_reason("override", "reduce", "x") == "override" and exit_reason("plan", "scaled_out", "+1R") == "target"
+    assert exit_reason("plan", "invalidated", "期貨跌破") == "invalidated" and exit_reason("plan", "force_flat", "") == "force_flat"
+    assert [exit_reason("plan", "exited", r) for r in ("stop", "runner", "scaled_out_all", "superseded by abc", "roll", "x")] == [
+        "stop", "target", "target", "superseded", "roll", "other"]
+    assert [system_exit_reason(r) for r in ("flatten", "roll", "orphan", "chase", None)] == ["flatten", "roll", "orphan", "system", "system"]
+
+
+def test_scale_out_r_is_quantity_weighted_and_matches_tradewind_fill_r(db):
+    """3 口 +1R（23030）、7 口 −0.5R（22985）→ (3×30 − 7×15)／(30×10)＝−0.05（不是單純平均 0.25）。"""
+    _ingest(db, [_fill("09:20", "buy", 10, 23000.0), _ev("plan", "scaled_out", "09:59", "sell", 3, 23030.0, 1.0, "+1R"),
+                 _fill("10:00", "sell", 3, 23030.0), _ev("plan", "exited", "10:59", "sell", 7, 22985.0, -0.5, "runner"),
+                 _fill("11:00", "sell", 7, 22985.0)])
     s = build_trade_stats(db)
-    g = next(x for x in s["groups"] if x["rule_version"] == "v3")
-    assert g["r"]["n"] == 1 and g["r"]["avg_r"] == -0.05 and g["by_exit_reason"] == {"target": g["r"]}
-    assert g["insight"]["hit"]["n"] == 1 and g["insight"]["hit"]["avg_r"] == -0.05 and g["playbook"] == "pullback_hold/p1"
-    other = next(x for x in s["groups"] if x["rule_version"] is None)                                            # target 不在 DB
-    assert other["r"]["n"] == 3 and sorted(other["by_exit_reason"]) == ["invalidated", "override", "stop"]
-    assert other["by_exit_reason"]["stop"]["avg_r"] == -1.0 and other["by_exit_reason"]["invalidated"]["avg_r"] == -0.3
-    assert other["override"]["with"]["n"] == 1 and other["override"]["with"]["avg_r"] == 0.73
-    assert other["open_trades"] == 1 and other["mixed_versions"] is True and other["sufficient"] is False
-    assert other["r"]["total_r"] == round(-1.0 - 0.3 + 0.73, 4) and other["r"]["max_drawdown_r"] == 1.3
-    assert other["r"]["max_losing_streak"] == 2 and other["r"]["profit_factor"] == round(0.73 / 1.3, 4)
-    assert other["costs"] == 3 * 2 * 12                                                                         # 3 筆已平：每筆 2 次成交 ×（10＋2）
-    open_t = next(t for t in s["trades"] if t["target_id"] == "t-open")
-    assert open_t["status"] == "open" and open_t["r"] is None and s["n_trades"] == 5
+    (t,) = s["trades"]
+    assert t["status"] == "closed" and t["r"] == -0.05 and t["exit_reason"] == "target" and t["playbook"] == "pullback_hold/p1"
+    assert t["gross_pnl"] == (3 * 30 - 7 * 15) * 10 and t["costs"] == 36 and t["net_pnl"] == -150 - 36   # TMF 乘數 10
+    g = s["groups"][0]
+    assert g["r"]["avg_r"] == -0.05 and g["by_exit_reason"] == {"target": g["r"]} and g["sufficient"] is False
 
 
-def test_reruns_and_run_modes_are_kept_apart(db):
-    rows = (_trade("09:20", [("10:00", 10, 1.0)], ("plan", "exited", "runner"))
-            + _trade("09:30", [("10:30", 10, -1.0)], ("plan", "exited", "stop"), run="-r2")                        # 同日重跑：另一筆
-            + _trade("09:20", [("10:00", 10, 2.0)], ("plan", "exited", "runner"), mode="shioaji_sim"))
+def test_risk_flatten_exit_without_target_closes_the_trade(db):
+    """風控／kill switch 平倉單沒有 target（target_id 空、r_multiple 0）：一樣結束這筆，R 用價格算，原因＝flatten。"""
+    _ingest(db, [_fill("09:20", "buy", 10, 23000.0), _fill("10:30", "sell", 10, 22946.0, target=None, order_reason="flatten")])
+    (t,) = _trades(db)
+    assert t["status"] == "closed" and t["r"] == -1.8 and t["exit_reason"] == "flatten" and t["target_id"] == TGT
+
+
+def test_trend_add_and_reduce_netted_onto_the_new_target_stay_one_trade(db):
+    """加碼：舊 target 歸零＋新 target 進場被淨額成一張掛在新 target 上的買單；減碼同理。都是同一段部位、以開倉 target 的 1R 計。"""
+    _ingest(db, [_fill("09:20", "buy", 2, 23000.0), _fill("09:40", "buy", 2, 23010.0, target="t-new"),       # 加碼（掛新 target）
+                 _fill("10:00", "sell", 1, 23020.0, target="t-new"),                                          # 減碼
+                 _ev("plan", "exited", "10:59", "sell", 3, 23030.0, None, "stop", target="t-new"),
+                 _fill("11:00", "sell", 3, 23030.0, target="t-new")])
+    (t,) = _trades(db)
+    assert t["status"] == "closed" and t["adds"] == 1 and t["entry_qty"] == 4 and t["targets"] == [TGT, "t-new"]
+    assert t["r"] == round(((23020 - 23005) * 1 + (23030 - 23005) * 3) / (30 * 4), 4) and t["exit_reason"] == "stop"
+
+
+def test_same_day_rerun_keeps_only_the_last_run_and_swing_across_a_rerun_is_one_trade(db):
+    rows = [_fill("09:20", "buy", 10, 23000.0), _fill("09:40", "sell", 10, 22970.0, order_reason="flatten", target=None),  # 第 1 次（被取代）
+            _fill("10:20", "buy", 10, 23000.0, run="-r2"),
+            _fill("11:00", "sell", 10, 23060.0, run="-r2", target=None, order_reason="flatten"),
+            _fill("09:20", "buy", 5, 23100.0, day=D2, target="t-swing"),                                       # 隔天進場
+            _fill("10:00", "sell", 5, 23130.0, day=D3, run="-r2", target="t-swing")]                           # 再隔天重跑後出場
     _ingest(db, rows)
-    trades = build_trades(rows)
-    assert sorted((t["run_mode"], t["run"], t["r"]) for t in trades) == [("paper", 1, 1.0), ("paper", 2, -1.0), ("shioaji_sim", 1, 2.0)]
+    assert len(latest_runs([{**r, "_session_date": r["ts"][:10]} for r in rows])) == 4
+    ts = _trades(db)
+    assert sorted((t["entry_ts"][:10], t["status"], t["r"]) for t in ts) == [(D, "closed", 2.0), (D2, "closed", None)]
+    swing = next(t for t in ts if t["target_id"] == "t-swing")
+    assert swing["unscored"] and swing["exit_ts"].startswith(D3)                     # t-swing 不在 DB：沒有 stop_pts → 不打分但不是未平倉
+
+
+def test_date_window_does_not_cut_a_trade_in_half(db):
+    _ingest(db, [_fill("13:00", "buy", 10, 23000.0, day=D), _fill("09:30", "sell", 10, 23030.0, day=D2)])
+    assert [(t["status"], t["r"], t["entry_ts"][:10]) for t in _trades(db, date_from=D2, date_to=D2)] == [("closed", 1.0, D)]
+    assert [t["status"] for t in _trades(db, date_from=D, date_to=D)] == ["open"]        # 只看到 6/12：那時還沒出場
+
+
+def test_position_gone_without_an_exit_fill_is_not_scored(db):
+    """到期結算（沒有出場成交）：之後的快照已經沒有部位 → closed_without_fill，不算未平倉、不打分。"""
+    _ingest(db, [_fill("09:20", "buy", 10, 23000.0)])
+    res = snapshots_ingest(db, [{**_fixture("account_snapshots")[0], "snapshot_id": "s-expiry-day", "as_of": f"{D}T13:50:00+08:00",
+                                 "positions": []}])
+    assert res["inserted"] == 1, res
     s = build_trade_stats(db)
-    by_mode = {g["run_mode"]: g for g in s["groups"]}
-    assert by_mode["paper"]["r"]["n"] == 2 and by_mode["shioaji_sim"]["r"]["n"] == 1
-    assert build_trade_stats(db, run_mode="shioaji_sim")["n_trades"] == 1
+    (t,) = s["trades"]
+    assert t["status"] == "closed_without_fill" and t["r"] is None and s["groups"][0]["closed_without_fill"] == 1
+    assert s["groups"][0]["open_trades"] == 0 and s["groups"][0]["r"]["n"] == 0
 
 
-def test_inconsistent_fills_are_not_scored(db, caplog):
-    rows = _trade("09:20", [("10:00", 12, 1.0)], ("plan", "exited", "runner"))                                  # 出比進多
-    rows += _trade("09:21", [("10:00", 10, None)], ("plan", "exited", "stop"), target="t-nor")                  # 出場成交沒有 R
-    _ingest(db, rows)
+def test_flip_closes_and_opens_and_side_less_fills_are_skipped(db, caplog):
+    bad = _fill("09:30", "buy", 3, 23000.0)
+    bad["side"] = None
+    _ingest(db, [_fill("09:20", "buy", 10, 23000.0), bad, _fill("10:00", "sell", 20, 23030.0), _fill("11:00", "buy", 10, 23000.0)])
+    assert sorted((t["direction"], t["r"]) for t in _trades(db)) == [(-1, 1.0), (1, 1.0)] and "without side" in caplog.text
+
+
+def test_override_reduce_to_zero_has_a_reason_and_nothing_crashes(db):
+    """人為 reduce 到 0：只有 override/reduce、沒有 plan/exited——原因是 override；另一筆沒有出場事件＝other，排序不會炸。"""
+    _ingest(db, [_fill("09:20", "buy", 10, 23000.0), _ev("override", "reduce", "09:59", "sell", 10, 23015.0, 0.5, "手動"),
+                 _fill("10:00", "sell", 10, 23015.0),
+                 _fill("10:20", "buy", 10, 23000.0, target="t-x"), _fill("10:40", "sell", 10, 22990.0, target="t-x")])
     s = build_trade_stats(db)
-    assert all(t["status"] == "inconsistent" for t in s["trades"]) and all(g["r"]["n"] == 0 for g in s["groups"])
-    assert sum(g["inconsistent_trades"] for g in s["groups"]) == 2 and "not scored" in caplog.text
+    assert {t["exit_reason"] for t in s["trades"]} == {"override", "other"}
+    g = next(g for g in s["groups"] if g["rule_version"] == "v3")
+    assert g["override"]["with"]["n"] == 1 and g["override"]["with"]["avg_r"] == 0.5
 
 
-def test_account_curves_take_the_latest_snapshot_per_day(db):
-    snaps = _fixture("account_snapshots")
-    day2 = {**snaps[0], "snapshot_id": "s-20260615-close", "as_of": "2026-06-15T13:50:00+08:00", "equity": 297400.0,
-            "cash_balance": 297400.0, "available_margin": 297400.0}
-    day3 = {**snaps[0], "snapshot_id": "s-20260616-close", "as_of": "2026-06-16T13:50:00+08:00", "equity": 303000.0,
-            "cash_balance": 303000.0, "available_margin": 303000.0}
-    snapshots_ingest(db, snaps + [day2, day3])
-    a = build_trade_stats(db)["accounts"]
-    assert len(a) == 1 and a[0]["days"] == 3 and a[0]["start_equity"] == 300412.0 and a[0]["end_equity"] == 303000.0
-    assert a[0]["max_drawdown_pct"] == round((300412.0 - 297400.0) / 300412.0 * 100, 4)
+def test_versions_split_groups_and_insight_uses_direction_vs_actual_move(db):
+    _ingest(db, [_fill("09:20", "buy", 10, 23000.0), _fill("10:00", "sell", 10, 23030.0),
+                 _fill("10:20", "buy", 10, 23000.0, engine="g14"), _fill("10:40", "sell", 10, 22970.0, engine="g14")])
+    db.execute("INSERT INTO verifications (date, day_change_class, hit_day) VALUES (?, 'up', 0)", (D,))  # hit_day 是重算後判斷的：不看它
+    s = build_trade_stats(db)
+    assert sorted(g["versions"]["engine_version"] for g in s["groups"]) == ["g13", "g14"]
+    assert all(g["insight"]["hit"]["n"] == 1 and g["insight"]["miss"]["n"] == 0 for g in s["groups"])
+    db.execute("UPDATE verifications SET day_change_class = 'flat'")
+    assert all(g["insight"]["flat"]["n"] == 1 for g in build_trade_stats(db)["groups"])
+    db.execute("UPDATE verifications SET day_change_class = 'down'")
+    assert all(g["insight"]["miss"]["n"] == 1 for g in build_trade_stats(db)["groups"])
+
+
+def test_run_modes_never_mix(db):
+    _ingest(db, [_fill("09:20", "buy", 10, 23000.0), _fill("10:00", "sell", 10, 23030.0),
+                 _fill("09:20", "buy", 10, 23000.0, mode="shioaji_sim"), _fill("10:00", "sell", 10, 22970.0, mode="shioaji_sim")])
+    by = {g["run_mode"]: g["r"]["avg_r"] for g in build_trade_stats(db)["groups"]}
+    assert by == {"paper": 1.0, "shioaji_sim": -1.0} and build_trade_stats(db, run_mode="shioaji_sim")["n_trades"] == 1
+
+
+def test_account_curve_base_and_flags(db):
+    s0 = _fixture("account_snapshots")[0]
+
+    def snap(day, eq):
+        return {**s0, "snapshot_id": f"s-{day}", "as_of": f"{day}T13:50:00+08:00", "equity": eq, "cash_balance": eq, "available_margin": eq}
+    assert snapshots_ingest(db, [snap(D, 300000.0), snap(D2, 297000.0), snap(D3, 303000.0)])["inserted"] == 3
+    (a,) = build_trade_stats(db)["accounts"]
+    assert a["first_day_pnl_excluded"] and a["includes_cash_flows"] and a["start_equity"] == 300000.0 and a["days"] == 3
+    (a,) = build_trade_stats(db, date_from=D2)["accounts"]                                  # 基準＝區間前最後一天（6/12 收盤）
+    assert a["base_date"] == D and a["start_equity"] == 300000.0 and a["end_equity"] == 303000.0 and a["days"] == 2
+    assert not a["first_day_pnl_excluded"] and a["max_drawdown_pct"] == 1.0 and a["return_pct"] == 1.0
 
 
 def test_empty_db_is_fine(db):
@@ -133,12 +194,11 @@ def test_empty_db_is_fine(db):
     assert s["groups"] == [] and s["accounts"] == [] and s["trades"] == [] and s["min_sample"] == settings.STATS_MIN_SAMPLE
 
 
-def test_api_and_stats_page(tmp_path):
+def test_api_and_stats_page(tmp_path, monkeypatch):
     p = str(tmp_path / "t.db")
     conn = sqlite3.connect(p)
-    create_all_tables(conn)
-    target_put(conn, _fixture("targets")[0])
-    _ingest(conn, _trade("09:20", [("10:00", 10, 1.0)], ("plan", "exited", "runner")))
+    _setup(conn)
+    _ingest(conn, [_fill("09:20", "buy", 10, 23000.0), _fill("10:00", "sell", 10, 23030.0)])
     conn.commit()
     conn.close()
     c = TestClient(create_app(db_path=p, enable_scheduler=False))
@@ -148,3 +208,7 @@ def test_api_and_stats_page(tmp_path):
     assert c.get("/api/trade-stats", params={"run_mode": "live"}).status_code == 422
     page = c.get("/stats").text
     assert "Paper／模擬交易成績" in page and "pullback_hold/p1" in page and "+1.00" in page
+    import integration.trade_stats as mod
+    monkeypatch.setattr(mod, "build_trade_stats", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    r = c.get("/stats")
+    assert r.status_code == 200 and "交易成績算不出來" in r.text and "boom" in r.text

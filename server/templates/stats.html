@@ -223,8 +223,9 @@
 {# ── ⑤ Paper／模擬交易成績（依成交打分，integration/trade_stats；同一份是 /api/trade-stats）── #}
 <div class="sec">
   <div class="section-title">⑤ Paper／模擬交易成績</div>
-  <div class="dim">tradewind 回流的成交（每天 18:30 入庫）：一個 target 的成交算一筆交易，R＝依出場口數加權的成交 R（不扣成本）。
-    依 run_mode × 策略 × 規則版本 × Playbook 分開（Paper 與實盤各算各的）；未平倉不算進統計。</div>
+  <div class="dim">tradewind 回流的成交（每天 18:30 入庫）：同一帳戶同一商品從空手到空手算一筆交易（含風控平倉、換月、加碼減碼），
+    R 以開倉 target 的 1R 計（不扣成本）。依 run_mode × 策略 × 規則版本 × Playbook × 引擎版本分開（Paper 與實盤各算各的）；
+    未平倉、沒有成交就消失的部位（到期結算）不算。同日重跑只看最後一次。不套用上方的規則版本篩選。帳戶報酬含入出金。</div>
 </div>
 {% if t.groups %}
 <div class="table-wrap">
@@ -249,6 +250,8 @@
     </tbody>
   </table>
 </div>
+{% elif t.error %}
+<div class="panel empty" style="padding:14px">交易成績算不出來（{{ t.error }}），看 log；上面的判斷統計不受影響</div>
 {% else %}
 <div class="panel empty" style="padding:14px">此區間還沒有 tradewind 回流的成交（Paper 開跑、18:30 入庫後才會有）</div>
 {% endif %}
