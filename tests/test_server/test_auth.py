@@ -116,3 +116,70 @@ def test_token_comes_from_settings_and_denials_never_log_it(db, monkeypatch, cap
     c.get("/api/instruments", headers={"Authorization": f"Bearer {TOKEN}x"})
     assert "auth denied" in caplog.text and TOKEN not in caplog.text
     assert caplog.text.count("auth denied") == 1                                         # 同一 IP 60 秒內只記一次
+
+
+# ── 審查加固 ─────────────────────────────────────────────────────
+def test_every_response_refuses_to_be_framed_even_without_auth(client, db):
+    for c, headers in ((client, BEARER), (TestClient(create_app(db_path=db, api_token="")), {})):
+        for path in ("/healthz", "/api/instruments"):
+            r = c.get(path, headers=headers)
+            assert r.headers["x-frame-options"] == "DENY" and r.headers["content-security-policy"] == "frame-ancestors 'none'"
+    assert client.get("/api/instruments").headers["x-frame-options"] == "DENY"              # 401 也有
+
+
+def test_denial_log_cannot_be_forged_and_reports_suppressed_counts(client, caplog):
+    client.get("/api/x%0aWARNING%20server.auth%20auth%20OK%20for%20admin")             # 伺服器解碼後是換行
+    for _ in range(3):
+        client.get("/api/instruments")
+    assert "\nWARNING server.auth auth OK" not in caplog.text and "\\n" in caplog.text     # 路徑以 repr 記
+    assert caplog.text.count("auth denied") == 1
+    import server.auth as mod
+    mw = client.app.middleware_stack
+    while not isinstance(mw, mod.TokenAuth):
+        mw = mw.app
+    mw._last_log.clear()                                                                   # 下一分鐘
+    client.get("/api/instruments", headers={"X-Forwarded-For": "203.0.113.9"})
+    assert "forwarded '203.0.113.9'" in caplog.text
+
+
+def test_whitespace_token_means_auth_off_and_healthz_says_so(db):
+    c = TestClient(create_app(db_path=db, api_token="   "))
+    assert c.get("/api/instruments").status_code == 200 and c.get("/healthz").json()["auth"] is False
+
+
+def test_validate_token_rules():
+    from server.auth import validate_token
+    good = "A" * 32
+    assert validate_token(good) is None and validate_token("", disabled=True) is None
+    assert "not set" in validate_token("") and "not set" in validate_token("   ")
+    assert "too short" in validate_token("short-token")
+    assert "printable ASCII" in validate_token("A" * 31 + "é") and "printable ASCII" in validate_token("A" * 16 + " " + "A" * 16)
+
+
+def test_serve_refuses_to_start_without_a_token_or_with_a_weak_one(monkeypatch, capsys):
+    import argparse
+
+    import uvicorn
+
+    import main as cli
+    started = []
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: started.append(kw))
+    args = argparse.Namespace(no_scheduler=True, port=None)
+    monkeypatch.delenv("WINDSCOPE_AUTH_DISABLED", raising=False)
+    for tok in ("", "weak"):
+        monkeypatch.setattr(settings, "WINDSCOPE_API_TOKEN", tok)
+        with pytest.raises(SystemExit) as e:
+            cli.cmd_serve(args)
+        assert e.value.code == 2 and "refusing to start" in capsys.readouterr().err
+    monkeypatch.setenv("WINDSCOPE_AUTH_DISABLED", "1")                                       # 本機開發：明講才准
+    monkeypatch.setattr(settings, "WINDSCOPE_API_TOKEN", "")
+    cli.cmd_serve(args)
+    monkeypatch.delenv("WINDSCOPE_AUTH_DISABLED")
+    monkeypatch.setattr(settings, "WINDSCOPE_API_TOKEN", TOKEN + "x" * 20)
+    cli.cmd_serve(args)
+    assert len(started) == 2
+
+
+def test_service_worker_caches_nothing_and_clears_old_caches(client):
+    sw = client.get("/sw.js").text
+    assert "caches.delete" in sw and "addAll" not in sw and ".put(" not in sw and "respondWith" not in sw

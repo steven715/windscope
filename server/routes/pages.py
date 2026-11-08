@@ -230,34 +230,17 @@ _MANIFEST = json.dumps({
     ],
 }, ensure_ascii=False)
 
-# Service worker：network-first，/api/ 一律走網路（即時資料不快取），離線回退快取殼。
+# Service worker：只為了「加到主畫面」；不快取任何東西（ADR-0008：頁面要認證，快取會讓別人離線看到資料），
+# 啟用時刪掉舊版（premarket-v1）留下的快取；請求不攔，瀏覽器自己處理（認證對話框照常出現）。
 _SERVICE_WORKER = """\
-const CACHE = "premarket-v1";
-const SHELL = ["/", "/live"];
-self.addEventListener("install", function (e) {
-  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).catch(function () {}));
-  self.skipWaiting();
-});
+self.addEventListener("install", function () { self.skipWaiting(); });
 self.addEventListener("activate", function (e) {
   e.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.filter(function (k) { return k !== CACHE; })
-                           .map(function (k) { return caches.delete(k); }));
+    return Promise.all(keys.map(function (k) { return caches.delete(k); }));
   }));
   self.clients.claim();
 });
-self.addEventListener("fetch", function (e) {
-  var req = e.request;
-  if (req.method !== "GET") return;
-  e.respondWith(
-    fetch(req).then(function (res) {
-      if (res.ok && new URL(req.url).pathname.indexOf("/api/") !== 0) {
-        var copy = res.clone();
-        caches.open(CACHE).then(function (c) { c.put(req, copy); });
-      }
-      return res;
-    }).catch(function () { return caches.match(req); })
-  );
-});
+self.addEventListener("fetch", function () { /* 不攔：不快取、不改寫 */ });
 """
 
 

@@ -13,3 +13,6 @@ crontab.example
 docker-compose.yml
 Dockerfile
 .dockerignore
+# 金鑰只走 compose 的 environment，不烤進 image
+.env
+.env.*

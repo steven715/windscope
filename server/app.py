@@ -16,7 +16,7 @@ def create_app(db_path: str | None = None,
 
     enable_scheduler=True 時啟動 APScheduler（測試時保持 False）。
     """
-    token = settings.WINDSCOPE_API_TOKEN if api_token is None else api_token
+    token = (settings.WINDSCOPE_API_TOKEN if api_token is None else api_token or "").strip()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
