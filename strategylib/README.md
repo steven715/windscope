@@ -9,7 +9,7 @@ windscope 與 tradewind **共用的純函式策略庫**。回測（windscope）�
 |---|---|---|
 | `strategylib.trend` | 趨勢三態（UP／DOWN／FLAT／UNKNOWN）、小勢、行動／持倉提示：`evaluate_series(bars, params, gate)` | `RULE_VERSION`（t2） |
 | `strategylib.adjust` | 還原股價純函式：`back_adjust_with_events(bars, div_events, gap_pct)` | — |
-| `strategylib.roll` | 期貨連續代號的換月：`front_contract(continuous, instruments, session_date, holidays)`（`roll_rule=days_before_expiry:N`，換月日＝到期日往前第 N 個交易日；0.3.0 起，windscope 串流用它決定連續代號該接哪一口，語意與 tradewind `market/contracts` 相同） | `ROLL_VERSION`（roll1） |
+| `strategylib.roll` | 期貨連續代號的換月：`front_contract(continuous, instruments, session_date, holidays)`（`roll_rule=days_before_expiry:N`，換月日＝到期日往前第 N 個交易日；0.3.0 起，windscope 串流用它決定連續代號該接哪一口，語意與 tradewind `market/contracts` 相同；0.3.1 起日期只收嚴格 YYYY-MM-DD） | `ROLL_VERSION`（roll1） |
 | `strategylib.playbooks` | Playbook 程式（契約 `trade_plan.playbook_id`）：`get_playbook(id, ver).step(state, bars_1m, plan, direction, prev_close)`。`pullback_hold p1`（微台日內）、`trend_pullback p1`（個股波段：窗口內第一根 1 分 K 收完進場、停損跨日、分批；趨勢進出由上游新 target 表達） | 各 playbook 自帶 `VERSION` |
 
 ## 規則
@@ -33,7 +33,7 @@ windscope 與 tradewind **共用的純函式策略庫**。回測（windscope）�
 ## tradewind 怎麼用
 
 ```
-pip install "git+https://github.com/steven715/windscope@strategylib-v0.3.0#subdirectory=strategylib"
+pip install "git+https://github.com/steven715/windscope@strategylib-v0.3.1#subdirectory=strategylib"
 ```
 
 tag 格式 `strategylib-vX.Y.Z`，對應 `__version__`。tradewind 的 `plan/` 只呼叫 `get_playbook(...).step(...)`，
