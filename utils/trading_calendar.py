@@ -46,17 +46,10 @@ def _holidays() -> set[str]:
     return _holiday_cache
 
 
-def holidays_between(date_from: str, date_to: str, conn=None) -> list[dict]:
-    """休市日（含名稱）在 [date_from, date_to] 之間，舊→新：[{date, name}]。給 /api/calendar 用（讀表的唯一入口在本模組）。"""
-    from db.connection import get_connection
-
+def holidays_between(conn, date_from: str, date_to: str) -> list[dict]:
+    """休市日（含名稱）在 [date_from, date_to] 之間，舊→新：[{date, name}]。conn 由呼叫端用 get_connection 開（/api/calendar）。"""
     sql = "SELECT date, name FROM market_holidays WHERE date >= ? AND date <= ? ORDER BY date"
-    if conn is not None:
-        rows = conn.execute(sql, (date_from, date_to)).fetchall()
-    else:
-        with get_connection() as c:
-            rows = c.execute(sql, (date_from, date_to)).fetchall()
-    return [{"date": r[0], "name": r[1]} for r in rows]
+    return [{"date": r[0], "name": r[1]} for r in conn.execute(sql, (date_from, date_to)).fetchall()]
 
 
 def holiday_years(conn) -> list[str]:

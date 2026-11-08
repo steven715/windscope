@@ -235,10 +235,10 @@ def query_calendar(request: Request, date_from: str, date_to: str) -> dict:
             raise HTTPException(status_code=422, detail="date_from/date_to 要是 YYYY-MM-DD")
     if date_to < date_from:
         raise HTTPException(status_code=422, detail="date_to 早於 date_from")
-    if int(date_to[:4]) - int(date_from[:4]) > 5:
-        raise HTTPException(status_code=422, detail="一次最多 5 年")
+    if int(date_to[:4]) - int(date_from[:4]) + 1 > 5:
+        raise HTTPException(status_code=422, detail="一次最多 5 個年份")
     with get_connection(request.app.state.db_path) as conn:
-        return {"date_from": date_from, "date_to": date_to, "holidays": holidays_between(date_from, date_to, conn=conn),
+        return {"date_from": date_from, "date_to": date_to, "holidays": holidays_between(conn, date_from, date_to),
                 "years_covered": holiday_years(conn)}
 
 

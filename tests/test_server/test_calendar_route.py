@@ -30,5 +30,6 @@ def test_calendar_lists_holidays_in_range_and_covered_years(client):
 def test_calendar_rejects_bad_ranges(client):
     assert client.get("/api/calendar?date_from=2026-6-1&date_to=2026-12-31").status_code == 422
     assert client.get("/api/calendar?date_from=2026-12-31&date_to=2026-01-01").status_code == 422
-    assert client.get("/api/calendar?date_from=2020-01-01&date_to=2026-12-31").status_code == 422
+    assert client.get("/api/calendar?date_from=2021-01-01&date_to=2026-12-31").status_code == 422   # 6 個年份
+    assert client.get("/api/calendar?date_from=2022-01-01&date_to=2026-12-31").status_code == 200   # 5 個年份
     assert client.get("/api/calendar?date_from=2026-01-01").status_code == 422
