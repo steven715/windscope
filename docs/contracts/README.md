@@ -82,6 +82,7 @@ tradewind 算口數時取「`trade_plan.risk` 反推的口數」與「可用保�
 | `raw_stock_daily(date, stock_id, o,h,l,c,v)` | bars `TWSE:{id}` `1d` | 同上；`volume` 單位股 |
 | `raw_futures(date, night_close, night_volume, …)` | bars `TAIFEX:TX` `1d` `session=night` | 同上；只有收盤價，`open/high/low` 為 null；夜盤 `ts` 以歸屬日前一日 15:00 近似 |
 | `raw_fx` / `intraday_fx` | bars `FX:USDTWD` `1d` / `5m` | — |
+| `market_holidays` | （非契約）`GET /api/calendar` | **已實作**（2026-11-08）：區間休市日 `{date, name}`＋`years_covered`（休市表有資料的年份）；tradewind 排程用來算交易日與換月日 |
 | `stock_info` | instruments | **已實作** `instruments` 表＋`config/instruments.json` 種子（`db/instruments.py`、`GET /api/instruments`）；`stock_info` 仍供舊頁面用 |
 | `stock_dividends(factor)` | corporate_actions | `kind` 先全填 `cash_dividend`，factor 直接搬 |
 | `signals`（盤前判斷） | targets `strategy_id=premarket_call` | **已實作**（`integration/targets_builder.py`，掛在 before_open）：偏多/偏空/中性 → `target_weight` ±信心/5／0，`horizon=intraday`，`valid_from` 08:50、`valid_until` 13:25；`invalidation`＝開盤 30 分內跌破/站上前日低/高點；`trade_plan` 取 `settings.PREMARKET_PLAYBOOK` |

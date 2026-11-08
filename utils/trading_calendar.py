@@ -46,6 +46,17 @@ def _holidays() -> set[str]:
     return _holiday_cache
 
 
+def holidays_between(conn, date_from: str, date_to: str) -> list[dict]:
+    """休市日（含名稱）在 [date_from, date_to] 之間，舊→新：[{date, name}]。conn 由呼叫端用 get_connection 開（/api/calendar）。"""
+    sql = "SELECT date, name FROM market_holidays WHERE date >= ? AND date <= ? ORDER BY date"
+    return [{"date": r[0], "name": r[1]} for r in conn.execute(sql, (date_from, date_to)).fetchall()]
+
+
+def holiday_years(conn) -> list[str]:
+    """休市表有資料的年份（沒資料的年份＝只排除週末，呼叫端要知道）。"""
+    return [r[0] for r in conn.execute("SELECT DISTINCT substr(date, 1, 4) FROM market_holidays ORDER BY 1").fetchall()]
+
+
 def is_market_holiday(date: str) -> bool:
     """判斷 date 是否為台股休市日（國定假日／補假／無交易日）。"""
     holidays = _holidays()
