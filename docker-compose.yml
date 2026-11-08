@@ -22,7 +22,7 @@ services:
       MARKET_SOURCE: ${MARKET_SOURCE:-none}
       SHIOAJI_API_KEY: ${SHIOAJI_API_KEY:-}
       SHIOAJI_SECRET: ${SHIOAJI_SECRET:-}
-      SHIOAJI_SIMULATION: ${SHIOAJI_SIMULATION:-1}
+      SHIOAJI_SIMULATION: ${SHIOAJI_SIMULATION:-}     # 必填：1＝模擬環境（當演練）、0＝正式環境只看行情
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

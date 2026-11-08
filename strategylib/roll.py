@@ -1,11 +1,12 @@
-"""期貨連續代號的換月（windscope 串流與 tradewind 交易共用的單一定義；純函式，只用標準庫）。
+"""期貨連續代號的換月（純函式，只用標準庫）：windscope 串流用它決定連續代號接哪一口。
 
 - **連續代號**：主檔 `expiry` 為空、`roll_rule` 有值的期貨（例 `TAIFEX:TMF`）。對應的**月份合約**＝同市場、期貨、
   `symbol` 為「連續 symbol ＋ 可選 `F` ＋ `YYYYMM`」（TX↔TXF202606、TMF↔TMF202606）、乘數相同、`expiry` 有值。
 - **`roll_rule = days_before_expiry:N`**（N ≥ 1）：換月日＝到期日往前第 N 個交易日。某交易日的**近月（front）**＝
   換月日 ≥ 當天的最早那口；換月日當天仍是舊月，下一個交易日起是次月。N=0 不接受（最後交易日的收盤時刻 ⚠ 未查證）。
 - **交易日**＝週一到週五扣掉呼叫端給的假日表（夜盤歸屬由呼叫端先算成交易日再傳進來）。
-語意與 tradewind `market/contracts`（2026-11-05 Q5 v0）相同；改語意 → bump ROLL_VERSION 與套件 __version__。
+語意與 tradewind `market/contracts`（2026-11-05 Q5 v0）相同（目前兩份程式，審查時對跑約 12,000 組一致）；tradewind 下次同步
+strategylib tag 時改呼叫這裡，才算單一真相。改語意 → bump ROLL_VERSION 與套件 __version__，兩邊一起換。
 """
 
 import calendar

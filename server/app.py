@@ -32,7 +32,7 @@ def create_app(db_path: str | None = None,
             app.state.scheduler = create_scheduler(app.state.db_path)
             app.state.scheduler.start()
             logger.info("Scheduler started")
-            # 即時行情：有設 MARKET_SOURCE 才接；來源起不來（shioaji 仍是 stub、名稱打錯）只記 ERROR，server 照常
+            # 即時行情：有設 MARKET_SOURCE 才接；設定錯（金鑰、SHIOAJI_SIMULATION、名稱打錯）只記 ERROR，server 照常；永豐的登入在背景做，不擋開機
             from collectors.market_stream import start_market_stream
 
             app.state.stream = start_market_stream(app.state.hub, app.state.db_path)

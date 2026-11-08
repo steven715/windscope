@@ -180,12 +180,16 @@ PRODUCTION_DB_PATH = os.environ.get("PRODUCTION_DB", "data/premarket.db")
 SHIOAJI_API_KEY = os.environ.get("SHIOAJI_API_KEY", "")
 SHIOAJI_SECRET = os.environ.get("SHIOAJI_SECRET", "")
 # 永豐行情（MARKET_SOURCE=shioaji，collectors/shioaji_source.py）：只用行情權限的 key、不需憑證；windscope 不下單。
-SHIOAJI_SIMULATION = os.environ.get("SHIOAJI_SIMULATION", "1") != "0"     # 預設模擬環境（⚠ 模擬環境的行情是否即時待本機驗證）
+# SHIOAJI_SIMULATION 必須明講：1＝模擬環境（行情是否即時真行情 ⚠ 未驗證 → 當串流演練：落地進 REPLAY_DB）、0＝正式環境只看行情（進正式 bars）。
+# 沒設＝None：來源不啟動。
+SHIOAJI_SIMULATION = {"1": True, "0": False}.get(os.environ.get("SHIOAJI_SIMULATION", "").strip())
 SHIOAJI_MAX_SUBSCRIPTIONS = 200              # 永豐一個連線的訂閱上限（官方文件「使用限制」）
 SHIOAJI_SILENCE_WARN_SECONDS = 120           # 盤中這麼久沒收到任何 tick 就記 WARNING（每段沉默一次）
-SHIOAJI_RECONNECT_BACKOFF = (5, 300)         # 斷線重連的等待（秒）：起始、上限（倍增）
-SHIOAJI_MAX_LOGINS_PER_DAY = 50              # 一天最多重登幾次（官方上限 1000／日，留給 tradewind 與人工）
-# 期貨商品根：windscope 月份合約 symbol 去掉 YYYYMM（TXF202606 → TXF、TMF202606 → TMF）＝永豐 Contracts.Futures 的群組名（⚠ 待本機驗證）
+SHIOAJI_RECONNECT_BACKOFF = (5, 300)         # 連不上／斷線重連的等待（秒）：起始、上限（倍增）
+SHIOAJI_MAX_LOGINS_PER_DAY = 50              # 一天最多登入幾次（官方上限 1000／日，留給 tradewind 與人工）
+SHIOAJI_RETRY_SUBSCRIBE_SECONDS = 30         # 訂閱失敗的口多久補訂一次
+SHIOAJI_REPLAN_SECONDS = 300                 # 規劃不完整（主檔缺月份、合約找不到）多久重讀主檔重新規劃
+SHIOAJI_RETIRED_GRACE_SECONDS = 90           # 換日退掉的口再保留路由多久（佇列裡、晚到的收盤 tick）
 # tradewind 回流的 inbox：{inbox}/events/{run_mode}/{date}.jsonl、{inbox}/account_snapshots/...
 TRADEWIND_INBOX_DIR = os.environ.get("TRADEWIND_INBOX", "data/inbox")
 

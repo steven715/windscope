@@ -41,6 +41,8 @@ class FakeApi:
         self.logins.append({"api_key": api_key, "subscribe_trade": subscribe_trade})
 
     def fetch_contracts(self, contract_download=False):
+        if self.sdk.on_fetch:
+            self.sdk.on_fetch()
         self.downloaded = contract_download
 
     def set_on_tick_fop_v1_callback(self, cb, bind=False):
@@ -56,6 +58,8 @@ class FakeApi:
         self.down = cb
 
     def subscribe(self, contract, quote_type=None, intraday_odd=False, version=None):
+        if contract.code in self.sdk.fail_subscribe:
+            raise RuntimeError(f"subscribe {contract.code} timed out")
         self.subscribed.append((contract.code, quote_type, intraday_odd, version))
 
     def unsubscribe(self, contract, quote_type=None, intraday_odd=False, version=None):
@@ -63,6 +67,18 @@ class FakeApi:
 
     def logout(self):
         self.logged_out += 1
+
+    def clear_on_tick_fop_v1_callback(self):
+        self.fop = None
+
+    def clear_on_tick_stk_v1_callback(self):
+        self.stk = None
+
+    def clear_event_callback(self):
+        self.event = None
+
+    def clear_session_down_callback(self):
+        self.down = None
 
 
 class FakeSdk:
@@ -76,6 +92,8 @@ class FakeSdk:
         self.stocks = stocks if stocks is not None else {}
         self.apis: list[FakeApi] = []
         self.fail_login = False
+        self.fail_subscribe: set[str] = set()
+        self.on_fetch = None                     # 登入後、下載合約時呼叫（測試注入失敗或 stop）
 
     def Shioaji(self, simulation=None):
         api = FakeApi(self, simulation)

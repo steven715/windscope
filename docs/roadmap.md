@@ -88,7 +88,7 @@
   **本機剩**：`ShioajiSource` 驗證（清單在 `docs/data_sources.md` 八）、`.env` 設 `MARKET_SOURCE=shioaji`。
   → ⑧-c ✅ `ShioajiSource`（2026-11-08，`collectors/shioaji_source.py`）：行情權限登入（不需憑證）、訂近月＋下一口、連續代號依
   `strategylib.roll`（0.3.0，換月日＝到期前 N 個交易日，與 tradewind 同義）的近月路由（夜盤歸下一個交易日 → 換月日當晚就是次月；不用永豐的 R1）、
-  月份合約與整股直接路由、試撮／暫停／零股丟掉、張→股、SDK callback 只丟佇列、斷線倍增重登、盤中沉默警告、換日重訂；compose 帶
+  月份合約與整股直接路由、試撮／暫停／零股丟掉、張→股、SDK callback 只丟佇列（綁連線世代）、連線由 worker 管（開機不擋、失敗倍增重試、登入後失敗必登出、沒訂到算失敗、訂閱補訂、主檔重讀）、盤中沉默警告、換日重訂；`SHIOAJI_SIMULATION` 必填、模擬環境當演練（不進正式 bars）；compose 帶
   `MARKET_SOURCE`／金鑰、`INSTALL_SHIOAJI=1` build 時裝 SDK。假 SDK 測試＋官方文件 tick 範例當 fixture；**本機剩**：驗證清單 10 項、主檔補當月與次月。
   → ⑧-b ✅ 串流演練隔離（2026-11-08）：`ReplaySource` 的落地一律寫演練 DB（`REPLAY_DB`，預設 `data/replay.db`），
   `db/bars.bars_upsert(replay=True)` 拒寫正式 DB（bars 主鍵不含 source，演練會蓋掉同一分鐘的真資料；`PRODUCTION_DB` 放真資料的檔、比 inode）；
