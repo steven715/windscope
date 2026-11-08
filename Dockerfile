@@ -9,6 +9,9 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# 永豐行情 SDK（MARKET_SOURCE=shioaji 才要）：build 時 INSTALL_SHIOAJI=1 才裝；版本跟 tradewind 釘同一版（介面以它的 _core.pyi 為準）
+ARG INSTALL_SHIOAJI=0
+RUN if [ "$INSTALL_SHIOAJI" = "1" ]; then pip install --no-cache-dir "shioaji==1.7.11"; fi
 
 COPY . .
 

@@ -4,7 +4,7 @@
   on_tick(instrument_id, ts, price, volume)——逐筆成交；on_bar(bar_row)——來源本身就是已收完的 1m（只有回放用）。
 - `ReplaySource`：回放契約 bars 列——tick 列走 on_tick（經合成器），1m 列走 on_bar（直接推、直接落地，**不**拆成假 tick：
   消費端的 `last` 不會看到市場沒走過的路徑）；同一商品同一分鐘兩者都有只用 tick。
-- `ShioajiSource`：永豐 API（📌 STUB）。雲端連不到券商、沒有憑證；本機驗證前 `start()` 回 False。
+- `ShioajiSource`（collectors/shioaji_source.py）：永豐逐筆成交；連續代號依 strategylib.roll 的近月路由（⚠ 本機驗證清單在 docs/data_sources.md）。
 Runner：來源的 ts 先經 db/bars.normalize_ts 正規化（壞時刻丟掉並記 WARNING）、每筆都過契約驗證才推；時段歸屬用主檔 sessions；
 時鐘驅動的 flush（clock_flush=True 時每秒看一次）讓沒有後續 tick 的分鐘也在結束時刻發出。
 tick 落地（STREAM_PERSIST_TICKS）是有損的：契約 ts 只到秒，同一秒多筆 tick 會互相覆蓋；預設關。
@@ -95,27 +95,6 @@ class ReplaySource:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=5)
-
-
-class ShioajiSource:
-    """永豐 Shioaji 行情（📌 STUB，本機驗證後才實作；驗證清單在 docs/data_sources.md「永豐 Shioaji」）。"""
-
-    name = "shioaji"
-
-    def start(self, on_tick: OnTick, on_bar: OnBar | None = None) -> bool:
-        # TODO 狀態:STUB
-        # 要做的事（依 Shioaji 文件，未實測，不猜）：
-        #   1. 以 SHIOAJI_API_KEY／SHIOAJI_SECRET 登入（只要行情，不簽署下單憑證；與 tradewind 的下單登入是否能分開 ⚠ 待查證）。
-        #   2. 依 settings.STREAM_INSTRUMENTS 找合約：TAIFEX:TMF → 微台近月（api.Contracts.Futures.TMF，近月對應規則＝instruments.roll_rule）。
-        #   3. 訂閱逐筆（quote_type Tick），callback 轉 (instrument_id, ts, price, volume) 丟給 on_tick；ts 轉成 +08:00 契約格式
-        #      （runner 會再 normalize_ts 一次，壞時刻會被丟）。
-        #   4. 斷線重連、登入逾時、每日連線數限制：記 log、不丟例外。
-        """尚未驗證：記 ERROR、回 False，不啟動。"""
-        logger.error("ShioajiSource is a stub: verify on a machine with credentials and network (docs/data_sources.md)")
-        return False
-
-    def stop(self) -> None:
-        """無事可停。"""
 
 
 class StreamRunner:
@@ -265,14 +244,16 @@ class StreamRunner:
         logger.info("market stream stop: %d ticks, %d bars, %d dropped", self.ticks, self.bars, self.dropped)
 
 
-def make_source(name: str, replay_records: list[dict] | None = None, delay_sec: float = 0.0) -> MarketSource | None:
-    """依名稱建來源：none → None、replay、shioaji；未知名稱 raise ValueError（呼叫端決定要不要擋）。"""
+def make_source(name: str, replay_records: list[dict] | None = None, delay_sec: float = 0.0,
+                db_path: str | None = None) -> MarketSource | None:
+    """依名稱建來源：none → None、replay、shioaji（讀 db_path 的主檔）；未知名稱 raise ValueError（呼叫端決定要不要擋）。"""
     if name == "none":
         return None
     if name == "replay":
         return ReplaySource(replay_records or [], delay_sec)
     if name == "shioaji":
-        return ShioajiSource()
+        from collectors.shioaji_source import ShioajiSource
+        return ShioajiSource(settings.STREAM_INSTRUMENTS, db_path=db_path)
     raise ValueError(f"unknown MARKET_SOURCE {name!r}")
 
 
@@ -286,7 +267,7 @@ def start_market_stream(hub, db_path: str | None) -> StreamRunner | None:
                 logger.error("MARKET_SOURCE=replay needs STREAM_REPLAY_JSONL; stream not started")
                 return None
             records = bars_from_jsonl(settings.STREAM_REPLAY_JSONL)
-        source = make_source(settings.MARKET_SOURCE, records, settings.STREAM_REPLAY_DELAY_SECONDS)
+        source = make_source(settings.MARKET_SOURCE, records, settings.STREAM_REPLAY_DELAY_SECONDS, db_path)
     except Exception as e:
         logger.error("market stream not started: %s", e)
         return None

@@ -46,6 +46,11 @@ def _holidays() -> set[str]:
     return _holiday_cache
 
 
+def holiday_dates() -> frozenset[str]:
+    """休市日集合（快取；給要自己數交易日的純函式，例 strategylib.roll）。"""
+    return frozenset(_holidays())
+
+
 def holidays_between(conn, date_from: str, date_to: str) -> list[dict]:
     """休市日（含名稱）在 [date_from, date_to] 之間，舊→新：[{date, name}]。conn 由呼叫端用 get_connection 開（/api/calendar）。"""
     sql = "SELECT date, name FROM market_holidays WHERE date >= ? AND date <= ? ORDER BY date"
