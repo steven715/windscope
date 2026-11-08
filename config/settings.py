@@ -212,6 +212,8 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # === Server ===
+# 對外認證（ADR-0008，server/auth.py）：設了就所有端點都要帶（API：Bearer；瀏覽器：Basic，密碼＝token）；空＝不認證（只限本機開發）。
+WINDSCOPE_API_TOKEN = os.environ.get("WINDSCOPE_API_TOKEN", "").strip()
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
 # 盤中即時行情背景刷新間隔（秒）：背景排程每隔此秒數抓一次 MIS 存入記憶體快取，

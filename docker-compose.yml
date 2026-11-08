@@ -18,6 +18,8 @@ services:
       # 分點截圖 OCR（階段二）需 Anthropic API key，留空則停用（手動表單照常可用）
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OCR_MODEL: ${OCR_MODEL:-claude-sonnet-4-6}
+      # 對外認證（ADR-0008）：必填，沒設 compose 起不來；tradewind 用同一把（它的 WINDSCOPE_API_TOKEN）
+      WINDSCOPE_API_TOKEN: ${WINDSCOPE_API_TOKEN:?set WINDSCOPE_API_TOKEN in .env}
       # 即時行情：MARKET_SOURCE=shioaji 才接永豐（預設 none）；金鑰只放 .env（行情權限即可，不需憑證）
       MARKET_SOURCE: ${MARKET_SOURCE:-none}
       SHIOAJI_API_KEY: ${SHIOAJI_API_KEY:-}

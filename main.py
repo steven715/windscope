@@ -515,6 +515,12 @@ def cmd_serve(args: argparse.Namespace) -> None:
     from config import settings
     from server.app import create_app
 
+    from server.auth import validate_token
+
+    err = validate_token(settings.WINDSCOPE_API_TOKEN, disabled=os.environ.get("WINDSCOPE_AUTH_DISABLED") == "1")
+    if err:                                                             # ADR-0008：不准沒認證、或用弱 token 對外起
+        print(f"refusing to start: {err}", file=sys.stderr)
+        sys.exit(2)
     app = create_app(enable_scheduler=not args.no_scheduler)
     port = args.port or settings.SERVER_PORT
     print(f"Starting server on http://{settings.SERVER_HOST}:{port} "

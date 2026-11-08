@@ -67,7 +67,7 @@
   才能真正放行「關注建倉區」。
 - **主力分點歷史**：分點明細無免費自動來源（需 FinMind Sponsor 或手動 CSV `分點匯入`）；
   外資動向與股價位置已可免費回補，分點維度暫維持手動。
-- **對外認證**：ngrok 對外目前無認證、且有會改資料的 POST 端點（見 auto-memory）。
+- ✅ **對外認證**（2026-11-08，ADR-0008）：單一 token `WINDSCOPE_API_TOKEN`（`server/auth.py` middleware）——API／tradewind 用 Bearer、過渡期 Jinja 頁用 HTTP Basic（密碼＝token，不新增登入頁）；Basic 的會改資料請求與 WS 握手要同源；compose 沒設起不來。同源反向代理等前端 repo。
 
 ---
 
