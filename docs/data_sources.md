@@ -355,6 +355,6 @@
 | 用途 | `/ws/bars` 即時串流（tick ＋ 已收完的 1m）、`bars` 表落地 1m（tradewind 回放與 Paper 的行情源） |
 | 來源 | 永豐金證券 Shioaji API（Python SDK `shioaji`）；需 API Key／Secret（`SHIOAJI_API_KEY`／`SHIOAJI_SECRET`） |
 | 程式 | `collectors/market_stream.py::ShioajiSource` |
-| 狀態 | 📌 STUB（2026-11-03）：雲端連不到券商、無憑證；`start()` 回 False、記 ERROR。合成、落地、串流、回放（`ReplaySource`）已驗證 |
+| 狀態 | 📌 STUB（2026-11-03）：雲端連不到券商、無憑證；`start()` 回 False、記 ERROR。合成、落地、串流、串流演練（`ReplaySource`，落地只進演練 DB `REPLAY_DB`、不碰正式 DB）已驗證 |
 | 本機驗證清單 | 1. `pip install shioaji`，登入只要行情（不簽署下單憑證）；確認與 tradewind 的下單登入是否能分開（ADR-0007 決定 2 ⚠）。2. 找合約：`TAIFEX:TMF` → 微台近月，近月對應規則寫進 `instruments.roll_rule`。3. 訂閱逐筆（Tick），callback 的時間欄位是交易所時間還是本機時間、精度到秒還是毫秒；轉成 `+08:00` 契約格式。4. 夜盤的 tick 是否也來，`session_date` 歸屬對不對（`integration/market_sessions`）。5. 斷線重連、每日連線上限、登入逾時的行為。6. 跑完一天，`bars` 表的 1m 與券商自己的 `kbars` 對帳（量與 OHLC）。 |
 | 備註 | 驗證通過後把 `MARKET_SOURCE=shioaji` 寫進 `.env`，server 啟動時自動接；排程外（週末）來源起不來只記 ERROR，server 照常 |

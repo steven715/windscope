@@ -2,14 +2,17 @@
 
 讀取走 `bars_v`（新 bars 表 ∪ 三張舊 raw 表的映射），輸出一律是契約 `bars` 的 dict 形狀，
 時刻正規化為 `YYYY-MM-DDTHH:MM:SS+08:00`（舊表的 collected_at 沒有時區、可能帶微秒）。
-寫入只進 `bars` 表（新來源：串流落地、tick／1m），每筆以契約驗過。
+寫入只進 `bars` 表（新來源：串流落地、tick／1m），每筆以契約驗過。串流演練（replay=True）只准寫演練 DB（REPLAY_DB），
+寫正式 DB 一律拒絕：bars 主鍵不含 source，演練資料會蓋掉同一分鐘的真資料。
 """
 
 import json
 import logging
+import os
 import sqlite3
 from datetime import datetime
 
+from config import settings
 from utils.contract_schema import require_valid
 from utils.tw_time import TW
 
@@ -78,8 +81,38 @@ def bars_query(conn: sqlite3.Connection, instrument_id: str, resolution: str = "
     return [_row_to_record(r) for r in rows]
 
 
-def bars_upsert(conn: sqlite3.Connection, records: list[dict]) -> int:
-    """寫入 bars 表（新來源）。每筆先驗契約；回傳寫入筆數。"""
+def _db_file(conn: sqlite3.Connection) -> str:
+    """連線的主資料庫檔（絕對路徑；記憶體 DB 回空字串）。"""
+    row = next((r for r in conn.execute("PRAGMA database_list") if r[1] == "main"), None)
+    return os.path.realpath(row[2]) if row and row[2] else ""
+
+
+def _same_file(a: str, b: str) -> bool:
+    """兩個路徑是不是同一個檔：都存在就比 inode（硬連結、另一個掛載點也抓得到），否則比 realpath（不分大小寫的檔案系統用 normcase）。"""
+    if not a or not b:
+        return False
+    try:
+        if os.path.exists(a) and os.path.exists(b):
+            return os.path.samefile(a, b)
+    except OSError:
+        pass
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+def is_protected_path(path: str) -> bool:
+    """演練不准寫的檔：放真資料的 DB（PRODUCTION_DB_PATH），以及 PREMARKET_DB 指到的 DB——除非它就是演練 DB（演練 server）。"""
+    if not path or path == ":memory:":
+        return False
+    if _same_file(path, settings.PRODUCTION_DB_PATH):
+        return True
+    return _same_file(path, settings.DB_PATH) and not _same_file(settings.DB_PATH, settings.REPLAY_DB_PATH)
+
+
+def bars_upsert(conn: sqlite3.Connection, records: list[dict], *, replay: bool = False) -> int:
+    """寫入 bars 表（新來源）。每筆先驗契約；回傳寫入筆數。replay=True（串流演練）時拒寫正式 DB（raise ValueError）：
+    演練資料只能進 settings.REPLAY_DB_PATH。"""
+    if replay and is_protected_path(_db_file(conn)):
+        raise ValueError(f"replay bars must not be written to the production DB ({_db_file(conn)}); use REPLAY_DB")
     n = 0
     for rec in records:
         rec = {**rec, "revision": rec.get("revision", 0)}
