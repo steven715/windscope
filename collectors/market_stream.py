@@ -9,16 +9,18 @@ Runner：來源的 ts 先經 db/bars.normalize_ts 正規化（壞時刻丟掉並
 時鐘驅動的 flush（clock_flush=True 時每秒看一次）讓沒有後續 tick 的分鐘也在結束時刻發出。
 tick 落地（STREAM_PERSIST_TICKS）是有損的：契約 ts 只到秒，同一秒多筆 tick 會互相覆蓋；預設關。
 **串流演練隔離**：來源是 ReplaySource 時，落地一律寫 settings.REPLAY_DB_PATH（第一次寫時建表），讀主檔（sessions）仍用 db_path；
-演練 DB 解析到正式 DB（設定錯）就不落地、記 ERROR。bars_upsert(replay=True) 也會擋住寫進正式 DB。
+演練 DB 解析到正式 DB（設定錯）在建 runner 時就關掉落地、記一次 ERROR（不碰正式 DB 的 schema）；bars_upsert(replay=True) 也會擋。
+演練只隔離了落地：/ws/bars 推出去的 1m 跟真的長得一樣，演練要跑在另一個 server（port），不要讓 tradewind 的 paper 排程接它。
 """
 
 import logging
+import os
 import threading
 import time
 from typing import Callable, Protocol
 
 from config import settings
-from db.bars import bars_upsert, normalize_ts
+from db.bars import bars_upsert, is_protected_path, normalize_ts
 from db.connection import get_connection
 from db.instruments import instrument_get
 from db.schema import create_all_tables
@@ -46,6 +48,7 @@ class ReplaySource:
     """回放契約 bars 列（tick → on_tick、1m → on_bar）。delay_sec>0 在背景執行緒跑，`wait()` 等它跑完。"""
 
     name = "replay"
+    rehearsal = True                                                    # 串流演練：runner 落地到演練 DB
 
     def __init__(self, records: list[dict], delay_sec: float = 0.0) -> None:
         tick_minutes = {(r["instrument_id"], r["ts"][:16]) for r in records if r["resolution"] == "tick"}
@@ -124,9 +127,14 @@ class StreamRunner:
         self.source = source
         self.hub = hub
         self.db_path = db_path                                          # 讀主檔（sessions）
-        self.replay = source.name == "replay"
+        self.replay = bool(getattr(source, "rehearsal", False))
         self.persist_db = persist_db or (settings.REPLAY_DB_PATH if self.replay else db_path)   # 演練一律寫演練 DB
         self._schema_ready = not self.replay
+        self._persist_off = False
+        if self.replay and is_protected_path(self.persist_db or settings.DB_PATH):            # 設定錯：一次 ERROR，整場不落地
+            logger.error("rehearsal persist DB %s is the production DB; bars will NOT be persisted (set REPLAY_DB)",
+                         self.persist_db or settings.DB_PATH)
+            self._persist_off = True
         self.instruments = list(instruments or settings.STREAM_INSTRUMENTS)
         self.persist_ticks = settings.STREAM_PERSIST_TICKS if persist_ticks is None else persist_ticks
         self.clock_flush = clock_flush
@@ -137,6 +145,7 @@ class StreamRunner:
         self._stop = threading.Event()
         self.ticks = 0
         self.bars = 0
+        self.persisted = 0                                              # 實際落地的 1m 筆數（bars 是推出去的）
         self.dropped = 0
 
     def _sessions_for(self, instrument_id: str) -> dict | None:
@@ -210,17 +219,22 @@ class StreamRunner:
     def _emit_bar(self, bar: dict) -> None:
         self.bars += 1
         self.hub.publish(bar)
-        self._persist([bar])
+        self.persisted += self._persist([bar])
 
-    def _persist(self, records: list[dict]) -> None:
+    def _persist(self, records: list[dict]) -> int:
+        if self._persist_off:
+            return 0
         try:
+            if not self._schema_ready and self.persist_db and self.persist_db != ":memory:":
+                os.makedirs(os.path.dirname(self.persist_db) or ".", exist_ok=True)   # 演練 DB 的目錄可能不存在
             with get_connection(self.persist_db) as conn:
                 if not self._schema_ready:                              # 演練 DB 可能是新檔：第一次寫時建表（冪等）
                     create_all_tables(conn)
                     self._schema_ready = True
-                bars_upsert(conn, records, replay=self.replay)
+                return bars_upsert(conn, records, replay=self.replay)
         except Exception as e:                                        # 落地失敗不能讓串流掛掉
             logger.error("bars persist failed (%s): %s", self.persist_db, e)
+            return 0
 
     def start(self) -> bool:
         """啟動來源（來源丟例外也只記 ERROR）；clock_flush 時啟動每秒 flush 的執行緒。"""

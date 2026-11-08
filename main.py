@@ -503,7 +503,7 @@ def cmd_stream(args: argparse.Namespace) -> None:
     from integration.bar_builder import _minute_end
     last = max((r["ts"] for r in rows), default=None)
     runner.stop(now=_minute_end(last) if last else None)              # 以最後一筆之後一分鐘當時鐘：回放當天的也收得掉
-    print(f"replayed {source.replayed}/{len(source)} usable rows: {runner.ticks} ticks, {runner.bars} 1m bars written "
+    print(f"replayed {source.replayed}/{len(source)} usable rows: {runner.ticks} ticks, {runner.bars} 1m bars, {runner.persisted} written "
           f"to {runner.persist_db} (rehearsal DB, not the production DB), {runner.dropped} dropped")
 
 

@@ -138,7 +138,7 @@ def test_cli_stream_replays_jsonl_into_the_rehearsal_db(db_path, replay_db, tmp_
     monkeypatch.setattr("sys.argv", ["main.py", "stream", "--jsonl", str(p)])
     cli.main()
     out = capsys.readouterr().out
-    assert "1 1m bars written" in out and "1/1 usable rows" in out and replay_db in out
+    assert "1 1m bars, 1 written" in out and "1/1 usable rows" in out and replay_db in out
     conn = sqlite3.connect(replay_db)
     assert len(bars_query(conn, "TAIFEX:TMF", "1m", "2026-06-12", "2026-06-12")) == 1
     conn.close()
@@ -176,36 +176,113 @@ def test_start_market_stream_never_breaks_server_boot(db_path, monkeypatch, capl
     assert start_market_stream(hub, db_path) is None
 
 
-def test_replay_writes_are_refused_on_the_production_db(db_path, monkeypatch, caplog):
-    """寫入口的保險：replay=True 寫正式 DB 一律拒絕；演練 DB 設定成正式 DB（設定錯）時，串流照跑、不落地、記 ERROR。"""
+def _tmf_1m() -> dict:
+    return next(r for r in _fixture_rows() if r["instrument_id"] == "TAIFEX:TMF" and r["resolution"] == "1m")
+
+
+def _tables(path: str) -> set[str]:
+    c = sqlite3.connect(path)
+    try:
+        return {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        c.close()
+
+
+def test_replay_writes_are_refused_on_the_production_db(db_path, monkeypatch):
+    """寫入口的保險：replay=True 寫正式 DB 一律拒絕，真來源照常寫。"""
     from db.bars import bars_upsert
     monkeypatch.setattr(settings, "DB_PATH", db_path)
-    row = next(r for r in _fixture_rows() if r["instrument_id"] == "TAIFEX:TMF" and r["resolution"] == "1m")
     conn = sqlite3.connect(db_path)
     with pytest.raises(ValueError, match="production DB"):
-        bars_upsert(conn, [row], replay=True)
-    assert bars_upsert(conn, [row]) == 1                                     # 真來源照常寫
+        bars_upsert(conn, [_tmf_1m()], replay=True)
+    assert bars_upsert(conn, [_tmf_1m()]) == 1
     conn.rollback()
     conn.close()
-    monkeypatch.setattr(settings, "REPLAY_DB_PATH", db_path)
+
+
+def test_misconfigured_rehearsal_db_disables_persistence_once_without_touching_the_production_schema(tmp_path, monkeypatch, caplog):
+    """REPLAY_DB 設成正式 DB（設定錯）：建 runner 時就關掉落地、只記一次 ERROR，串流照推，正式 DB 不建表也不寫。"""
+    prod = str(tmp_path / "prod.db")
+    sqlite3.connect(prod).close()                                          # 空的正式 DB（沒有表）
+    monkeypatch.setattr(settings, "DB_PATH", prod)
+    monkeypatch.setattr(settings, "REPLAY_DB_PATH", prod)
+    monkeypatch.setattr(settings, "PRODUCTION_DB_PATH", prod)
     hub = StreamHub()
-    runner = StreamRunner(ReplaySource([row]), hub, db_path, instruments=["TAIFEX:TMF"], clock_flush=False)
-    assert runner.start() and runner.bars == 1
+    q = hub.subscribe()
+    rows = [_tmf_1m(), {**_tmf_1m(), "ts": _tmf_1m()["ts"][:14] + "59:00+08:00"}]
+    runner = StreamRunner(ReplaySource(rows), hub, None, instruments=["TAIFEX:TMF"], clock_flush=False)
+    assert runner.start() and runner.bars == 2 and runner.persisted == 0
     runner.stop()
-    assert "production DB" in caplog.text
+    assert hub.get(q, 0.01) is not None and hub.get(q, 0.01) is not None   # 兩根都推出去了
+    assert caplog.text.count("will NOT be persisted") == 1 and "persist failed" not in caplog.text
+    assert _tables(prod) == set()
+
+
+def test_rehearsal_server_mode_writes_its_own_db(tmp_path, monkeypatch):
+    """演練 server：PREMARKET_DB＝REPLAY_DB＝演練檔，演練照常落地；放真資料的檔（PRODUCTION_DB）仍然拒寫。"""
+    from db.bars import bars_upsert
+    rehearsal, prod = str(tmp_path / "replay.db"), str(tmp_path / "premarket.db")
+    sqlite3.connect(prod).close()
+    monkeypatch.setattr(settings, "DB_PATH", rehearsal)
+    monkeypatch.setattr(settings, "REPLAY_DB_PATH", rehearsal)
+    monkeypatch.setattr(settings, "PRODUCTION_DB_PATH", prod)
+    runner = StreamRunner(ReplaySource([_tmf_1m()]), StreamHub(), rehearsal, instruments=["TAIFEX:TMF"], clock_flush=False)
+    assert runner.start() and runner.persisted == 1
+    runner.stop()
+    conn = sqlite3.connect(prod)
+    create_all_tables(conn)
+    with pytest.raises(ValueError, match="production DB"):
+        bars_upsert(conn, [_tmf_1m()], replay=True)
+    conn.close()
+
+
+def test_hard_link_to_the_production_db_is_still_refused(db_path, tmp_path, monkeypatch):
+    import os
+    from db.bars import bars_upsert
+    link = str(tmp_path / "alias.db")
+    os.link(db_path, link)
+    monkeypatch.setattr(settings, "DB_PATH", db_path)
+    monkeypatch.setattr(settings, "PRODUCTION_DB_PATH", db_path)          # 硬連結到放真資料的檔
+    monkeypatch.setattr(settings, "REPLAY_DB_PATH", link)
+    conn = sqlite3.connect(link)
+    with pytest.raises(ValueError, match="production DB"):
+        bars_upsert(conn, [_tmf_1m()], replay=True)
+    conn.close()
+    runner = StreamRunner(ReplaySource([_tmf_1m()]), StreamHub(), db_path, instruments=["TAIFEX:TMF"], clock_flush=False)
+    assert runner.start() and runner.persisted == 0
+    runner.stop()
     main = sqlite3.connect(db_path)
     assert main.execute("SELECT COUNT(*) FROM bars").fetchone()[0] == 0
     main.close()
 
 
+def test_rehearsal_db_directory_is_created(tmp_path, monkeypatch, db_path):
+    p = str(tmp_path / "nested" / "dir" / "replay.db")
+    monkeypatch.setattr(settings, "DB_PATH", db_path)
+    monkeypatch.setattr(settings, "REPLAY_DB_PATH", p)
+    runner = StreamRunner(ReplaySource([_tmf_1m()]), StreamHub(), db_path, instruments=["TAIFEX:TMF"], clock_flush=False)
+    assert runner.start() and runner.persisted == 1
+    runner.stop()
+
+
 def test_non_replay_sources_still_persist_to_the_main_db(db_path, monkeypatch):
+    """真來源（非演練）照舊寫正式 DB：餵一筆 1m 進 on_bar，正式 DB 看得到。"""
+    monkeypatch.setattr(settings, "DB_PATH", db_path)
+    row = _tmf_1m()
+
     class Live:
         name = "shioaji"
 
         def start(self, on_tick, on_bar):
+            on_bar(dict(row))
             return True
 
         def stop(self):
             pass
     runner = StreamRunner(Live(), StreamHub(), db_path, instruments=["TAIFEX:TMF"], clock_flush=False)
     assert runner.persist_db == db_path and not runner.replay
+    assert runner.start() and runner.persisted == 1
+    runner.stop()
+    main = sqlite3.connect(db_path)
+    assert len(bars_query(main, "TAIFEX:TMF", "1m", "2026-06-12", "2026-06-12")) == 1
+    main.close()

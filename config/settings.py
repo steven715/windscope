@@ -172,8 +172,11 @@ STREAM_FLUSH_SECONDS = 1.0                   # 時鐘驅動 flush 的間隔：�
 STREAM_REPLAY_JSONL = os.environ.get("STREAM_REPLAY_JSONL", "")   # MARKET_SOURCE=replay 時 server 回放的 JSONL
 STREAM_REPLAY_DELAY_SECONDS = float(os.environ.get("STREAM_REPLAY_DELAY", "0"))
 # 串流演練（ReplaySource）落地的 DB：一律跟正式 DB 分開（bars 主鍵不含 source，寫進正式 DB 會蓋掉同一分鐘的真資料）。
-# 要讓 /api/bars 讀演練資料：另開一個 server，PREMARKET_DB 指到這個檔。
+# 要讓 /api/bars 讀演練資料：另開一個 server（另一個 port），PREMARKET_DB＝REPLAY_DB 指到這個檔；演練 server 的 /ws/bars
+# 不要接 tradewind 的 paper 排程（演練的 1m 跟真的長得一樣）。
 REPLAY_DB_PATH = os.environ.get("REPLAY_DB", "data/replay.db")
+# 放真資料的 DB：演練不管 PREMARKET_DB 指到哪都不准寫這個檔（演練 server 會把 PREMARKET_DB 指到演練 DB）。
+PRODUCTION_DB_PATH = os.environ.get("PRODUCTION_DB", "data/premarket.db")
 SHIOAJI_API_KEY = os.environ.get("SHIOAJI_API_KEY", "")
 SHIOAJI_SECRET = os.environ.get("SHIOAJI_SECRET", "")
 # tradewind 回流的 inbox：{inbox}/events/{run_mode}/{date}.jsonl、{inbox}/account_snapshots/...

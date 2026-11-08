@@ -87,7 +87,8 @@
   `ReplaySource` 回放；`ShioajiSource` 📌 STUB）、`server/stream.StreamHub`＋`/ws/bars`（tick／1m／心跳）、CLI `stream --jsonl`；
   **本機剩**：`ShioajiSource` 實作與驗證（清單在 `docs/data_sources.md` 八）、`.env` 設 `MARKET_SOURCE=shioaji`。
   → ⑧-b ✅ 串流演練隔離（2026-11-08）：`ReplaySource` 的落地一律寫演練 DB（`REPLAY_DB`，預設 `data/replay.db`），
-  `db/bars.bars_upsert(replay=True)` 拒寫正式 DB（bars 主鍵不含 source，演練會蓋掉同一分鐘的真資料）；Shioaji 落地前必須先有這條。
+  `db/bars.bars_upsert(replay=True)` 拒寫正式 DB（bars 主鍵不含 source，演練會蓋掉同一分鐘的真資料；`PRODUCTION_DB` 放真資料的檔、比 inode）；
+  Shioaji 落地前必須先有這條。看演練資料＝另開一個 server（另一個 port，`PREMARKET_DB`＝`REPLAY_DB`）；演練的 `/ws/bars` 跟真的長得一樣，不要讓 tradewind 的 paper 排程接。
   名詞（與 tradewind 12-engine 一致）：**串流演練**＝ReplaySource 回放進 /ws/bars；**歷史回測**＝tradewind 讀 /api/bars 跑 backtest；
   **事件重放**＝tradewind 重放錄下的外部事件、比對輸出（未實作）。
   → ⑨ ✅ `GET /api/calendar?date_from=&date_to=`（2026-11-08）：`market_holidays` 的休市日＋有資料的年份（唯讀、非契約表；讀表入口在
