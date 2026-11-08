@@ -11,11 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 def create_app(db_path: str | None = None,
-               enable_scheduler: bool = False) -> FastAPI:
-    """建立 FastAPI app。db_path 為 None 時用 settings.DB_PATH。
+               enable_scheduler: bool = False, api_token: str | None = None) -> FastAPI:
+    """建立 FastAPI app。db_path 為 None 時用 settings.DB_PATH；api_token 為 None 時用 settings.WINDSCOPE_API_TOKEN（空＝不認證）。
 
     enable_scheduler=True 時啟動 APScheduler（測試時保持 False）。
     """
+    token = settings.WINDSCOPE_API_TOKEN if api_token is None else api_token
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -25,6 +26,9 @@ def create_app(db_path: str | None = None,
 
         with get_connection(app.state.db_path) as conn:
             create_all_tables(conn)
+        if not token:
+            logger.error("WINDSCOPE_API_TOKEN is not set: every endpoint (including the POSTs that change data) is open; "
+                         "never expose this server (ngrok, port forwarding) without it")
 
         if enable_scheduler:
             from server.scheduler import create_scheduler
@@ -63,4 +67,12 @@ def create_app(db_path: str | None = None,
     static_dir = Path(__file__).resolve().parent / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+    @app.get("/healthz")
+    def healthz() -> dict:
+        """存活檢查（公開，不需 token）：只回是否活著與認證有沒有開。"""
+        return {"ok": True, "auth": bool(token)}
+
+    from server.auth import TokenAuth
+
+    app.add_middleware(TokenAuth, token=token)                       # 單一 token（ADR-0008）：HTTP 與 /ws/bars 都過這裡
     return app

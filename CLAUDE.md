@@ -38,6 +38,7 @@ auto-memory（MEMORY.md）與 `docs/`。
   - **schema 自癒**：app 啟動時 `create_all_tables` 冪等建表＋PRAGMA-guard 的 ALTER migration，不用手動遷移 DB。
   - 只改 `.env`（token/chat_id）→ `docker compose up -d`（不必 `--build`）。
 - 常用 CLI：`python main.py serve | init-db | refresh-holidays | collect | backfill | targets build|list|lock | ingest-events`。
+- **`.env` 一定要有 `WINDSCOPE_API_TOKEN`**（ADR-0008；沒設 compose 起不來）：API／tradewind 帶 `Authorization: Bearer`，瀏覽器開頁會彈出帳密框（密碼＝token）。
 - **全新部署（空 DB）要手動跑一次 `init-db`** 灌觀察名單與商品主檔種子：容器啟動只建表，表空就是觀察名單為空、collector 不收個股；`instruments` 空則 `/api/instruments` 為空、tradewind 無規格可用。
 - 要單獨測某個 collector 又不想碰正式資料：`PREMARKET_DB=/tmp/t.db python main.py collect ...`。
 
