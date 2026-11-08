@@ -163,7 +163,7 @@ TREND_PLAYBOOK = {
     "discretion_allowed": ["early_exit", "reduce"],
 }
 # === 即時行情串流（契約 README「串流與回放」；ADR-0005 ⑧）===
-# MARKET_SOURCE：none（預設，/ws/bars 只送心跳）／replay（回放 JSONL，CLI `stream` 用）／shioaji（📌 STUB，本機驗證後才能用）
+# MARKET_SOURCE：none（預設，/ws/bars 只送心跳）／replay（回放 JSONL，CLI `stream` 用）／shioaji（永豐逐筆，collectors/shioaji_source.py；⚠ 先跑完 docs/data_sources.md 的本機驗證清單）
 MARKET_SOURCE = os.environ.get("MARKET_SOURCE", "none")
 STREAM_INSTRUMENTS = ["TAIFEX:TMF"]          # 訂閱哪些商品（instruments 主檔要有，時段歸屬用它的 sessions）
 STREAM_HEARTBEAT_SECONDS = 5                 # 閒置多久送一筆 {"heartbeat": ts}（契約起始值 5）
@@ -179,6 +179,13 @@ REPLAY_DB_PATH = os.environ.get("REPLAY_DB", "data/replay.db")
 PRODUCTION_DB_PATH = os.environ.get("PRODUCTION_DB", "data/premarket.db")
 SHIOAJI_API_KEY = os.environ.get("SHIOAJI_API_KEY", "")
 SHIOAJI_SECRET = os.environ.get("SHIOAJI_SECRET", "")
+# 永豐行情（MARKET_SOURCE=shioaji，collectors/shioaji_source.py）：只用行情權限的 key、不需憑證；windscope 不下單。
+SHIOAJI_SIMULATION = os.environ.get("SHIOAJI_SIMULATION", "1") != "0"     # 預設模擬環境（⚠ 模擬環境的行情是否即時待本機驗證）
+SHIOAJI_MAX_SUBSCRIPTIONS = 200              # 永豐一個連線的訂閱上限（官方文件「使用限制」）
+SHIOAJI_SILENCE_WARN_SECONDS = 120           # 盤中這麼久沒收到任何 tick 就記 WARNING（每段沉默一次）
+SHIOAJI_RECONNECT_BACKOFF = (5, 300)         # 斷線重連的等待（秒）：起始、上限（倍增）
+SHIOAJI_MAX_LOGINS_PER_DAY = 50              # 一天最多重登幾次（官方上限 1000／日，留給 tradewind 與人工）
+# 期貨商品根：windscope 月份合約 symbol 去掉 YYYYMM（TXF202606 → TXF、TMF202606 → TMF）＝永豐 Contracts.Futures 的群組名（⚠ 待本機驗證）
 # tradewind 回流的 inbox：{inbox}/events/{run_mode}/{date}.jsonl、{inbox}/account_snapshots/...
 TRADEWIND_INBOX_DIR = os.environ.get("TRADEWIND_INBOX", "data/inbox")
 

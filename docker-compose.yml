@@ -1,6 +1,9 @@
 services:
   premarket:
-    build: .
+    build:
+      context: .
+      args:
+        INSTALL_SHIOAJI: ${INSTALL_SHIOAJI:-0}       # 1＝image 裡裝永豐 SDK（MARKET_SOURCE=shioaji 要）
     container_name: premarket
     restart: unless-stopped
     ports:
@@ -15,6 +18,11 @@ services:
       # 分點截圖 OCR（階段二）需 Anthropic API key，留空則停用（手動表單照常可用）
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OCR_MODEL: ${OCR_MODEL:-claude-sonnet-4-6}
+      # 即時行情：MARKET_SOURCE=shioaji 才接永豐（預設 none）；金鑰只放 .env（行情權限即可，不需憑證）
+      MARKET_SOURCE: ${MARKET_SOURCE:-none}
+      SHIOAJI_API_KEY: ${SHIOAJI_API_KEY:-}
+      SHIOAJI_SECRET: ${SHIOAJI_SECRET:-}
+      SHIOAJI_SIMULATION: ${SHIOAJI_SIMULATION:-1}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

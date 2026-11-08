@@ -348,13 +348,17 @@
 
 ## 八、即時行情串流（永豐 Shioaji）
 
-### 8.1 微台逐筆成交（tick → 1 分 K）
+### 8.1 逐筆成交（tick → 1 分 K）
 
 | 項目 | 內容 |
 |------|------|
 | 用途 | `/ws/bars` 即時串流（tick ＋ 已收完的 1m）、`bars` 表落地 1m（tradewind 回放與 Paper 的行情源） |
-| 來源 | 永豐金證券 Shioaji API（Python SDK `shioaji`）；需 API Key／Secret（`SHIOAJI_API_KEY`／`SHIOAJI_SECRET`） |
-| 程式 | `collectors/market_stream.py::ShioajiSource` |
-| 狀態 | 📌 STUB（2026-11-03）：雲端連不到券商、無憑證；`start()` 回 False、記 ERROR。合成、落地、串流、串流演練（`ReplaySource`，落地只進演練 DB `REPLAY_DB`、不碰正式 DB）已驗證 |
-| 本機驗證清單 | 1. `pip install shioaji`，登入只要行情（不簽署下單憑證）；確認與 tradewind 的下單登入是否能分開（ADR-0007 決定 2 ⚠）。2. 找合約：`TAIFEX:TMF` → 微台近月，近月對應規則寫進 `instruments.roll_rule`。3. 訂閱逐筆（Tick），callback 的時間欄位是交易所時間還是本機時間、精度到秒還是毫秒；轉成 `+08:00` 契約格式。4. 夜盤的 tick 是否也來，`session_date` 歸屬對不對（`integration/market_sessions`）。5. 斷線重連、每日連線上限、登入逾時的行為。6. 跑完一天，`bars` 表的 1m 與券商自己的 `kbars` 對帳（量與 OHLC）。 |
-| 備註 | 驗證通過後把 `MARKET_SOURCE=shioaji` 寫進 `.env`，server 啟動時自動接；排程外（週末）來源起不來只記 ERROR，server 照常 |
+| 來源 | 永豐金證券 Shioaji API（Python SDK `shioaji==1.7.11`，與 tradewind 同一版）；行情權限的 API Key／Secret（`SHIOAJI_API_KEY`／`SHIOAJI_SECRET`），**不需憑證**（憑證只有下單要；windscope 不下單） |
+| 程式 | `collectors/shioaji_source.py::ShioajiSource`（2026-11-08）；換月規則 `strategylib.roll`（0.3.0，與 tradewind 同義） |
+| 事實來源 | 套件型別檔 `_core.pyi`（1.7.11）＋官方文件「即時行情／期貨選擇權」「即時行情／證券」（2026-11-08 讀；範例存成 `tests/fixtures/shioaji/ticks_from_docs.jsonl`） |
+| 合約對應 | 主檔是單一真相。月份合約 `TAIFEX:TMF202606` → `Contracts.Futures.get("TMF")` 裡 `delivery_month=202606`、不是 R1／R2 的那一口（剛好一口、乘數相同才訂）。**連續代號不用永豐的 R1**（R1 到期日才換；tradewind 的連續代號在換月日之後就是次月）：訂近月＋下一口，每筆 tick 依交易日（夜盤歸下一個交易日）的近月路由。現股 `TWSE:2330` → `Contracts.Stocks.get("2330")`、exchange TSE（TPEX↔OTC）。 |
+| 轉換 | `simtrade`（試撮）、`suspend`、`intraday_odd` 丟掉；時刻＝`datetime`（naive 視為台北時間 ⚠）；價＝`close`；量：期貨＝口、整股＝張 ×1000 成股。只訂整股（盤中零股價格不同，不混進同一條 1 分 K）。 |
+| 執行緒與斷線 | SDK callback 只丟有界佇列，worker 轉換後交 runner；`session_down` → 倍增重登（5→300 秒，一天最多 50 次）；盤中 120 秒沒 tick 記 WARNING。**不輪詢 snapshot**（官方明文禁止盤中輪詢）。交易日變了就重訂（近月＋下一口）。 |
+| 部署 | `.env`：`MARKET_SOURCE=shioaji`、`SHIOAJI_API_KEY`、`SHIOAJI_SECRET`、`INSTALL_SHIOAJI=1`（build 時裝 SDK）、`SHIOAJI_SIMULATION`（預設 1＝模擬環境）→ `docker compose up -d --build`。主檔要有**當月與次月**的月份合約（目前種子只有 202606，要補），沒有就不訂、記 ERROR。 |
+| 本機驗證清單（⚠，第一次接上時逐項確認並回填） | 1. `INSTALL_SHIOAJI=1` 在 `python:3.12-slim` 裝得起來（wheel 是否支援）。2. 行情權限的 key 能登入（`subscribe_trade=False`）；模擬環境（`SHIOAJI_SIMULATION=1`）的行情是不是即時真行情——不是就改 0（正式環境、只看行情）。3. `Contracts.Futures` 的群組名是不是 `TXF`／`MXF`／`TMF`、月份合約的 `delivery_month` 是不是 `YYYYMM`、乘數欄位（`multiplier` 或 `unit`）。4. callback 參數：1.7.11 是 `(tick)` 還是 `(exchange, tick)`（程式兩種都吃，記下實際的）。5. `tick.datetime` 有沒有時區、是不是交易所時間。6. 夜盤 tick 會不會來、凌晨 05:00 前的歸屬（`integration/market_sessions`）。7. 換月日當晚夜盤：連續代號切到次月（log 的 plan 會印）。8. 斷線：拔網路看 `session_down` 有沒有觸發、重登後有沒有重訂。9. 跑完一天，`bars` 表的 1m 跟永豐 `kbars` 對量與 OHLC。10. 跟 tradewind 的 `shioaji_sim` 同時登入（一個身分證 5 條連線）不互踢。 |
+| 備註 | 排程外（週末）連得上也沒有 tick；登入失敗只記 ERROR，server 照常 |

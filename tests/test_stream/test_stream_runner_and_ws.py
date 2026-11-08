@@ -1,5 +1,5 @@
 """串流：hub 發佈／訂閱／篩商品／滿了丟；ReplaySource 把 tick 與 1m 回放成一樣的 1m 並落地 bars 表、/api/bars 看得到；
-WebSocket /ws/bars 收到 tick／1m／心跳；Shioaji 是 stub；MARKET_SOURCE=none 不接來源。"""
+WebSocket /ws/bars 收到 tick／1m／心跳；沒有金鑰的 Shioaji 不啟動；MARKET_SOURCE=none 不接來源。"""
 
 import json
 import sqlite3
@@ -8,7 +8,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from collectors.market_stream import ReplaySource, ShioajiSource, StreamRunner, make_source
+from collectors.market_stream import ReplaySource, StreamRunner, make_source
+from collectors.shioaji_source import ShioajiSource
 from config import settings
 from db.bars import bars_query
 from db.instruments import instruments_seed
@@ -103,8 +104,9 @@ def test_runner_drops_unknown_instrument_and_persist_failure_does_not_kill_strea
     assert runner.bars == 1 and hub.published == 3 and "bars persist failed" in caplog.text
 
 
-def test_shioaji_source_is_a_stub_and_make_source():
-    assert ShioajiSource().start(lambda *a: None) is False
+def test_make_source_and_shioaji_without_keys_does_not_start(monkeypatch):
+    monkeypatch.setattr(settings, "SHIOAJI_API_KEY", "")
+    assert ShioajiSource().start(lambda *a: None) is False                   # 沒有金鑰：記 ERROR、不啟動
     assert make_source("none") is None and isinstance(make_source("shioaji"), ShioajiSource)
     with pytest.raises(ValueError):
         make_source("bloomberg")
@@ -171,7 +173,8 @@ def test_start_market_stream_never_breaks_server_boot(db_path, monkeypatch, capl
     monkeypatch.setattr(settings, "STREAM_REPLAY_JSONL", "")
     assert start_market_stream(hub, db_path) is None and "needs STREAM_REPLAY_JSONL" in caplog.text
     monkeypatch.setattr(settings, "MARKET_SOURCE", "shioaji")
-    assert start_market_stream(hub, db_path) is None and "stub" in caplog.text
+    monkeypatch.setattr(settings, "SHIOAJI_API_KEY", "")                     # 沒有金鑰：記 ERROR、server 照常
+    assert start_market_stream(hub, db_path) is None and "SHIOAJI_API_KEY" in caplog.text
     monkeypatch.setattr(settings, "MARKET_SOURCE", "none")
     assert start_market_stream(hub, db_path) is None
 
