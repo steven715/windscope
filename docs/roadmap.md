@@ -86,6 +86,8 @@
   `integration/bar_builder`（tick → 只在分鐘結束發出的 1m）、`collectors/market_stream`（`StreamRunner`：tick 推 hub、1m 推 hub＋落 `bars`；
   `ReplaySource` 回放；`ShioajiSource` 📌 STUB）、`server/stream.StreamHub`＋`/ws/bars`（tick／1m／心跳）、CLI `stream --jsonl`；
   **本機剩**：`ShioajiSource` 實作與驗證（清單在 `docs/data_sources.md` 八）、`.env` 設 `MARKET_SOURCE=shioaji`。
+  → ⑨ ✅ `GET /api/calendar?date_from=&date_to=`（2026-11-08）：`market_holidays` 的休市日＋有資料的年份（唯讀、非契約表；讀表入口在
+  `utils/trading_calendar.holidays_between`）。tradewind 的 paper 排程每天開盤前拉一次算交易日與換月日（假日單一真相在這裡）。
 - 待定事項列在 `docs/contracts/README.md` 末段，等 tradewind 上 GitHub 後在雙 repo session 定稿。
 
 ---

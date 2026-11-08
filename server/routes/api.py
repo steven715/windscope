@@ -219,8 +219,27 @@ def query_instruments(request: Request, tradable_only: bool = False) -> dict:
         return _envelope("instruments", instruments_list(conn=conn, tradable_only=tradable_only))
 
 
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+08:00$")
 _EVENTS_MAX_BATCH = 10_000
+
+
+@router.get("/calendar")
+def query_calendar(request: Request, date_from: str, date_to: str) -> dict:
+    """台股休市日曆（給 tradewind 算交易日、換月日）：[date_from, date_to] 之間的休市日＋休市表有資料的年份。
+    休市表沒有某年資料時，那年只能排除週末（years_covered 不含它，呼叫端要記 WARNING）。不是契約表；唯讀。"""
+    from utils.trading_calendar import holiday_years, holidays_between
+
+    for v in (date_from, date_to):
+        if not _DATE_RE.match(v):
+            raise HTTPException(status_code=422, detail="date_from/date_to 要是 YYYY-MM-DD")
+    if date_to < date_from:
+        raise HTTPException(status_code=422, detail="date_to 早於 date_from")
+    if int(date_to[:4]) - int(date_from[:4]) > 5:
+        raise HTTPException(status_code=422, detail="一次最多 5 年")
+    with get_connection(request.app.state.db_path) as conn:
+        return {"date_from": date_from, "date_to": date_to, "holidays": holidays_between(date_from, date_to, conn=conn),
+                "years_covered": holiday_years(conn)}
 
 
 @router.get("/bars")
