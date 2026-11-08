@@ -80,7 +80,7 @@
 - windscope 端落地順序：① ✅ `bars_v` 映射三張 raw 表＋`instruments` 表（`db/bars.py`、`db/instruments.py`、`/api/bars`、`/api/instruments`）
   → ② ✅ 時點正確性：`tests/test_strategylib/test_pit.py` 證明還原是尺度變換、事後事件不改 ≤t 的趨勢輸出（回測用整段還原序列無前視）→ ③ ✅ `strategylib/`（趨勢三態、還原、Playbook `pullback_hold p1`；golden＋純度測試；ADR-0007）
   → ④ ✅ `targets` 表＋`/api/targets`＋`POST /api/targets/{id}/lock`＋`integration/targets_builder`（掛 before_open）
-  → ⑤ ✅ events／account_snapshots 入庫（`db/events.py`、`POST/GET /api/events`、after_close 掃 inbox）
+  → ⑤ ✅ events／account_snapshots 入庫（`db/events.py`、`POST/GET /api/events`、after_close 掃 inbox）；⑤-b ✅ 依成交打分（2026-11-08，`integration/trade_stats.py`、`GET /api/trade-stats`、`/stats` 第⑤段）：一個 target 的成交＝一筆交易，R＝依出場口數加權的成交 R；依 run_mode×策略×規則版本×Playbook 分組（永不混算）、出場原因（停損／失效／目標／override 分開）、Insight 對錯×R、override 有無、帳戶權益曲線；版本混用標記；純讀取（tradewind M2 的「windscope 看得到」）
   → ⑥ ✅ Playbook `trend_pullback p1`（個股波段執行：窗口內第一根 1 分 K 收完進場、停損跨日、分批；strategylib 0.2.0）
   → ⑦ ✅ `stock_trend_signals` → targets builder（`integration/trend_targets.py`，掛 after_close；批數規則與回測同一組 `BACKTEST_*`，批數有變才發一筆新 target，weight＝累積批次權重；狀態在上一筆 target 的 `inputs_ref.key`）→ ⑧ 即時串流（WS）與 1m 落地：✅ 雲端能做的部分（2026-11-03）——`integration/market_sessions`（時段歸屬，夜盤歸次一交易日）、
   `integration/bar_builder`（tick → 只在分鐘結束發出的 1m）、`collectors/market_stream`（`StreamRunner`：tick 推 hub、1m 推 hub＋落 `bars`；

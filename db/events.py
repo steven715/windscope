@@ -110,6 +110,37 @@ def snapshots_list(conn: sqlite3.Connection, session_date: str | None = None,
     return [json.loads(r[0]) for r in rows]
 
 
+def events_range(conn: sqlite3.Connection, run_mode: str | None = None, date_from: str | None = None,
+                 date_to: str | None = None, kinds: tuple[str, ...] = (), limit: int = 200_000) -> list[dict]:
+    """區間內的 events（session_date 介於兩者、含端點；kinds 給了只取這些 kind），ts、event_id 升冪。給打分（integration/trade_stats）用。"""
+    conds, params = [], []
+    for cond, val in (("run_mode = ?", run_mode), ("session_date >= ?", date_from), ("session_date <= ?", date_to)):
+        if val:
+            conds.append(cond)
+            params.append(val)
+    if kinds:
+        conds.append(f"kind IN ({','.join('?' * len(kinds))})")
+        params.extend(kinds)
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
+    rows = conn.execute(f"SELECT payload FROM events{where} ORDER BY ts ASC, event_id ASC LIMIT ?",
+                        [*params, max(1, limit)]).fetchall()
+    return [json.loads(r[0]) for r in rows]
+
+
+def snapshots_range(conn: sqlite3.Connection, run_mode: str | None = None, date_from: str | None = None,
+                    date_to: str | None = None, limit: int = 100_000) -> list[dict]:
+    """區間內的帳戶快照（as_of 升冪）。"""
+    conds, params = [], []
+    for cond, val in (("run_mode = ?", run_mode), ("session_date >= ?", date_from), ("session_date <= ?", date_to)):
+        if val:
+            conds.append(cond)
+            params.append(val)
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
+    rows = conn.execute(f"SELECT payload FROM account_snapshots{where} ORDER BY as_of ASC, snapshot_id ASC LIMIT ?",
+                        [*params, max(1, limit)]).fetchall()
+    return [json.loads(r[0]) for r in rows]
+
+
 def _read_jsonl(path: Path) -> list[dict]:
     out = []
     with open(path, encoding="utf-8") as f:

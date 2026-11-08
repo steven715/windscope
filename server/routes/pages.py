@@ -583,12 +583,15 @@ def stats_page(request: Request, rule_version: str | None = None,
     rule_version = rule_version or None
     date_from = date_from if date_from and _DATE_RE.match(date_from) else None
     date_to = date_to if date_to and _DATE_RE.match(date_to) else None
+    from integration.trade_stats import build_trade_stats
+
     with get_connection(request.app.state.db_path) as conn:
         stats = build_call_stats(conn, rule_version, date_from, date_to)
+        trade = build_trade_stats(conn, None, None, None, date_from, date_to, trades_limit=20)
 
     verdict_label, verdict_css = _VERDICT_LABELS[stats["assessment"]["verdict"]]
     return templates.TemplateResponse(request, "stats.html", {
-        "active": "stats", "s": stats,
+        "active": "stats", "s": stats, "t": trade,
         "verdict_label": verdict_label, "verdict_css": verdict_css,
         "direction_labels": _DIRECTION_LABELS, "class_labels": _CLASS_LABELS,
         "bt_modes": _CALL_BT_MODE_LABELS,
