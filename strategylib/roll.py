@@ -14,6 +14,7 @@ import re
 
 ROLL_VERSION = "roll1"
 _RULE = re.compile(r"^days_before_expiry:(\d+)$")
+_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def parse_roll_rule(rule: str | None) -> int | None:
@@ -30,6 +31,10 @@ def parse_roll_rule(rule: str | None) -> int | None:
 
 
 def _ymd(d: str) -> tuple[int, int, int]:
+    """嚴格 YYYY-MM-DD → (y, m, d)；其他格式（2026-6-1、前後空白、20260601）一律 ValueError——交易日與換月的比較都是字串比較，
+    非標準格式會靜靜算錯（0.3.1）。"""
+    if not isinstance(d, str) or not _DATE.fullmatch(d):
+        raise ValueError(f"date must be YYYY-MM-DD, got {d!r}")
     y, m, dd = (int(x) for x in d.split("-"))
     calendar.monthrange(y, m)                                       # 月份不合法 raise
     if not 1 <= dd <= calendar.monthrange(y, m)[1]:

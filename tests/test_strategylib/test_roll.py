@@ -64,3 +64,13 @@ def test_front_contract_and_roll_day():
     with pytest.raises(ValueError):
         front_contract(_get(_rows("days_before_expiry:0"), "TAIFEX:TMF"), _rows(), "2026-06-12")
     assert ROLL_VERSION == "roll1"
+
+
+def test_dates_must_be_strict_iso():
+    """0.3.1：非標準日期一律拒絕（之前 2026-6-1 會被接受、再拿去跟 2026-06-17 做字串比較，靜靜算錯近月）。"""
+    for bad in ("2026-6-1", " 2026-06-01", "2026-06-01 ", "20260601", "+2026-06-01", "2_026-06-01", "2026-06-01\n", None, 20260601):
+        with pytest.raises(ValueError):
+            shift_trading_days(bad, 1)
+        with pytest.raises(ValueError):
+            is_trading_day(bad)
+    assert shift_trading_days("2026-06-12", 1) == "2026-06-15"
