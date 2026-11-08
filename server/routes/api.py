@@ -332,6 +332,27 @@ def query_snapshots(request: Request, date: str | None = None,
     return _envelope("account_snapshots", rows)
 
 
+_RUN_MODES = ("backtest", "replay", "paper", "shioaji_sim", "shioaji_live")
+
+
+@router.get("/trade-stats")
+def query_trade_stats(request: Request, run_mode: str | None = None, strategy_id: str | None = None,
+                      account_id: str | None = None, date_from: str | None = None, date_to: str | None = None,
+                      trades_limit: int = 500) -> dict:
+    """Paper／券商模擬的交易成績（依成交打分，integration/trade_stats）：分組（run_mode×策略×規則版本×Playbook，永不混算）的 R 統計、
+    出場原因、override、Insight 對錯、帳戶權益曲線、交易明細。純讀取。"""
+    from integration.trade_stats import build_trade_stats
+
+    for v in (date_from, date_to):
+        if v and not _DATE_RE.match(v):
+            raise HTTPException(status_code=422, detail="date_from/date_to 要是 YYYY-MM-DD")
+    if run_mode and run_mode not in _RUN_MODES:
+        raise HTTPException(status_code=422, detail=f"run_mode 要是 {_RUN_MODES} 之一")
+    with get_connection(request.app.state.db_path) as conn:
+        return build_trade_stats(conn, run_mode or None, strategy_id or None, account_id or None, date_from or None,
+                                 date_to or None, max(0, min(trades_limit, 5000)))
+
+
 @router.get("/call-stats")
 def query_call_stats(request: Request, rule_version: str | None = None,
                      date_from: str | None = None, date_to: str | None = None,

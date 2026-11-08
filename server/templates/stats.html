@@ -220,6 +220,63 @@
 {% endif %}
 {% endfor %}
 
+{# ── ⑤ Paper／模擬交易成績（依成交打分，integration/trade_stats；同一份是 /api/trade-stats）── #}
+<div class="sec">
+  <div class="section-title">⑤ Paper／模擬交易成績</div>
+  <div class="dim">tradewind 回流的成交（每天 18:30 入庫）：同一帳戶同一商品從空手到空手算一筆交易（含風控平倉、換月、加碼減碼），
+    R 以開倉 target 的 1R 計（不扣成本）。依 run_mode × 策略 × 規則版本 × Playbook × 引擎版本分開（Paper 與實盤各算各的）；
+    未平倉、沒有成交就消失的部位（到期結算）不算。同日重跑只看最後一次。不套用上方的規則版本篩選。帳戶報酬含入出金。</div>
+</div>
+{% if t.groups %}
+<div class="table-wrap">
+  <table class="wide">
+    <thead><tr><th>模式／策略</th><th>規則／Playbook</th><th class="r">筆數</th><th class="r">勝率</th><th class="r">平均 R</th>
+      <th class="r">PF</th><th class="r">累計 R</th><th class="r">最大回撤 R</th><th>出場原因</th><th>Insight 對／錯 平均 R</th></tr></thead>
+    <tbody>
+      {% for g in t.groups %}
+      <tr>
+        <td data-label="模式／策略">{{ g.run_mode }} · {{ g.strategy_id }}{% if not g.sufficient %} <span class="tag low">樣本不足</span>{% endif %}{% if g.mixed_versions %} <span class="tag low">版本混用</span>{% endif %}</td>
+        <td data-label="規則／Playbook" class="mono">{{ g.rule_version or "—" }} · {{ g.playbook or "—" }}</td>
+        <td data-label="筆數" class="mono r">{{ g.r.n }}{% if g.open_trades %} <span class="muted">（+{{ g.open_trades }} 未平）</span>{% endif %}</td>
+        <td data-label="勝率" class="mono r">{% if g.r.n %}{{ g.r.win_rate.rate|pct }} <span class="ci">{{ g.r.win_rate.ci_low|pct(0) }}–{{ g.r.win_rate.ci_high|pct(0) }}</span>{% else %}—{% endif %}</td>
+        <td data-label="平均 R" class="mono r">{{ "%+.2f"|format(g.r.avg_r) if g.r.avg_r is not none else "—" }}</td>
+        <td data-label="PF" class="mono r">{{ "%.2f"|format(g.r.profit_factor) if g.r.profit_factor is not none else "—" }}</td>
+        <td data-label="累計 R" class="mono r {{ 'pos' if g.r.total_r > 0 else 'neg' if g.r.total_r < 0 else '' }}">{{ "%+.2f"|format(g.r.total_r) }}</td>
+        <td data-label="最大回撤 R" class="mono r">{{ "%.2f"|format(g.r.max_drawdown_r) }}</td>
+        <td data-label="出場原因">{% for k, b in g.by_exit_reason.items() %}{{ k }} {{ b.n }}{% if not loop.last %}、{% endif %}{% endfor %}</td>
+        <td data-label="Insight 對／錯" class="mono">{% if g.insight.hit.n or g.insight.miss.n %}{{ "%+.2f"|format(g.insight.hit.avg_r) if g.insight.hit.avg_r is not none else "—" }} ／ {{ "%+.2f"|format(g.insight.miss.avg_r) if g.insight.miss.avg_r is not none else "—" }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% elif t.error %}
+<div class="panel empty" style="padding:14px">交易成績算不出來（{{ t.error }}），看 log；上面的判斷統計不受影響</div>
+{% else %}
+<div class="panel empty" style="padding:14px">此區間還沒有 tradewind 回流的成交（Paper 開跑、18:30 入庫後才會有）</div>
+{% endif %}
+{% if t.accounts %}
+<div class="table-wrap">
+  <table class="wide">
+    <thead><tr><th>帳戶</th><th class="r">天數</th><th>區間</th><th class="r">期初權益</th><th class="r">期末權益</th><th class="r">報酬</th><th class="r">最大回撤</th></tr></thead>
+    <tbody>
+      {% for a in t.accounts %}
+      <tr>
+        <td data-label="帳戶">{{ a.run_mode }} · {{ a.account_id }}</td>
+        <td data-label="天數" class="mono r">{{ a.days }}</td>
+        <td data-label="區間" class="mono">{{ a.date_from }} ～ {{ a.date_to }}</td>
+        <td data-label="期初權益" class="mono r">{{ "{:,.0f}".format(a.start_equity) }}</td>
+        <td data-label="期末權益" class="mono r">{{ "{:,.0f}".format(a.end_equity) }}</td>
+        <td data-label="報酬" class="mono r {{ 'pos' if (a.return_pct or 0) > 0 else 'neg' if (a.return_pct or 0) < 0 else '' }}">{{ "%+.2f"|format(a.return_pct) if a.return_pct is not none else "—" }}%</td>
+        <td data-label="最大回撤" class="mono r">{{ "%.2f"|format(a.max_drawdown_pct) }}%</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+<div class="footnote" style="margin-top:-8px">停損（stop）與失效（invalidated）分開：前者是 Trade Plan 的風險參數觸發，後者是 Insight 的主張不成立。Insight 對／錯＝盤前判斷當天的驗證結果；對了還虧＝執行或計畫的問題，錯了還賺＝運氣。</div>
+
 <div class="footnote" style="margin-top:18px">
   怎麼讀：① 系統沒贏過基準 → 規則整體沒資訊量；② 信心不單調 → 加減分邏輯該重審；③ 命中率高但期望值負 → 方向對不等於賺錢，看盈虧比；④ 某因子各桶漲跌分布差不多 → 那個輸入是擺設。
   任何一格樣本不足都先別下結論，先累積資料。

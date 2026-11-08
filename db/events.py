@@ -110,6 +110,40 @@ def snapshots_list(conn: sqlite3.Connection, session_date: str | None = None,
     return [json.loads(r[0]) for r in rows]
 
 
+def events_range(conn: sqlite3.Connection, run_mode: str | None = None, date_from: str | None = None,
+                 date_to: str | None = None, kinds: tuple[str, ...] = (), limit: int = 200_000) -> list[dict]:
+    """區間內的 events（session_date 介於兩者、含端點；kinds 給了只取這些 kind），ts、event_id 升冪。給打分（integration/trade_stats）用。
+    每筆另加 `_session_date`（入庫時的交易日：夜盤的 ts 日期不等於它）；超過 limit 記 WARNING（被截掉的是最新的）。"""
+    conds, params = [], []
+    for cond, val in (("run_mode = ?", run_mode), ("session_date >= ?", date_from), ("session_date <= ?", date_to)):
+        if val:
+            conds.append(cond)
+            params.append(val)
+    if kinds:
+        conds.append(f"kind IN ({','.join('?' * len(kinds))})")
+        params.extend(kinds)
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
+    rows = conn.execute(f"SELECT payload, session_date FROM events{where} ORDER BY ts ASC, event_id ASC LIMIT ?",
+                        [*params, max(1, limit)]).fetchall()
+    if len(rows) >= limit:
+        logger.warning("events_range hit the limit (%d rows); the newest events are cut off", limit)
+    return [{**json.loads(r[0]), "_session_date": r[1]} for r in rows]
+
+
+def snapshots_range(conn: sqlite3.Connection, run_mode: str | None = None, date_from: str | None = None,
+                    date_to: str | None = None, limit: int = 100_000) -> list[dict]:
+    """區間內的帳戶快照（as_of 升冪）。"""
+    conds, params = [], []
+    for cond, val in (("run_mode = ?", run_mode), ("session_date >= ?", date_from), ("session_date <= ?", date_to)):
+        if val:
+            conds.append(cond)
+            params.append(val)
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
+    rows = conn.execute(f"SELECT payload FROM account_snapshots{where} ORDER BY as_of ASC, snapshot_id ASC LIMIT ?",
+                        [*params, max(1, limit)]).fetchall()
+    return [json.loads(r[0]) for r in rows]
+
+
 def _read_jsonl(path: Path) -> list[dict]:
     out = []
     with open(path, encoding="utf-8") as f:

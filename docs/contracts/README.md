@@ -11,7 +11,7 @@
 | `instruments.schema.json` | windscope 產、兩邊讀 | 商品主檔：代碼規則、資產類別、合約規格、交易時段 |
 | `corporate_actions.schema.json` | windscope 產、兩邊讀 | 公司行為（除權息／分割）：還原股價的唯一來源 |
 | `targets.schema.json` | **windscope → tradewind** | 目標部位＝**Insight**（主張：方向/信心/有效期/失效）＋**Trade Plan**（行動約束：怎麼進/多大/何時減/何時認錯/什麼不做）；是最終狀態，不是訂單 |
-| `events.schema.json` | **tradewind → windscope** | 反向流：Trade Management 狀態轉換、委託、成交、override、風控、系統狀態、健康；每筆帶 `run_mode`，Paper 與實盤永不混算 |
+| `events.schema.json` | **tradewind → windscope** | 反向流：Trade Management 狀態轉換、委託、成交、override、風控、系統狀態、健康；每筆帶 `run_mode`，Paper 與實盤永不混算；windscope 依成交打分（`integration/trade_stats.py`：一筆交易＝同帳戶同商品從空手到空手的一段部位，R 以開倉 target 的 `trade_plan.risk.stop_pts` 計；沒有 target 的平倉成交靠 `detail.order_reason` 分原因） |
 | `account_snapshots.schema.json` | **tradewind → windscope／錢包** | 券商回報的帳戶快照（權益、保證金、持倉）；tradewind 對帳用，未來的個人資產彙總專案也讀這份 |
 
 `fixtures/*.jsonl` 是每張表的範例列；兩個 repo 的 contract test 都讀同一份 fixture。
