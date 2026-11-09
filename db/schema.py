@@ -181,7 +181,8 @@ CREATE TABLE IF NOT EXISTS verifications (
     day_change_class TEXT,
     hit_day INTEGER,
     hit_open INTEGER,
-    verified_at TEXT
+    verified_at TEXT,
+    rule_version TEXT           -- 驗證當下那筆判斷的規則版本（signals 之後被 recompute 改掉也不變；命中率依它分版）
 );
 
 CREATE TABLE IF NOT EXISTS schedule_config (
@@ -425,6 +426,7 @@ _COLUMN_MIGRATIONS = [
     ("job_config", "display_desc", "TEXT"),
     ("job_config", "enabled", "INTEGER"),
     ("stock_trend_signals", "adjust_note", "TEXT"),
+    ("verifications", "rule_version", "TEXT"),
 ]
 
 # 既有表移除欄位用的 migration：(table, column)。SQLite >=3.35 支援 DROP COLUMN，
@@ -452,10 +454,31 @@ def _migrate_drop_columns(conn: sqlite3.Connection) -> None:
             logger.info("migrated %s: dropped column %s", table, column)
 
 
+def _backfill_verification_rule_version(conn: sqlite3.Connection) -> int:
+    """verifications 剛加上 rule_version 時，補上舊列的版本（只在補欄位那次跑）。
+
+    只有「判斷在驗證之前就產生、之後沒被 recompute 覆寫」（signals.created_at <= verified_at）的列，
+    signals 現在的版本才是驗證當下的版本；其他列不猜、留 NULL（不列入分版命中率）。回傳補上的筆數。
+    """
+    conn.execute(
+        """UPDATE verifications SET rule_version = (
+               SELECT s.rule_version FROM signals s
+               WHERE s.date = verifications.date AND s.created_at <= verifications.verified_at)
+           WHERE rule_version IS NULL""")
+    filled = conn.execute("SELECT COUNT(*) FROM verifications WHERE rule_version IS NOT NULL").fetchone()[0]
+    unknown = conn.execute("SELECT COUNT(*) FROM verifications WHERE rule_version IS NULL").fetchone()[0]
+    logger.info("migrated verifications.rule_version: %d 筆補上版本，%d 筆判斷在驗證後被重算過、版本不明（留 NULL）",
+                filled, unknown)
+    return filled
+
+
 def create_all_tables(conn: sqlite3.Connection) -> None:
     """建立所有表並套用欄位 migration。可重複執行（冪等）。"""
     conn.executescript(_SCHEMA_SQL)
+    had_ver_version = "rule_version" in {r[1] for r in conn.execute("PRAGMA table_info(verifications)")}
     _migrate_columns(conn)
+    if not had_ver_version:
+        _backfill_verification_rule_version(conn)
     _migrate_drop_columns(conn)
     conn.executescript(_BARS_VIEW_SQL)   # view 每次重建，定義改了才會跟上
     logger.info("All tables created (or already exist)")

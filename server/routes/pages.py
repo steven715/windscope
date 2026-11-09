@@ -499,7 +499,7 @@ def dashboard(request: Request):
             explain = build_explain(signal["date"], conn)
             explain_notice = premarket_drift_notice(signal["date"], conn)
 
-        stats = get_verification_stats(conn)
+        stats = get_verification_stats(conn, settings.SIGNAL_RULE_VERSION)
         recent = get_recent_verifications(conn, last_n=10)
 
     for r in recent:
@@ -537,7 +537,7 @@ def signals_page(request: Request, date_from: str | None = None,
             sql += " WHERE " + " AND ".join(conditions)
         sql += " ORDER BY s.date DESC LIMIT 200"
         rows = conn.execute(sql, params).fetchall()
-        stats = get_verification_stats(conn)
+        stats = get_verification_stats(conn, settings.SIGNAL_RULE_VERSION)
 
     records = [
         {

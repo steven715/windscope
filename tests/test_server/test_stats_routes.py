@@ -18,11 +18,11 @@ def _seed_day(conn, date, direction, confidence, prev_close, open_, close, rule_
                  "VALUES (?, ?, ?, ?)", (date, direction, confidence, rule_version))
     conn.execute(
         "INSERT INTO verifications (date, predicted_direction, confidence, prev_close, open, "
-        "close, open_gap_pct, day_change_pct, open_gap_class, day_change_class, hit_day, hit_open) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "close, open_gap_pct, day_change_pct, open_gap_class, day_change_class, hit_day, hit_open, rule_version) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (date, direction, confidence, prev_close, open_, close, c["open_gap_pct"],
          c["day_change_pct"], c["open_gap_class"], c["day_change_class"],
-         c["hit_day"], c["hit_open"]))
+         c["hit_day"], c["hit_open"], rule_version))
     conn.execute("INSERT OR REPLACE INTO raw_index (date, open, close) VALUES (?, ?, ?)",
                  (date, open_, close))
     conn.execute("INSERT INTO daily_metrics (date, fx_direction, futures_spread_adjusted, "

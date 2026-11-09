@@ -38,7 +38,7 @@ _Z95 = 1.959964
 class CallRow:
     """一筆已驗證的盤前判斷（signals ⋈ verifications 同日），日期升冪供回測串接。
 
-    方向/信心取自 verifications（驗證當下的立場），hit 由本模組依三分類重算，
+    方向/信心/規則版本取自 verifications（驗證當下的立場），hit 由本模組依三分類重算，
     避免 signals 事後被 recompute 覆寫而與 hit_day 不一致。
     """
 
@@ -112,14 +112,17 @@ def _date_where(date_from: str | None, date_to: str | None, col: str) -> tuple[l
 def load_verified_calls(conn: sqlite3.Connection, rule_version: str | None = None,
                         date_from: str | None = None,
                         date_to: str | None = None) -> list[CallRow]:
-    """讀已驗證的盤前判斷（signals ⋈ verifications），日期升冪；可篩規則版本與區間。"""
+    """讀已驗證的盤前判斷（signals ⋈ verifications），日期升冪；可篩規則版本與區間。
+
+    版本、方向、信心都取自 verifications（驗證當下那筆判斷）：signals 事後被 recompute 改成新版本時，
+    舊判斷不會被算進新版本。驗證時版本不明（NULL）的列只在不篩版本時出現。"""
     conds, params = _date_where(date_from, date_to, "s.date")
     if rule_version:
-        conds.append("s.rule_version = ?")
+        conds.append("v.rule_version = ?")
         params.append(rule_version)
     where = (" WHERE " + " AND ".join(conds)) if conds else ""
     rows = conn.execute(
-        "SELECT s.date, v.predicted_direction, v.confidence, s.rule_version, "
+        "SELECT s.date, v.predicted_direction, v.confidence, v.rule_version, "
         "       v.prev_close, v.open, v.close, v.open_gap_pct, v.day_change_pct, "
         "       v.open_gap_class, v.day_change_class "
         "FROM signals s JOIN verifications v ON s.date = v.date"
@@ -145,11 +148,12 @@ def load_verified_calls(conn: sqlite3.Connection, rule_version: str | None = Non
 
 
 def list_rule_versions(conn: sqlite3.Connection) -> list[dict]:
-    """各規則版本的已驗證筆數（供篩選下拉），最近使用的版本在前（不用字串排序，v10 才不會排在 v9 前）。"""
+    """各規則版本（驗證當下的版本）的已驗證筆數（供篩選下拉），最近使用的版本在前（不用字串排序，v10 才不會排在 v9 前）。
+    版本不明的列以空字串列出。"""
     rows = conn.execute(
-        "SELECT s.rule_version, COUNT(*) FROM signals s "
+        "SELECT v.rule_version, COUNT(*) FROM signals s "
         "JOIN verifications v ON s.date = v.date "
-        "GROUP BY s.rule_version ORDER BY MAX(s.date) DESC"
+        "GROUP BY v.rule_version ORDER BY MAX(s.date) DESC"
     ).fetchall()
     return [{"rule_version": r[0] or "", "n": r[1]} for r in rows]
 

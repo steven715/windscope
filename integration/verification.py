@@ -60,12 +60,12 @@ def verify_signal(date: str, conn: sqlite3.Connection) -> dict | None:
     任一缺失回傳 None。
     """
     signal = conn.execute(
-        "SELECT direction, confidence FROM signals WHERE date = ?", (date,)
+        "SELECT direction, confidence, rule_version FROM signals WHERE date = ?", (date,)
     ).fetchone()
     if signal is None:
         logger.warning("verify_signal: no signal for %s", date)
         return None
-    predicted_direction, confidence = signal
+    predicted_direction, confidence, rule_version = signal
 
     index_row = conn.execute(
         "SELECT open, close FROM raw_index WHERE date = ?", (date,)
@@ -109,6 +109,7 @@ def verify_signal(date: str, conn: sqlite3.Connection) -> dict | None:
         "day_change_class": day_change_class,
         "hit_day": hit_day,
         "hit_open": hit_open,
+        "rule_version": rule_version,
     }
 
     conn.execute(
@@ -116,8 +117,8 @@ def verify_signal(date: str, conn: sqlite3.Connection) -> dict | None:
                (date, predicted_direction, confidence, prev_close,
                 open, close, open_gap_pct, day_change_pct,
                 open_gap_class, day_change_class, hit_day, hit_open,
-                verified_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                verified_at, rule_version)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(date) DO UPDATE SET
                predicted_direction = excluded.predicted_direction,
                confidence = excluded.confidence,
@@ -130,11 +131,12 @@ def verify_signal(date: str, conn: sqlite3.Connection) -> dict | None:
                day_change_class = excluded.day_change_class,
                hit_day = excluded.hit_day,
                hit_open = excluded.hit_open,
-               verified_at = excluded.verified_at""",
+               verified_at = excluded.verified_at,
+               rule_version = excluded.rule_version""",
         (date, predicted_direction, confidence, prev_close,
          open_price, close_price, open_gap_pct, day_change_pct,
          open_gap_class, day_change_class, hit_day, hit_open,
-         datetime.now().isoformat()),
+         datetime.now().isoformat(), rule_version),
     )
     conn.commit()
 
@@ -143,18 +145,20 @@ def verify_signal(date: str, conn: sqlite3.Connection) -> dict | None:
     return result
 
 
-def get_verification_stats(conn: sqlite3.Connection, last_n: int = 20) -> dict:
-    """統計最近 last_n 筆驗證的命中率（主/輔基準）與各信心度命中率。"""
+def get_verification_stats(conn: sqlite3.Connection, rule_version: str, last_n: int = 20) -> dict:
+    """統計 rule_version 最近 last_n 筆驗證的命中率（主/輔基準）與各信心度命中率。
+
+    只算同一個規則版本（驗證當下的版本）：新舊規則的命中率不混算。"""
     rows = conn.execute(
         "SELECT confidence, hit_day, hit_open FROM verifications "
-        "ORDER BY date DESC LIMIT ?",
-        (last_n,),
+        "WHERE rule_version = ? ORDER BY date DESC LIMIT ?",
+        (rule_version, last_n),
     ).fetchall()
 
     total = len(rows)
     if total == 0:
         return {
-            "total": 0, "hit_day_rate": None, "hit_open_rate": None,
+            "rule_version": rule_version, "total": 0, "hit_day_rate": None, "hit_open_rate": None,
             "by_confidence": {},
         }
 
@@ -170,6 +174,7 @@ def get_verification_stats(conn: sqlite3.Connection, last_n: int = 20) -> dict:
         bucket["rate"] = round(bucket["hits"] / bucket["total"] * 100, 1)
 
     return {
+        "rule_version": rule_version,
         "total": total,
         "hit_day_rate": round(hit_day_count / total * 100, 1),
         "hit_open_rate": round(hit_open_count / total * 100, 1),

@@ -6,6 +6,7 @@ import sqlite3
 import pytest
 from fastapi.testclient import TestClient
 
+from config import settings
 from db.schema import create_all_tables
 from server.app import create_app
 
@@ -41,8 +42,9 @@ def client_with_data(tmp_path):
     conn.execute(
         "INSERT INTO verifications (date, predicted_direction, confidence, "
         "day_change_pct, day_change_class, open_gap_pct, open_gap_class, "
-        "hit_day, hit_open) VALUES "
-        "('2026-06-11', 'bullish', 3, 0.58, 'up', 0.4, 'up', 1, 1)"
+        "hit_day, hit_open, rule_version) VALUES "
+        "('2026-06-11', 'bullish', 3, 0.58, 'up', 0.4, 'up', 1, 1, ?)",
+        (settings.SIGNAL_RULE_VERSION,),
     )
     conn.execute(
         "INSERT INTO watchlist (stock_id, stock_name, added_date, reason) "
@@ -415,8 +417,11 @@ class TestApi:
     def test_api_stats(self, client_with_data):
         resp = client_with_data.get("/api/stats")
         data = resp.json()
+        assert data["rule_version"] == settings.SIGNAL_RULE_VERSION   # 預設現行版本
         assert data["total"] == 1
         assert data["hit_day_rate"] == 100.0
+        other = client_with_data.get("/api/stats?rule_version=v0").json()   # 別的版本不混進來
+        assert (other["rule_version"], other["total"]) == ("v0", 0)
 
     def test_api_stats_empty(self, client):
         resp = client.get("/api/stats")

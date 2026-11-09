@@ -106,3 +106,9 @@
 - 後端只出 JSON API（FastAPI＋OpenAPI）；UI 在獨立前端 repo（Vite＋TypeScript＋React），同一個前端吃 windscope／tradewind／錢包三個 API。
 - 本 repo 不再新增 Jinja 頁；既有頁面過渡期保留，**API-first**：先補每頁對應的 `/api/*`（`/stats` 已有 `/api/call-stats`），前端做到哪頁、哪頁的 Jinja 才下線。
 - 前端第一批只做兩頁：判斷有效性（windscope）、狀態頁＋kill switch（tradewind，按鈕走 ops）。
+- 前端 repo＝windwatch：「今日」（windwatch #1）、「情報」（windwatch #2：判斷有效性、判斷與驗證、籌碼觀察）已做；
+  `signals.html`、`stats.html` 的內容前端都有了，可排下線。
+- ✅ 命中率依「驗證當下」的規則版本分（2026-11-09，windwatch #2 審查）：`verifications.rule_version` 驗證時記下，
+  `call-stats` 與近 N 筆小卡（`/api/stats`、首頁、訊號頁，預設現行版本）都依它篩；之前用 signals 的現在版本篩，
+  判斷驗證後被 recompute 成新版本時，舊判斷會被算進新版本。舊資料遷移只補「判斷在驗證前產生、之後沒被重算」的列，
+  其他留 NULL 不猜（不列入分版統計）；要讓它們進統計就重跑驗證（會改成照現在的判斷算）。

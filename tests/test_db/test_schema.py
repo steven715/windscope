@@ -119,6 +119,33 @@ class TestCreateAllTables:
         create_all_tables(conn)  # 冪等
         conn.close()
 
+    def test_migration_backfills_verification_rule_version_only_when_known(self):
+        """既有 verifications 無 rule_version → 補欄位，並只替「判斷在驗證前產生、之後沒被重算」的列補版本；
+        驗證後才被 recompute 的列版本不明，留 NULL（不猜）。之後再跑不會再補（冪等）。"""
+        conn = sqlite3.connect(":memory:")
+        conn.execute("CREATE TABLE signals (date TEXT PRIMARY KEY, direction TEXT, confidence INTEGER, fx_vote TEXT, "
+                     "futures_vote TEXT, reasons TEXT, rule_version TEXT, created_at TEXT)")
+        conn.execute("CREATE TABLE verifications (date TEXT PRIMARY KEY, predicted_direction TEXT, confidence INTEGER, "
+                     "prev_close REAL, open REAL, close REAL, open_gap_pct REAL, day_change_pct REAL, "
+                     "open_gap_class TEXT, day_change_class TEXT, hit_day INTEGER, hit_open INTEGER, verified_at TEXT)")
+        conn.executemany("INSERT INTO signals (date, direction, rule_version, created_at) VALUES (?, ?, ?, ?)", [
+            ("2026-06-10", "bullish", "v2", "2026-06-10T08:50:01"),     # 驗證前產生、沒動過 → v2
+            ("2026-06-11", "bearish", "v3", "2026-07-01T10:00:00"),     # 驗證後被 recompute 成 v3 → 不明
+        ])
+        conn.executemany("INSERT INTO verifications (date, predicted_direction, verified_at) VALUES (?, ?, ?)", [
+            ("2026-06-10", "bullish", "2026-06-10T13:40:00"),
+            ("2026-06-11", "bullish", "2026-06-11T13:40:00"),
+        ])
+
+        create_all_tables(conn)
+
+        got = dict(conn.execute("SELECT date, rule_version FROM verifications"))
+        assert got == {"2026-06-10": "v2", "2026-06-11": None}
+        conn.execute("UPDATE signals SET created_at = '2026-06-11T08:50:00' WHERE date = '2026-06-11'")
+        create_all_tables(conn)                                       # 欄位已在：不再補，NULL 照舊
+        assert dict(conn.execute("SELECT date, rule_version FROM verifications")) == got
+        conn.close()
+
     def test_migration_adds_display_desc_to_existing_job_config(self):
         """既有(舊 schema)job_config 無 display_desc → create_all_tables 應 ALTER 補上。"""
         conn = sqlite3.connect(":memory:")

@@ -228,7 +228,7 @@ def _query_verification(date: str) -> None:
             "       hit_day, hit_open FROM verifications WHERE date = ?",
             (date,),
         ).fetchone()
-        stats = get_verification_stats(conn)
+        stats = get_verification_stats(conn, settings.SIGNAL_RULE_VERSION)
 
     if not row:
         print(f"No verification found for {date}")
@@ -241,7 +241,7 @@ def _query_verification(date: str) -> None:
         print(f"開盤跳空: {gap_pct:+.2f}% ({gap_cls}) → {'✓' if hit_open else '✗'}")
 
     if stats["total"] > 0:
-        print(f"\n[近 {stats['total']} 日命中率]")
+        print(f"\n[{stats['rule_version']} 近 {stats['total']} 日命中率]")
         print(f"  收盤基準: {stats['hit_day_rate']}%  跳空基準: {stats['hit_open_rate']}%")
         for conf_level in sorted(stats["by_confidence"], reverse=True):
             b = stats["by_confidence"][conf_level]
