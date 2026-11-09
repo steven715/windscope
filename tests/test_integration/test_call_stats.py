@@ -133,7 +133,6 @@ def test_load_filters_by_version_and_range(db):
     assert [v["rule_version"] for v in list_rule_versions(db)] == ["v10", "v3", "v2"]
 
 
-
 def test_recomputed_call_stays_in_the_version_it_was_verified_under(db):
     """回歸（windwatch #2 審查）：判斷驗證後被 recompute 成新版本、沒重驗——命中是照舊判斷算的，
     不能算進新版本（之前用 signals 的現在版本篩，v2 的判斷會被當成 v3）。"""
@@ -146,6 +145,7 @@ def test_recomputed_call_stays_in_the_version_it_was_verified_under(db):
     v2 = load_verified_calls(db, rule_version="v2")
     assert [(r.date, r.direction, r.rule_version, r.hit_day) for r in v2] == [(_DAYS[0], "bullish", "v2", 1)]
     assert {v["rule_version"]: v["n"] for v in list_rule_versions(db)} == {"v2": 1, "v3": 1}
+
 
 def test_load_skips_null_or_out_of_range_confidence(db):
     _seed_day(db, _DAYS[0], "bullish", 3, 100, 100, 101)

@@ -523,7 +523,8 @@ def signals_page(request: Request, date_from: str | None = None,
         sql = (
             "SELECT s.date, s.direction, s.confidence, s.reasons, s.rule_version, "
             "       v.day_change_pct, v.day_change_class, v.hit_day, "
-            "       v.open_gap_pct, v.hit_open "
+            "       v.open_gap_pct, v.hit_open, "
+            "       v.date, v.predicted_direction, v.confidence, v.rule_version "
             "FROM signals s LEFT JOIN verifications v ON s.date = v.date"
         )
         conditions, params = [], []
@@ -539,13 +540,14 @@ def signals_page(request: Request, date_from: str | None = None,
         rows = conn.execute(sql, params).fetchall()
         stats = get_verification_stats(conn, settings.SIGNAL_RULE_VERSION)
 
+    # 已驗證的列顯示「驗證當下」的判斷與版本（命中是照它算的；signals 之後可能被 recompute 改掉）
     records = [
         {
             "date": r[0],
-            "direction_label": _DIRECTION_LABELS.get(r[1], r[1]),
-            "confidence": r[2],
+            "direction_label": _DIRECTION_LABELS.get(r[11] if r[10] else r[1], r[11] if r[10] else r[1]),
+            "confidence": r[12] if r[10] else r[2],
             "reasons": json.loads(r[3]) if r[3] else [],
-            "rule_version": r[4],
+            "rule_version": (r[13] or "版本不明") if r[10] else r[4],
             "day_change_pct": r[5],
             "day_change_class": r[6],
             "day_label": _CLASS_LABELS.get(r[6], None),

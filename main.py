@@ -550,6 +550,16 @@ def cmd_recompute(args: argparse.Namespace) -> None:
                   f"籌碼觀察={result['chip_observations']} → {sig_str}")
 
 
+def cmd_reverify(args: argparse.Namespace) -> None:
+    """離線重驗（只讀 raw_index）：預設只重驗版本不明的驗證；--all 重驗區間內每一筆（照現在的判斷算）。"""
+    from integration.verification import reverify_range
+
+    with get_connection() as conn:
+        result = reverify_range(conn, args.from_date, args.to_date, only_unversioned=not args.all)
+    print(f"重驗 {len(result['verified'])} 筆（照現在的判斷與版本算）；缺資料沒驗 {len(result['failed'])} 筆"
+          + (f"：{', '.join(result['failed'])}" if result["failed"] else ""))
+
+
 def cmd_refresh_holidays(args: argparse.Namespace) -> None:
     """抓 TWSE 休市日曆寫入 DB（server 啟動時與每月會自動執行，此為手動觸發）。"""
     from jobs.refresh_holidays import run_refresh_holidays
@@ -861,6 +871,13 @@ def main() -> None:
         "--to", dest="to_date", default=None, help="Range end (YYYY-MM-DD)",
     )
 
+    # reverify（離線重驗：版本不明的驗證列重新照現在的判斷算）
+    reverify_parser = subparsers.add_parser(
+        "reverify", help="Re-verify calls offline (default: only verifications whose rule_version is unknown)")
+    reverify_parser.add_argument("--from", dest="from_date", required=True, help="Range start (YYYY-MM-DD)")
+    reverify_parser.add_argument("--to", dest="to_date", required=True, help="Range end (YYYY-MM-DD)")
+    reverify_parser.add_argument("--all", action="store_true", help="Re-verify every call in range, not only unversioned")
+
     # serve
     targets_parser = subparsers.add_parser(
         "targets", help="契約 targets：build <date> / list [date] / lock <target_id>"
@@ -921,6 +938,8 @@ def main() -> None:
 
             args.date = date.today().isoformat()
         cmd_run(args)
+    elif args.command == "reverify":
+        cmd_reverify(args)
     elif args.command == "recompute":
         if args.date is None and not (args.from_date and args.to_date):
             from datetime import date

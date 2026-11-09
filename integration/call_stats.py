@@ -112,10 +112,8 @@ def _date_where(date_from: str | None, date_to: str | None, col: str) -> tuple[l
 def load_verified_calls(conn: sqlite3.Connection, rule_version: str | None = None,
                         date_from: str | None = None,
                         date_to: str | None = None) -> list[CallRow]:
-    """讀已驗證的盤前判斷（signals ⋈ verifications），日期升冪；可篩規則版本與區間。
-
-    版本、方向、信心都取自 verifications（驗證當下那筆判斷）：signals 事後被 recompute 改成新版本時，
-    舊判斷不會被算進新版本。驗證時版本不明（NULL）的列只在不篩版本時出現。"""
+    """讀已驗證的盤前判斷（signals ⋈ verifications），日期升冪；可篩規則版本（驗證當下的版本）與區間。
+    版本／方向／信心都取自 verifications：signals 事後被 recompute 成新版本，舊判斷也不會算進新版本。"""
     conds, params = _date_where(date_from, date_to, "s.date")
     if rule_version:
         conds.append("v.rule_version = ?")
@@ -148,8 +146,7 @@ def load_verified_calls(conn: sqlite3.Connection, rule_version: str | None = Non
 
 
 def list_rule_versions(conn: sqlite3.Connection) -> list[dict]:
-    """各規則版本（驗證當下的版本）的已驗證筆數（供篩選下拉），最近使用的版本在前（不用字串排序，v10 才不會排在 v9 前）。
-    版本不明的列以空字串列出。"""
+    """各規則版本（驗證當下的版本；不明＝空字串）的已驗證筆數，最近使用的在前（不用字串排序，v10 才不會排在 v9 前）。"""
     rows = conn.execute(
         "SELECT v.rule_version, COUNT(*) FROM signals s "
         "JOIN verifications v ON s.date = v.date "

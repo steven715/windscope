@@ -117,3 +117,55 @@ def test_api_call_stats_empty(client):
     body = client.get("/api/call-stats").json()
     assert body["n"] == 0 and body["assessment"]["verdict"] == "insufficient"
     assert body["calibration"]["by_confidence"] == {}
+
+
+# ── 規則版本不混算（verifications.rule_version；審查） ─────────────────────────────
+
+
+def _db(client: TestClient) -> sqlite3.Connection:
+    return sqlite3.connect(client.app.state.db_path)
+
+
+def _row(html: str, date: str) -> str:
+    start = html.index(date)
+    return html[start:html.index("</tr>", start)]
+
+
+def test_small_cards_count_only_the_current_version(client_with_data):
+    """近 N 筆小卡（訊號頁、首頁）只算現行版本 v3：2/3＝66.7%；混進 v2 會變 3/4＝75.0%。"""
+    for page in ("/signals", "/"):
+        html = client_with_data.get(page).text
+        assert "66.7%" in html, page
+        assert "75.0%" not in html, page
+        assert "v3 近 3" in html, page
+
+
+def test_signals_page_shows_the_call_as_verified_after_a_recompute(client_with_data):
+    """判斷驗證後被 recompute 成 v3 偏空：訊號頁該列顯示驗證當下的偏多／v2（命中是照它算的）。"""
+    with _db(client_with_data) as conn:
+        conn.execute("UPDATE signals SET direction = 'bearish', confidence = 5, rule_version = 'v3' WHERE date = ?",
+                     (_DAYS[1],))
+    row = _row(client_with_data.get("/signals").text, _DAYS[1])
+    assert "偏多" in row and "v2" in row and "4/5" in row
+    assert "偏空" not in row and "v3" not in row
+
+
+def test_stats_page_lists_unknown_version_but_cannot_select_it(client_with_data):
+    with _db(client_with_data) as conn:
+        conn.execute("UPDATE verifications SET rule_version = NULL WHERE date = ?", (_DAYS[1],))
+    html = client_with_data.get("/stats").text
+    assert '<option value="" disabled>版本不明 · 1 筆' in html
+    assert "目前混算 1 個規則版本＋版本不明的列" in html
+
+
+def test_dashboard_strip_without_verifications_for_the_current_version(tmp_path):
+    db_path = str(tmp_path / "t.db")
+    conn = sqlite3.connect(db_path)
+    create_all_tables(conn)
+    conn.execute("INSERT INTO raw_index (date, close) VALUES (?, 100)", (_DAYS[0],))
+    _seed_day(conn, _DAYS[1], "bullish", 4, 100, 100.2, 101, rule_version="v2")   # 只有舊版本的驗證
+    conn.commit()
+    conn.close()
+    html = TestClient(create_app(db_path=db_path, enable_scheduler=False)).get("/").text
+    assert "v3 還沒有驗證紀錄" in html
+    assert "None%" not in html

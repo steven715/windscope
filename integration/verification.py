@@ -145,6 +145,23 @@ def verify_signal(date: str, conn: sqlite3.Connection) -> dict | None:
     return result
 
 
+def reverify_range(conn: sqlite3.Connection, date_from: str, date_to: str,
+                   only_unversioned: bool = True) -> dict:
+    """離線重驗區間內的判斷（照 signals 現在的判斷與版本、只讀 raw_index），回傳 {verified, failed}。
+    only_unversioned：只重驗版本不明（NULL）的驗證列；False＝區間內每一筆有判斷的日子。"""
+    if only_unversioned:
+        sql = ("SELECT s.date FROM signals s JOIN verifications v ON s.date = v.date "
+               "WHERE v.rule_version IS NULL AND s.date BETWEEN ? AND ? ORDER BY s.date")
+    else:
+        sql = "SELECT date FROM signals WHERE date BETWEEN ? AND ? ORDER BY date"
+    dates = [r[0] for r in conn.execute(sql, (date_from, date_to)).fetchall()]
+    verified, failed = [], []
+    for d in dates:
+        (verified if verify_signal(d, conn) is not None else failed).append(d)
+    logger.info("reverify_range %s~%s: 重驗 %d 筆，缺資料 %d 筆", date_from, date_to, len(verified), len(failed))
+    return {"verified": verified, "failed": failed}
+
+
 def get_verification_stats(conn: sqlite3.Connection, rule_version: str, last_n: int = 20) -> dict:
     """統計 rule_version 最近 last_n 筆驗證的命中率（主/輔基準）與各信心度命中率。
 

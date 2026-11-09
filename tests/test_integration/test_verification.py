@@ -9,6 +9,7 @@ from integration.verification import (
     _classify_change,
     get_recent_verifications,
     get_verification_stats,
+    reverify_range,
     verify_signal,
 )
 
@@ -156,6 +157,30 @@ class TestVerifySignal:
         row = db_ready.execute(
             "SELECT rule_version, predicted_direction, hit_day FROM verifications WHERE date = '2026-06-12'").fetchone()
         assert row == ("v3", "bearish", 0)
+
+
+class TestReverifyRange:
+    def test_only_unversioned_by_default_and_all_on_request(self, db_ready):
+        """預設只重驗版本不明的列（照現在的判斷）；--all 重驗區間內每一筆；缺行情的日子列在 failed。"""
+        _insert_index(db_ready, "2026-06-12", open_=43300.0, close=43400.0)
+        _insert_index(db_ready, "2026-06-15", open_=43500.0, close=43600.0)
+        _insert_signal(db_ready, "2026-06-12", "bearish", 2, rule_version="v3")
+        _insert_signal(db_ready, "2026-06-15", "bullish", 3, rule_version="v3")
+        _insert_signal(db_ready, "2026-06-16", "bullish", 3, rule_version="v3")      # 沒行情
+        db_ready.executemany("INSERT INTO verifications (date, predicted_direction, hit_day, rule_version) VALUES (?, ?, ?, ?)",
+                             [("2026-06-12", "bullish", 1, None), ("2026-06-15", "bullish", 1, "v2"),
+                              ("2026-06-16", "bullish", 1, None)])
+
+        r = reverify_range(db_ready, "2026-06-01", "2026-06-30")
+
+        assert r == {"verified": ["2026-06-12"], "failed": ["2026-06-16"]}
+        rows = dict((d, (v, p, h)) for d, v, p, h in db_ready.execute(
+            "SELECT date, rule_version, predicted_direction, hit_day FROM verifications"))
+        assert rows["2026-06-12"] == ("v3", "bearish", 0)                     # 照現在的判斷重算
+        assert rows["2026-06-15"] == ("v2", "bullish", 1)                     # 版本已知的不動
+        assert reverify_range(db_ready, "2026-06-13", "2026-06-15", only_unversioned=False) == {
+            "verified": ["2026-06-15"], "failed": []}
+        assert db_ready.execute("SELECT rule_version FROM verifications WHERE date = '2026-06-15'").fetchone() == ("v3",)
 
 
 class TestVerificationStats:
