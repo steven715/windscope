@@ -9,6 +9,7 @@ from integration.verification import (
     _classify_change,
     get_recent_verifications,
     get_verification_stats,
+    reverify_range,
     verify_signal,
 )
 
@@ -19,10 +20,10 @@ def _make_db() -> sqlite3.Connection:
     return conn
 
 
-def _insert_signal(conn, date="2026-06-12", direction="bullish", confidence=3):
+def _insert_signal(conn, date="2026-06-12", direction="bullish", confidence=3, rule_version="v3"):
     conn.execute(
-        "INSERT INTO signals (date, direction, confidence) VALUES (?, ?, ?)",
-        (date, direction, confidence),
+        "INSERT INTO signals (date, direction, confidence, rule_version) VALUES (?, ?, ?, ?)",
+        (date, direction, confidence, rule_version),
     )
 
 
@@ -141,17 +142,58 @@ class TestVerifySignal:
         assert rows[0] == 1
 
 
+    def test_records_rule_version_of_the_call_and_keeps_it_after_recompute(self, db_ready):
+        """驗證時記下當下判斷的規則版本；之後 signals 被 recompute 成新版本，驗證紀錄的版本不變（命中是照舊判斷算的）。"""
+        _insert_signal(db_ready, direction="bullish", rule_version="v2")
+        _insert_index(db_ready, "2026-06-12", open_=43300.0, close=43400.0)
+
+        assert verify_signal("2026-06-12", db_ready)["rule_version"] == "v2"
+        db_ready.execute("UPDATE signals SET direction = 'bearish', rule_version = 'v3' WHERE date = '2026-06-12'")
+
+        row = db_ready.execute(
+            "SELECT rule_version, predicted_direction, hit_day FROM verifications WHERE date = '2026-06-12'").fetchone()
+        assert row == ("v2", "bullish", 1)
+        verify_signal("2026-06-12", db_ready)                       # 明確重驗才換成新判斷與新版本
+        row = db_ready.execute(
+            "SELECT rule_version, predicted_direction, hit_day FROM verifications WHERE date = '2026-06-12'").fetchone()
+        assert row == ("v3", "bearish", 0)
+
+
+class TestReverifyRange:
+    def test_only_unversioned_by_default_and_all_on_request(self, db_ready):
+        """預設只重驗版本不明的列（照現在的判斷）；--all 重驗區間內每一筆；缺行情的日子列在 failed。"""
+        _insert_index(db_ready, "2026-06-12", open_=43300.0, close=43400.0)
+        _insert_index(db_ready, "2026-06-15", open_=43500.0, close=43600.0)
+        _insert_signal(db_ready, "2026-06-12", "bearish", 2, rule_version="v3")
+        _insert_signal(db_ready, "2026-06-15", "bullish", 3, rule_version="v3")
+        _insert_signal(db_ready, "2026-06-16", "bullish", 3, rule_version="v3")      # 沒行情
+        db_ready.executemany("INSERT INTO verifications (date, predicted_direction, hit_day, rule_version) VALUES (?, ?, ?, ?)",
+                             [("2026-06-12", "bullish", 1, None), ("2026-06-15", "bullish", 1, "v2"),
+                              ("2026-06-16", "bullish", 1, None)])
+
+        r = reverify_range(db_ready, "2026-06-01", "2026-06-30")
+
+        assert r == {"verified": ["2026-06-12"], "failed": ["2026-06-16"]}
+        rows = dict((d, (v, p, h)) for d, v, p, h in db_ready.execute(
+            "SELECT date, rule_version, predicted_direction, hit_day FROM verifications"))
+        assert rows["2026-06-12"] == ("v3", "bearish", 0)                     # 照現在的判斷重算
+        assert rows["2026-06-15"] == ("v2", "bullish", 1)                     # 版本已知的不動
+        assert reverify_range(db_ready, "2026-06-13", "2026-06-15", only_unversioned=False) == {
+            "verified": ["2026-06-15"], "failed": []}
+        assert db_ready.execute("SELECT rule_version FROM verifications WHERE date = '2026-06-15'").fetchone() == ("v3",)
+
+
 class TestVerificationStats:
-    def _insert_verification(self, conn, date, confidence, hit_day, hit_open=0):
+    def _insert_verification(self, conn, date, confidence, hit_day, hit_open=0, rule_version="v3"):
         conn.execute(
-            "INSERT INTO verifications (date, confidence, hit_day, hit_open) "
-            "VALUES (?, ?, ?, ?)",
-            (date, confidence, hit_day, hit_open),
+            "INSERT INTO verifications (date, confidence, hit_day, hit_open, rule_version) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (date, confidence, hit_day, hit_open, rule_version),
         )
 
     def test_empty_stats(self):
         conn = _make_db()
-        stats = get_verification_stats(conn)
+        stats = get_verification_stats(conn, "v3")
         assert stats["total"] == 0
         assert stats["hit_day_rate"] is None
 
@@ -162,7 +204,7 @@ class TestVerificationStats:
         self._insert_verification(conn, "2026-06-10", 2, 0, 0)
         self._insert_verification(conn, "2026-06-11", 4, 1, 1)
 
-        stats = get_verification_stats(conn)
+        stats = get_verification_stats(conn, "v3")
 
         assert stats["total"] == 4
         assert stats["hit_day_rate"] == 75.0
@@ -177,10 +219,23 @@ class TestVerificationStats:
         self._insert_verification(conn, "2026-06-10", 3, 1)
         self._insert_verification(conn, "2026-06-11", 3, 1)
 
-        stats = get_verification_stats(conn, last_n=2)
+        stats = get_verification_stats(conn, "v3", last_n=2)
 
         assert stats["total"] == 2
         assert stats["hit_day_rate"] == 100.0
+
+    def test_stats_never_mix_rule_versions(self):
+        """只算指定版本：別的版本、版本不明（NULL）的都不算進來。"""
+        conn = _make_db()
+        self._insert_verification(conn, "2026-06-08", 3, 0, rule_version="v2")
+        self._insert_verification(conn, "2026-06-09", 3, 0, rule_version=None)
+        self._insert_verification(conn, "2026-06-10", 3, 1)
+        self._insert_verification(conn, "2026-06-11", 4, 1)
+
+        stats = get_verification_stats(conn, "v3")
+
+        assert (stats["rule_version"], stats["total"], stats["hit_day_rate"]) == ("v3", 2, 100.0)
+        assert get_verification_stats(conn, "v2")["total"] == 1
 
     def test_recent_verifications_order(self):
         conn = _make_db()

@@ -119,6 +119,52 @@ class TestCreateAllTables:
         create_all_tables(conn)  # 冪等
         conn.close()
 
+    @staticmethod
+    def _old_signal_and_verification_tables(conn, with_column: bool = False) -> None:
+        conn.execute("CREATE TABLE signals (date TEXT PRIMARY KEY, direction TEXT, confidence INTEGER, fx_vote TEXT, "
+                     "futures_vote TEXT, reasons TEXT, rule_version TEXT, created_at TEXT)")
+        conn.execute("CREATE TABLE verifications (date TEXT PRIMARY KEY, predicted_direction TEXT, confidence INTEGER, "
+                     "prev_close REAL, open REAL, close REAL, open_gap_pct REAL, day_change_pct REAL, "
+                     "open_gap_class TEXT, day_change_class TEXT, hit_day INTEGER, hit_open INTEGER, verified_at TEXT"
+                     + (", rule_version TEXT)" if with_column else ")"))
+        conn.executemany("INSERT INTO signals (date, direction, rule_version, created_at) VALUES (?, ?, ?, ?)", [
+            ("2026-06-10", "bullish", "v2", "2026-06-10T08:50:01"),     # 驗證前產生、沒動過 → v2
+            ("2026-06-11", "bearish", "v3", "2026-07-01T10:00:00"),     # 驗證後被 recompute 成 v3 → 不明
+            ("2026-06-12", "bullish", "v2", None),                      # 沒有產生時刻 → 不明
+            ("2026-06-15", "bullish", "v2", "2026-06-15T08:50:01"),     # 驗證時刻缺 → 不明
+        ])
+        conn.executemany("INSERT INTO verifications (date, predicted_direction, verified_at) VALUES (?, ?, ?)", [
+            ("2026-06-10", "bullish", "2026-06-10T13:40:00"),
+            ("2026-06-11", "bullish", "2026-06-11T13:40:00"),
+            ("2026-06-12", "bullish", "2026-06-12T13:40:00"),
+            ("2026-06-15", "bullish", None),
+            ("2026-06-16", "bullish", "2026-06-16T13:40:00"),             # 沒有判斷 → 不明
+        ])
+
+    _EXPECTED = {"2026-06-10": "v2", "2026-06-11": None, "2026-06-12": None, "2026-06-15": None, "2026-06-16": None}
+
+    def test_migration_backfills_verification_rule_version_only_when_known(self):
+        """既有 verifications 無 rule_version → 補欄位，並只替「判斷在驗證前產生、之後沒被重算」的列補版本；
+        其他（驗證後才被 recompute、缺判斷、缺時刻）版本不明，留 NULL（不猜）。再跑不變。"""
+        conn = sqlite3.connect(":memory:")
+        self._old_signal_and_verification_tables(conn)
+
+        create_all_tables(conn)
+        assert dict(conn.execute("SELECT date, rule_version FROM verifications")) == self._EXPECTED
+        create_all_tables(conn)
+        assert dict(conn.execute("SELECT date, rule_version FROM verifications")) == self._EXPECTED
+        conn.close()
+
+    def test_backfill_resumes_when_the_first_start_died_after_adding_the_column(self):
+        """回歸（審查）：補欄位（ALTER 自己 commit）之後、補版本 commit 之前掛掉——下次啟動欄位已在，仍要補上。"""
+        conn = sqlite3.connect(":memory:")
+        self._old_signal_and_verification_tables(conn, with_column=True)   # 欄位在、版本全是 NULL
+
+        create_all_tables(conn)
+
+        assert dict(conn.execute("SELECT date, rule_version FROM verifications")) == self._EXPECTED
+        conn.close()
+
     def test_migration_adds_display_desc_to_existing_job_config(self):
         """既有(舊 schema)job_config 無 display_desc → create_all_tables 應 ALTER 補上。"""
         conn = sqlite3.connect(":memory:")

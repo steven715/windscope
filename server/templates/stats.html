@@ -39,7 +39,11 @@
     <select name="rule_version">
       <option value="" {% if not s.filters.rule_version %}selected{% endif %}>全部（分版列於下）</option>
       {% for v in s.versions %}
-      <option value="{{ v.rule_version }}" {% if v.rule_version and s.filters.rule_version == v.rule_version %}selected{% endif %}>{{ v.rule_version or '（無版本）' }} · {{ v.n }} 筆{% if v.rule_version == current_version %} · 現行{% endif %}</option>
+      {% if v.rule_version %}
+      <option value="{{ v.rule_version }}" {% if s.filters.rule_version == v.rule_version %}selected{% endif %}>{{ v.rule_version }} · {{ v.n }} 筆{% if v.rule_version == current_version %} · 現行{% endif %}</option>
+      {% else %}
+      <option value="" disabled>版本不明 · {{ v.n }} 筆（不可單獨篩；python main.py reverify 可重驗）</option>
+      {% endif %}
       {% endfor %}
     </select>
   </label>
@@ -56,7 +60,8 @@
     <div class="muted" style="margin-top:4px">
       已驗證 <b class="mono">{{ s.n }}</b> 筆{% if s.date_range %}（{{ s.date_range[0] }} ～ {{ s.date_range[1] }}）{% endif %}
       · 結論門檻 {{ s.min_sample }} 筆 · 分桶門檻 {{ s.min_bucket }} 筆
-      {% if s.versions|length > 1 and not s.filters.rule_version %}· <span class="flat">目前混算 {{ s.versions|length }} 個規則版本，建議用上方篩選分開看</span>{% endif %}
+      {% set known = s.versions | selectattr("rule_version") | list %}
+      {% if not s.filters.rule_version and (known|length > 1 or known|length < s.versions|length) %}· <span class="flat">目前混算 {{ known|length }} 個規則版本{% if known|length < s.versions|length %}＋版本不明的列{% endif %}，建議用上方篩選分開看</span>{% endif %}
     </div>
   </div>
 </div>

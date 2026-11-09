@@ -74,7 +74,7 @@
   </div>
   <div class="panel stats-card">
     <div class="row-between" style="margin-bottom:6px">
-      <span class="dim">判斷戰績 · 近 {{ stats.total }} 交易日</span>
+      <span class="dim">判斷戰績 · {{ stats.rule_version }} 近 {{ stats.total }} 交易日</span>
       <a href="/signals" class="dim">全部 ›</a>
     </div>
     {{ stats_body() }}
@@ -82,7 +82,11 @@
 </div>
 
 <a class="trust-strip" href="/signals">
-  <span class="tl"><span class="muted">近 {{ stats.total }} 日命中率</span><span class="rate-mini">{{ stats.hit_day_rate }}%</span></span>
+  {% if stats.total > 0 %}
+  <span class="tl"><span class="muted">{{ stats.rule_version }} 近 {{ stats.total }} 日命中率</span><span class="rate-mini">{{ stats.hit_day_rate }}%</span></span>
+  {% else %}
+  <span class="tl"><span class="muted">{{ stats.rule_version }} 還沒有驗證紀錄</span></span>
+  {% endif %}
   <span class="dim" style="color:var(--accent)">驗證紀錄 ›</span>
 </a>
 
@@ -180,7 +184,7 @@
 <div class="panel empty">尚無訊號資料——等第一次 08:50 排程跑完，或手動執行 <code>python main.py run before-open</code></div>
 <div class="bottom-grid">
   <div>
-    <div class="section-title">判斷戰績 <span class="dim">· 近 {{ stats.total }} 交易日</span></div>
+    <div class="section-title">判斷戰績 <span class="dim">· {{ stats.rule_version }} 近 {{ stats.total }} 交易日</span></div>
     <div class="panel">{{ stats_body() }}</div>
   </div>
   <div>

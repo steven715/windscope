@@ -8,12 +8,12 @@
   <div class="card">
     <div class="ct">收盤基準命中</div>
     <div class="cv mono" style="color:var(--ok)">{{ stats.hit_day_rate }}%</div>
-    <div class="muted mono">近 {{ stats.total }} 個交易日</div>
+    <div class="muted mono">{{ stats.rule_version }} 近 {{ stats.total }} 個交易日</div>
   </div>
   <div class="card">
     <div class="ct">跳空基準命中</div>
     <div class="cv mono" style="color:var(--warn)">{{ stats.hit_open_rate }}%</div>
-    <div class="muted mono">近 {{ stats.total }} 個交易日</div>
+    <div class="muted mono">{{ stats.rule_version }} 近 {{ stats.total }} 個交易日</div>
   </div>
 </div>
 {% endif %}

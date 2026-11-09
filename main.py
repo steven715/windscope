@@ -228,7 +228,7 @@ def _query_verification(date: str) -> None:
             "       hit_day, hit_open FROM verifications WHERE date = ?",
             (date,),
         ).fetchone()
-        stats = get_verification_stats(conn)
+        stats = get_verification_stats(conn, settings.SIGNAL_RULE_VERSION)
 
     if not row:
         print(f"No verification found for {date}")
@@ -241,7 +241,7 @@ def _query_verification(date: str) -> None:
         print(f"開盤跳空: {gap_pct:+.2f}% ({gap_cls}) → {'✓' if hit_open else '✗'}")
 
     if stats["total"] > 0:
-        print(f"\n[近 {stats['total']} 日命中率]")
+        print(f"\n[{stats['rule_version']} 近 {stats['total']} 日命中率]")
         print(f"  收盤基準: {stats['hit_day_rate']}%  跳空基準: {stats['hit_open_rate']}%")
         for conf_level in sorted(stats["by_confidence"], reverse=True):
             b = stats["by_confidence"][conf_level]
@@ -548,6 +548,16 @@ def cmd_recompute(args: argparse.Namespace) -> None:
                   f"futures={result['futures_metrics']} "
                   f"chip={result['chip_metrics']} "
                   f"籌碼觀察={result['chip_observations']} → {sig_str}")
+
+
+def cmd_reverify(args: argparse.Namespace) -> None:
+    """離線重驗（只讀 raw_index）：預設只重驗版本不明的驗證；--all 重驗區間內每一筆（照現在的判斷算）。"""
+    from integration.verification import reverify_range
+
+    with get_connection() as conn:
+        result = reverify_range(conn, args.from_date, args.to_date, only_unversioned=not args.all)
+    print(f"重驗 {len(result['verified'])} 筆（照現在的判斷與版本算）；缺資料沒驗 {len(result['failed'])} 筆"
+          + (f"：{', '.join(result['failed'])}" if result["failed"] else ""))
 
 
 def cmd_refresh_holidays(args: argparse.Namespace) -> None:
@@ -861,6 +871,13 @@ def main() -> None:
         "--to", dest="to_date", default=None, help="Range end (YYYY-MM-DD)",
     )
 
+    # reverify（離線重驗：版本不明的驗證列重新照現在的判斷算）
+    reverify_parser = subparsers.add_parser(
+        "reverify", help="Re-verify calls offline (default: only verifications whose rule_version is unknown)")
+    reverify_parser.add_argument("--from", dest="from_date", required=True, help="Range start (YYYY-MM-DD)")
+    reverify_parser.add_argument("--to", dest="to_date", required=True, help="Range end (YYYY-MM-DD)")
+    reverify_parser.add_argument("--all", action="store_true", help="Re-verify every call in range, not only unversioned")
+
     # serve
     targets_parser = subparsers.add_parser(
         "targets", help="契約 targets：build <date> / list [date] / lock <target_id>"
@@ -921,6 +938,8 @@ def main() -> None:
 
             args.date = date.today().isoformat()
         cmd_run(args)
+    elif args.command == "reverify":
+        cmd_reverify(args)
     elif args.command == "recompute":
         if args.date is None and not (args.from_date and args.to_date):
             from datetime import date

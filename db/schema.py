@@ -181,7 +181,8 @@ CREATE TABLE IF NOT EXISTS verifications (
     day_change_class TEXT,
     hit_day INTEGER,
     hit_open INTEGER,
-    verified_at TEXT
+    verified_at TEXT,
+    rule_version TEXT           -- 驗證當下那筆判斷的規則版本（signals 之後被 recompute 改掉也不變；命中率依它分版）
 );
 
 CREATE TABLE IF NOT EXISTS schedule_config (
@@ -425,6 +426,7 @@ _COLUMN_MIGRATIONS = [
     ("job_config", "display_desc", "TEXT"),
     ("job_config", "enabled", "INTEGER"),
     ("stock_trend_signals", "adjust_note", "TEXT"),
+    ("verifications", "rule_version", "TEXT"),
 ]
 
 # 既有表移除欄位用的 migration：(table, column)。SQLite >=3.35 支援 DROP COLUMN，
@@ -452,10 +454,29 @@ def _migrate_drop_columns(conn: sqlite3.Connection) -> None:
             logger.info("migrated %s: dropped column %s", table, column)
 
 
+def _backfill_verification_rule_version(conn: sqlite3.Connection) -> int:
+    """替版本是 NULL 的驗證補上「驗證當下」的規則版本，回傳這次補上的筆數（每次啟動都跑：補一半掛掉下次會接著補）。
+    只有 signals.created_at <= verified_at（判斷在驗證前產生、之後沒被重算）時 signals 的版本才算數；其他留 NULL，不猜。"""
+    before = conn.execute("SELECT COUNT(*) FROM verifications WHERE rule_version IS NULL").fetchone()[0]
+    if not before:
+        return 0
+    conn.execute(
+        """UPDATE verifications SET rule_version = (
+               SELECT s.rule_version FROM signals s
+               WHERE s.date = verifications.date AND s.created_at <= verifications.verified_at)
+           WHERE rule_version IS NULL""")
+    unknown = conn.execute("SELECT COUNT(*) FROM verifications WHERE rule_version IS NULL").fetchone()[0]
+    if before != unknown:
+        logger.info("verifications.rule_version：補上 %d 筆；%d 筆版本不明（判斷在驗證後被重算、或缺判斷／時刻），留 NULL",
+                    before - unknown, unknown)
+    return before - unknown
+
+
 def create_all_tables(conn: sqlite3.Connection) -> None:
     """建立所有表並套用欄位 migration。可重複執行（冪等）。"""
     conn.executescript(_SCHEMA_SQL)
     _migrate_columns(conn)
+    _backfill_verification_rule_version(conn)
     _migrate_drop_columns(conn)
     conn.executescript(_BARS_VIEW_SQL)   # view 每次重建，定義改了才會跟上
     logger.info("All tables created (or already exist)")

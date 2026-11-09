@@ -51,11 +51,11 @@ def _seed_day(conn, date, direction, confidence, prev_close, open_, close,
                  "VALUES (?, ?, ?, ?)", (date, direction, confidence, rule_version))
     conn.execute(
         "INSERT INTO verifications (date, predicted_direction, confidence, prev_close, open, "
-        "close, open_gap_pct, day_change_pct, open_gap_class, day_change_class, hit_day, hit_open) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "close, open_gap_pct, day_change_pct, open_gap_class, day_change_class, hit_day, hit_open, "
+        "rule_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (date, direction, confidence, prev_close, open_, close, c["open_gap_pct"],
          c["day_change_pct"], c["open_gap_class"], c["day_change_class"],
-         c["hit_day"], c["hit_open"]))
+         c["hit_day"], c["hit_open"], rule_version))
     conn.execute("INSERT OR REPLACE INTO raw_index (date, open, close) VALUES (?, ?, ?)",
                  (date, open_, close))
     if metrics is not None:
@@ -131,6 +131,20 @@ def test_load_filters_by_version_and_range(db):
     # 依最近使用日排序而非字串：v10 用在最新一天就排最前
     _seed_day(db, _DAYS[3], "bullish", 3, 101, 101, 102, rule_version="v10")
     assert [v["rule_version"] for v in list_rule_versions(db)] == ["v10", "v3", "v2"]
+
+
+def test_recomputed_call_stays_in_the_version_it_was_verified_under(db):
+    """回歸（windwatch #2 審查）：判斷驗證後被 recompute 成新版本、沒重驗——命中是照舊判斷算的，
+    不能算進新版本（之前用 signals 的現在版本篩，v2 的判斷會被當成 v3）。"""
+    _seed_day(db, _DAYS[0], "bullish", 3, 100, 100, 101, rule_version="v2")   # 偏多、漲 → 命中
+    _seed_day(db, _DAYS[1], "bearish", 2, 101, 101, 100, rule_version="v3")
+    db.execute("UPDATE signals SET direction = 'bearish', rule_version = 'v3' WHERE date = ?", (_DAYS[0],))
+
+    v3 = load_verified_calls(db, rule_version="v3")
+    assert [r.date for r in v3] == [_DAYS[1]]
+    v2 = load_verified_calls(db, rule_version="v2")
+    assert [(r.date, r.direction, r.rule_version, r.hit_day) for r in v2] == [(_DAYS[0], "bullish", "v2", 1)]
+    assert {v["rule_version"]: v["n"] for v in list_rule_versions(db)} == {"v2": 1, "v3": 1}
 
 
 def test_load_skips_null_or_out_of_range_confidence(db):

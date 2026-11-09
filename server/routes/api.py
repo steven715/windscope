@@ -7,6 +7,7 @@ import sqlite3
 
 from fastapi import APIRouter, HTTPException, Request
 
+from config import settings
 from db.connection import get_connection
 from integration.verification import get_verification_stats
 
@@ -195,10 +196,10 @@ def query_verifications(request: Request,
 
 
 @router.get("/stats")
-def query_stats(request: Request, last_n: int = 20) -> dict:
-    """近 N 日命中率統計。"""
+def query_stats(request: Request, last_n: int = 20, rule_version: str | None = None) -> dict:
+    """某規則版本（預設現行版本）近 N 筆的命中率統計；不同版本不混算。"""
     with get_connection(request.app.state.db_path) as conn:
-        return get_verification_stats(conn, last_n=last_n)
+        return get_verification_stats(conn, rule_version or settings.SIGNAL_RULE_VERSION, last_n=last_n)
 
 
 # ── 契約 I/O（docs/contracts v0.2）：JSON 信封 {schema_version, count, records} ─────────────
