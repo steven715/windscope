@@ -78,11 +78,11 @@
       </td>
       <td data-label="上次執行">
         {% if j.last_run %}
-        <div class="mono">{{ j.last_run.time }}</div>
+        <div class="mono">{{ j.last_run.started_at }}</div>
         {% set st = j.last_run.status %}
         <span class="chip {{ 'chip-ok' if st == 'completed' else 'chip-flat' if st in ('partial', 'skipped') else 'chip-bad' }}">{{ st | status_zh }}</span>
         {% else %}
-        <span class="dim">（本次啟動後尚未執行）</span>
+        <span class="dim">{{ "（還沒有執行紀錄）" if j.last_run_tracked else "（本次啟動後尚未執行）" }}</span>
         {% endif %}
       </td>
       <td data-label="操作">

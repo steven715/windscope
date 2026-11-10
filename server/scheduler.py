@@ -676,6 +676,28 @@ def _schedule_label(trigger_spec: dict, hhmm: str | None = None) -> str:
     return "—"
 
 
+_RUN_COLS = ("started_at", "finished_at", "duration_ms", "status", "trigger_type", "run_date", "summary", "error")
+
+
+def latest_runs(db_path: str | None = None) -> dict[str, dict | None]:
+    """每個 job 最近一次執行（排程頁與 /api/scheduler 共用的單一入口）；沒跑過為 None。
+    有寫 job_runs 的取最新那筆（重啟後也在）；skip_logging 的（盤中刷新）只有本次啟動後的記憶體，tracked=False。"""
+    out: dict[str, dict | None] = {}
+    with get_connection(db_path) as conn:
+        for job_id, spec in JOB_DEFS.items():
+            if spec.get("skip_logging"):
+                m = _last_runs.get(job_id)
+                st = (m or {}).get("status") or ""
+                out[job_id] = None if m is None else {
+                    **dict.fromkeys(_RUN_COLS), "started_at": m["time"], "tracked": False,
+                    "status": "error" if st.startswith("error") else st, "error": st[7:] if st.startswith("error: ") else None}
+                continue
+            row = conn.execute(f"SELECT {', '.join(_RUN_COLS)} FROM job_runs WHERE job_id = ? "
+                               "ORDER BY started_at DESC, id DESC LIMIT 1", (job_id,)).fetchone()
+            out[job_id] = {**dict(zip(_RUN_COLS, row)), "tracked": True} if row else None
+    return out
+
+
 def get_jobs_info(scheduler: BackgroundScheduler | None,
                   db_path: str | None = None) -> list[dict]:
     """回傳所有 job 的排程狀態供頁面顯示：時間、下次執行、上次結果。
@@ -686,6 +708,7 @@ def get_jobs_info(scheduler: BackgroundScheduler | None,
     """
     times = get_schedule_times(db_path)
     overrides = get_job_overrides(db_path)
+    runs = latest_runs(db_path)
     jobs = []
     for job_id, d in JOB_DEFS.items():
         editable = bool(d.get("schedulable"))
@@ -718,6 +741,7 @@ def get_jobs_info(scheduler: BackgroundScheduler | None,
             "notify_default": d.get("announce", True),
             "enabled": eff_enabled,
             "next_run": next_run,
-            "last_run": _last_runs.get(job_id),
+            "last_run": runs.get(job_id),
+            "last_run_tracked": not d.get("skip_logging"),
         })
     return jobs
