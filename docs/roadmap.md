@@ -108,6 +108,7 @@
 - 前端第一批只做兩頁：判斷有效性（windscope）、狀態頁＋kill switch（tradewind，按鈕走 ops）。
 - 前端 repo＝windwatch：「今日」（windwatch #1）、「情報」（windwatch #2：判斷有效性、判斷與驗證、籌碼觀察）已做；
   `signals.html`、`stats.html` 的內容前端都有了，可排下線。
+- ✅ `GET /api/scheduler`（2026-11-10）：排程設定與狀態（唯讀，同 `/scheduler` 頁的 get_jobs_info；最近一次執行取 job_runs，重啟後也在）——給 windwatch「系統」區；手動觸發／改設定仍只在 Jinja 頁（前端要做得先加代理 POST 白名單）。
 - ✅ 命中率依「驗證當下」的規則版本分（2026-11-09，windwatch #2 審查）：`verifications.rule_version` 驗證時記下，
   `call-stats` 與近 N 筆小卡（`/api/stats`、首頁、訊號頁，預設現行版本）都依它篩；之前用 signals 的現在版本篩，
   判斷驗證後被 recompute 成新版本時，舊判斷會被算進新版本。舊資料遷移只補「判斷在驗證前產生、之後沒被重算」的列，

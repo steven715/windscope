@@ -143,6 +143,26 @@ def query_job_runs(request: Request, job_id: str | None = None,
             "limit": limit, "offset": offset, "rows": rows}
 
 
+_LAST_RUN_COLS = ("started_at", "finished_at", "duration_ms", "status", "trigger_type", "run_date", "summary", "error")
+
+
+@router.get("/scheduler")
+def query_scheduler(request: Request) -> dict:
+    """各排程 job 的設定與狀態（唯讀，與 /scheduler 頁同一份 get_jobs_info）。
+    last_run 改取 job_runs 最近一筆（重啟後也在）；next_run 是台北時間、排程器沒開時為 None。"""
+    from server.scheduler import get_jobs_info
+
+    scheduler = request.app.state.scheduler
+    jobs = get_jobs_info(scheduler, db_path=request.app.state.db_path)
+    with get_connection(request.app.state.db_path) as conn:
+        cur = conn.execute(
+            f"SELECT job_id, {', '.join(_LAST_RUN_COLS)} FROM job_runs ORDER BY started_at, id")
+        last = {r[0]: dict(zip(_LAST_RUN_COLS, r[1:])) for r in cur.fetchall()}   # 舊→新，最後寫進去的就是最近一筆
+    for j in jobs:
+        j["last_run"] = last.get(j["id"])
+    return {"scheduler_enabled": scheduler is not None, "jobs": jobs}
+
+
 @router.get("/raw/{table}")
 def query_raw(table: str, request: Request,
               date_from: str | None = None, date_to: str | None = None,
