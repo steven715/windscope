@@ -143,6 +143,17 @@ def query_job_runs(request: Request, job_id: str | None = None,
             "limit": limit, "offset": offset, "rows": rows}
 
 
+@router.get("/scheduler")
+def query_scheduler(request: Request) -> dict:
+    """各排程 job 的設定與狀態（唯讀，與 /scheduler 頁同一份 get_jobs_info；last_run 見 scheduler.latest_runs）。
+    next_run 是台北時間、排程器沒開時為 None。"""
+    from server.scheduler import get_jobs_info
+
+    scheduler = request.app.state.scheduler
+    return {"scheduler_enabled": scheduler is not None,
+            "jobs": get_jobs_info(scheduler, db_path=request.app.state.db_path)}
+
+
 @router.get("/raw/{table}")
 def query_raw(table: str, request: Request,
               date_from: str | None = None, date_to: str | None = None,
