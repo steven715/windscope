@@ -46,6 +46,13 @@ def test_bars_from_legacy_view(client):
     assert client.get("/api/bars?instrument_id=TWSE:TAIEX&date_from=2026-07-01").json()["count"] == 0
 
 
+@pytest.fixture(autouse=True)
+def _before_lock_deadline(monkeypatch):
+    """fixture 的 target 是 2026-06-12：鎖定 API 過了 08:55 回 409，這裡把「現在」定在當天 08:40。"""
+    import utils.tw_time as tw
+    monkeypatch.setattr(tw, "now_tw_iso", lambda: "2026-06-12T08:40:00+08:00")
+
+
 def test_targets_list_and_lock(client):
     body = client.get("/api/targets?date=2026-06-12").json()
     assert body["schema_version"] == "0.2" and body["count"] == 1

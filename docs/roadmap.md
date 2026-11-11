@@ -108,7 +108,7 @@
 - 前端第一批只做兩頁：判斷有效性（windscope）、狀態頁＋kill switch（tradewind，按鈕走 ops）。
 - 前端 repo＝windwatch：「今日」（windwatch #1）、「情報」（windwatch #2：判斷有效性、判斷與驗證、籌碼觀察）已做；
   ✅ `signals.html`、`stats.html` 已下線（2026-11-11）：舊網址導到前端 `#intel`（`WINDSCOPE_FRONTEND_URL`），沒設回 410 說明；清單見 ADR-0006。
-- ✅ 前端寫入（2026-11-11，windwatch ADR-0002）：`POST /api/scheduler/{job_id}/run`（新增；404／409／202）與既有的 `POST /api/targets/{id}/lock` 只收 `application/json`（415），代理白名單只開這兩條。
+- ✅ 前端寫入（2026-11-11，windwatch ADR-0002）：`POST /api/scheduler/{job_id}/run`（新增；只准 `API_RUNNABLE_JOBS`、當天排定時間後、沒在跑；404／403／409／202）與既有的 `POST /api/targets/{id}/lock`（API 過 08:55 回 409、帶 `produced_at` 防內容被換掉；CLI 照舊可晚鎖）；兩支只收 `application/json`（415），代理白名單只開這兩條。
 - ✅ `GET /api/scheduler`（2026-11-10）：排程設定與狀態（唯讀，同 `/scheduler` 頁的 get_jobs_info；最近一次執行取 job_runs，重啟後也在）——給 windwatch「系統」區；手動觸發／改設定仍只在 Jinja 頁（前端要做得先加代理 POST 白名單）。
 - ✅ 命中率依「驗證當下」的規則版本分（2026-11-09，windwatch #2 審查）：`verifications.rule_version` 驗證時記下，
   `call-stats` 與近 N 筆小卡（`/api/stats`、首頁、訊號頁，預設現行版本）都依它篩；之前用 signals 的現在版本篩，
