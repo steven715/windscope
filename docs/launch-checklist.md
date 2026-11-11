@@ -110,5 +110,5 @@
 - Caddy 設定沒實際跑過（§4.2）。
 - 永豐：windscope 10 項、tradewind 23 項本機驗證清單都還沒做。
 - 現金對帳的口徑（cash_check）。
-- 08:55 期限寫在三處（windwatch `LOCK_DEADLINE`、windscope `TARGET_LOCK_DEADLINE`、tradewind lock_deadline），要改得三處一起改。
+- 08:55 期限：windscope `TARGET_LOCK_DEADLINE` 是來源（`/api/targets` 帶 `lock_deadline`，前端照它）；tradewind 的 lock_deadline 仍是自己的設定，要改得兩邊一起改。
 - 部分 server 測試會打外網（雲端環境被擋、重試拖到 4–5 分鐘）；本機有網路時快很多。
