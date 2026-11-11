@@ -154,6 +154,26 @@ def query_scheduler(request: Request) -> dict:
             "jobs": get_jobs_info(scheduler, db_path=request.app.state.db_path)}
 
 
+def _require_json(request: Request) -> None:
+    """會改東西的 POST 只收 application/json（windwatch ADR-0002）：跨站表單只能送 text/plain 等，經代理也排不進來。"""
+    if not request.headers.get("content-type", "").lower().startswith("application/json"):
+        raise HTTPException(status_code=415, detail="Content-Type must be application/json")
+
+
+@router.post("/scheduler/{job_id}/run", status_code=202)
+def run_scheduler_job(job_id: str, request: Request) -> dict:
+    """立即在背景跑一次 job（跟 /scheduler 頁的「執行」同一個 run_job_now；不影響原排程）。
+    不存在 404；排程器沒開 409；觸發了回 202（結果之後看 /api/scheduler 的 last_run）。"""
+    from server.scheduler import JOB_DEFS, run_job_now
+
+    _require_json(request)
+    if job_id not in JOB_DEFS:
+        raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
+    if not run_job_now(request.app.state.scheduler, job_id, db_path=request.app.state.db_path):
+        raise HTTPException(status_code=409, detail="scheduler is not running (started with --no-scheduler)")
+    return {"job_id": job_id, "triggered": True}
+
+
 @router.get("/raw/{table}")
 def query_raw(table: str, request: Request,
               date_from: str | None = None, date_to: str | None = None,
@@ -288,10 +308,11 @@ def query_targets(request: Request, date: str | None = None, since: str | None =
 
 @router.post("/targets/{target_id}/lock")
 def lock_target(target_id: str, request: Request) -> dict:
-    """盤前鎖定 Trade Plan（寫 locked_at；已鎖定不變）。不存在回 404。"""
+    """盤前鎖定 Trade Plan（寫 locked_at；已鎖定不變）。不存在回 404；要 application/json（ADR-0002 of windwatch）。"""
     from db.targets import target_lock
     from utils.contract_schema import ContractError
 
+    _require_json(request)
     try:
         with get_connection(request.app.state.db_path) as conn:
             rec = target_lock(conn, target_id)

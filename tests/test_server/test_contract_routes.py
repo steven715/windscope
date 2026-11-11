@@ -51,12 +51,12 @@ def test_targets_list_and_lock(client):
     assert body["schema_version"] == "0.2" and body["count"] == 1
     tid = body["records"][0]["target_id"]
     assert body["records"][0]["locked_at"] is None
-    r = client.post(f"/api/targets/{tid}/lock")
+    r = client.post(f"/api/targets/{tid}/lock", json={})
     assert r.status_code == 200 and r.json()["locked_at"].endswith("+08:00")
     first = r.json()["locked_at"]
-    assert client.post(f"/api/targets/{tid}/lock").json()["locked_at"] == first      # 再鎖不變
+    assert client.post(f"/api/targets/{tid}/lock", json={}).json()["locked_at"] == first      # 再鎖不變
     assert client.get("/api/targets?date=2026-06-12").json()["records"][0]["locked_at"] == first
-    assert client.post("/api/targets/nope/lock").status_code == 404
+    assert client.post("/api/targets/nope/lock", json={}).status_code == 404
     assert client.get("/api/targets?strategy_id=trend_signal").json()["count"] == 2
 
 
@@ -80,7 +80,7 @@ def test_targets_since_rejects_bad_format_and_sees_lock(client):
     tid = client.get("/api/targets?date=2026-06-12").json()["records"][0]["target_id"]
     assert client.get("/api/targets?since=2099-01-01T00:00:00%2B08:00").json()["count"] == 0
     assert client.get("/api/targets?since=2099-01-01T00:00:00+08:00").json()["count"] == 0   # 未編碼的 + 也接受
-    client.post(f"/api/targets/{tid}/lock")
+    client.post(f"/api/targets/{tid}/lock", json={})
     # 鎖定後 updated_at 更新 → 以鎖定前的時刻當 since 一定拿得到
     assert client.get("/api/targets?since=2000-01-01T00:00:00%2B08:00&locked_only=true").json()["count"] == 1
     body = client.get("/api/bars?instrument_id=TWSE:TAIEX&limit=1&offset=5").json()

@@ -56,7 +56,7 @@ def test_pages_accept_browser_basic_auth(client):
 
 def test_mutating_posts_are_blocked_without_the_token(client, db):
     """盤點出來會改資料的 POST：沒帶 token 一律 401，handler 根本不會跑。"""
-    for path in ("/api/targets/x/lock", "/api/events", "/watchlist/add", "/watchlist/remove", "/scheduler/run",
+    for path in ("/api/targets/x/lock", "/api/scheduler/before_open/run", "/api/events", "/watchlist/add", "/watchlist/remove", "/scheduler/run",
                  "/scheduler/save", "/scheduler/runs/delete", "/backtest/run", "/stock-import/run", "/chip-import",
                  "/chip-import/ocr"):
         assert client.post(path, data={"stock_id": "2330"}).status_code == 401, path
@@ -74,7 +74,7 @@ def test_browser_posts_must_be_same_origin(client):
     ref = {**_basic(TOKEN), "Referer": f"http://{HOST}/scheduler/runs"}
     assert client.post("/scheduler/runs/delete", data={"mode": "one", "run_id": "0"}, headers=ref,
                        follow_redirects=False).status_code in (200, 303)
-    assert client.post("/api/targets/nope/lock", headers=BEARER).status_code == 404          # Bearer：不看 Origin
+    assert client.post("/api/targets/nope/lock", headers=BEARER, json={}).status_code == 404          # Bearer：不看 Origin
     assert client.get("/api/instruments", headers={**_basic(TOKEN), "Origin": "https://evil.example"}).status_code == 200  # 讀取不限
 
 
