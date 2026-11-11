@@ -75,20 +75,20 @@
   <div class="panel stats-card">
     <div class="row-between" style="margin-bottom:6px">
       <span class="dim">判斷戰績 · {{ stats.rule_version }} 近 {{ stats.total }} 交易日</span>
-      <a href="/signals" class="dim">全部 ›</a>
+      {% if frontend_url() %}<a href="{{ frontend_url() }}/#intel" class="dim">全部 ›</a>{% endif %}
     </div>
     {{ stats_body() }}
   </div>
 </div>
 
-<a class="trust-strip" href="/signals">
+{% if frontend_url() %}<a class="trust-strip" href="{{ frontend_url() }}/#intel">{% else %}<div class="trust-strip">{% endif %}
   {% if stats.total > 0 %}
   <span class="tl"><span class="muted">{{ stats.rule_version }} 近 {{ stats.total }} 日命中率</span><span class="rate-mini">{{ stats.hit_day_rate }}%</span></span>
   {% else %}
   <span class="tl"><span class="muted">{{ stats.rule_version }} 還沒有驗證紀錄</span></span>
   {% endif %}
-  <span class="dim" style="color:var(--accent)">驗證紀錄 ›</span>
-</a>
+  {% if frontend_url() %}<span class="dim" style="color:var(--accent)">驗證紀錄 ›</span>{% endif %}
+{% if frontend_url() %}</a>{% else %}</div>{% endif %}
 
 {% if metrics %}
 <div class="cards">

@@ -1,4 +1,4 @@
-"""判斷有效性頁與 API 測試：空狀態 200、有資料時四區塊關鍵內容、篩選生效、JSON 結構。"""
+"""判斷有效性 API 測試（/stats 頁已下線、搬到前端 windwatch：見 test_retired_pages）：JSON 結構、篩選、空狀態；首頁小卡不混版本。"""
 
 import sqlite3
 
@@ -54,41 +54,6 @@ def client_with_data(tmp_path):
     return TestClient(create_app(db_path=db_path, enable_scheduler=False))
 
 
-def test_stats_page_empty_200(client):
-    r = client.get("/stats")
-    assert r.status_code == 200
-    assert "判斷有效性" in r.text
-    assert "樣本不足" in r.text
-    assert "沒有已驗證的盤前判斷" in r.text
-
-
-def test_stats_page_with_data_shows_all_sections(client_with_data):
-    r = client_with_data.get("/stats")
-    assert r.status_code == 200
-    assert "基準線對照" in r.text and "與結果無關" in r.text and "跟昨天" in r.text
-    assert "信心校準" in r.text and "4/5" in r.text
-    assert "判斷回測" in r.text and "開盤進 → 收盤出" in r.text and "每天做多" in r.text
-    assert "單因子表" in r.text and "調整後價差" in r.text and "外資未平倉" in r.text
-    assert "已驗證 <b class=\"mono\">4</b> 筆" in r.text
-    assert "混算 2 個規則版本" in r.text              # v2 + v3 未篩選 → 提示
-
-
-def test_stats_page_filter_by_version(client_with_data):
-    r = client_with_data.get("/stats?rule_version=v3")
-    assert r.status_code == 200
-    assert "已驗證 <b class=\"mono\">3</b> 筆" in r.text
-    assert "混算" not in r.text
-
-
-def test_stats_page_date_filter_and_bad_date_ignored(client_with_data):
-    r = client_with_data.get(f"/stats?date_from={_DAYS[3]}")
-    assert r.status_code == 200
-    assert "已驗證 <b class=\"mono\">2</b> 筆" in r.text
-    r2 = client_with_data.get("/stats?date_from=not-a-date")
-    assert r2.status_code == 200
-    assert "已驗證 <b class=\"mono\">4</b> 筆" in r2.text    # 非法日期被忽略
-
-
 def test_api_call_stats_structure(client_with_data):
     r = client_with_data.get("/api/call-stats")
     assert r.status_code == 200
@@ -113,6 +78,17 @@ def test_api_call_stats_filters(client_with_data):
     assert body["n"] == 2 and body["backtest"]["cost_bps"] == 0
 
 
+def test_api_call_stats_lists_unknown_version_as_empty_string(client_with_data):
+    """驗證時版本不明（NULL）的列在 versions 以 "" 列出（前端拿它說「另有 N 筆沒有規則版本」，不讓人選）。"""
+    conn = sqlite3.connect(client_with_data.app.state.db_path)
+    conn.execute("UPDATE verifications SET rule_version = NULL WHERE date = ?", (_DAYS[1],))
+    conn.commit()
+    conn.close()
+    versions = client_with_data.get("/api/call-stats").json()["versions"]
+    assert {"rule_version": "", "n": 1} in versions
+    assert sum(v["n"] for v in versions) == 4
+
+
 def test_api_call_stats_empty(client):
     body = client.get("/api/call-stats").json()
     assert body["n"] == 0 and body["assessment"]["verdict"] == "insufficient"
@@ -122,40 +98,13 @@ def test_api_call_stats_empty(client):
 # ── 規則版本不混算（verifications.rule_version；審查） ─────────────────────────────
 
 
-def _db(client: TestClient) -> sqlite3.Connection:
-    return sqlite3.connect(client.app.state.db_path)
-
-
-def _row(html: str, date: str) -> str:
-    start = html.index(date)
-    return html[start:html.index("</tr>", start)]
-
-
 def test_small_cards_count_only_the_current_version(client_with_data):
-    """近 N 筆小卡（訊號頁、首頁）只算現行版本 v3：2/3＝66.7%；混進 v2 會變 3/4＝75.0%。"""
-    for page in ("/signals", "/"):
+    """近 N 筆小卡（首頁）只算現行版本 v3：2/3＝66.7%；混進 v2 會變 3/4＝75.0%。"""
+    for page in ("/",):
         html = client_with_data.get(page).text
         assert "66.7%" in html, page
         assert "75.0%" not in html, page
         assert "v3 近 3" in html, page
-
-
-def test_signals_page_shows_the_call_as_verified_after_a_recompute(client_with_data):
-    """判斷驗證後被 recompute 成 v3 偏空：訊號頁該列顯示驗證當下的偏多／v2（命中是照它算的）。"""
-    with _db(client_with_data) as conn:
-        conn.execute("UPDATE signals SET direction = 'bearish', confidence = 5, rule_version = 'v3' WHERE date = ?",
-                     (_DAYS[1],))
-    row = _row(client_with_data.get("/signals").text, _DAYS[1])
-    assert "偏多" in row and "v2" in row and "4/5" in row
-    assert "偏空" not in row and "v3" not in row
-
-
-def test_stats_page_lists_unknown_version_but_cannot_select_it(client_with_data):
-    with _db(client_with_data) as conn:
-        conn.execute("UPDATE verifications SET rule_version = NULL WHERE date = ?", (_DAYS[1],))
-    html = client_with_data.get("/stats").text
-    assert '<option value="" disabled>版本不明 · 1 筆' in html
-    assert "目前混算 1 個規則版本＋版本不明的列" in html
 
 
 def test_dashboard_strip_without_verifications_for_the_current_version(tmp_path):

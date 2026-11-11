@@ -88,7 +88,7 @@ def client_with_data(tmp_path):
 class TestPagesEmpty:
     """空 DB 時所有頁面要能開、顯示空狀態，不能 500。"""
 
-    @pytest.mark.parametrize("path", ["/", "/signals", "/data", "/watchlist", "/scheduler"])
+    @pytest.mark.parametrize("path", ["/", "/data", "/watchlist", "/scheduler", "/more"])
     def test_page_returns_200(self, client, path):
         resp = client.get(path)
         assert resp.status_code == 200
@@ -121,15 +121,6 @@ class TestPagesWithData:
         resp = client_with_data.get("/")
         assert "✓ 命中" in resp.text
         assert "100.0%" in resp.text  # 近期命中率
-
-    def test_signals_page_lists_record(self, client_with_data):
-        resp = client_with_data.get("/signals")
-        assert "2026-06-12" in resp.text
-        assert "偏多" in resp.text
-
-    def test_signals_page_date_filter(self, client_with_data):
-        resp = client_with_data.get("/signals?date_from=2026-06-13")
-        assert "查無訊號紀錄" in resp.text
 
     def test_data_page_renders_table(self, client_with_data):
         resp = client_with_data.get("/data?table=raw_index")
@@ -1270,12 +1261,6 @@ class TestTableUX:
         # class 可含其他 class（手機 stack 卡片化），只要排序 class 仍套在 table 上
         assert 'class="sortable' in resp.text
         assert "data-filter" in resp.text
-
-    def test_signals_page_sortable_and_filter(self, client_with_data):
-        resp = client_with_data.get("/signals")
-        assert 'class="sortable' in resp.text
-        assert "data-filter" in resp.text
-
 
 class TestPagination:
     @staticmethod

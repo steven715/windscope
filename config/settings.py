@@ -1,4 +1,6 @@
+import logging
 import os
+from urllib.parse import urlsplit
 
 # 共用純函式庫（ADR-0007）：趨勢／還原／Playbook 的門檻單一真相在它那裡，這裡只取值
 from strategylib.adjust import DEFAULT_GAP_PCT as _ADJUST_GAP_PCT
@@ -192,6 +194,26 @@ SHIOAJI_REPLAN_SECONDS = 300                 # 規劃不完整（主檔缺月份
 SHIOAJI_RETIRED_GRACE_SECONDS = 90           # 換日退掉的口再保留路由多久（佇列裡、晚到的收盤 tick）
 # tradewind 回流的 inbox：{inbox}/events/{run_mode}/{date}.jsonl、{inbox}/account_snapshots/...
 TRADEWIND_INBOX_DIR = os.environ.get("TRADEWIND_INBOX", "data/inbox")
+
+# 前端 windwatch 的網址（ADR-0006）：下線的 Jinja 頁（/signals、/stats）導過去、其他頁的連結指過去；沒設＝下線頁回 410 說明。
+# 只收 http(s)://（避免設成別的東西變成奇怪的導向）。
+def frontend_url_from(raw: str | None) -> str | None:
+    """WINDSCOPE_FRONTEND_URL → 去掉結尾斜線的 http(s) 網址（只有 scheme＋主機＋可選路徑，不收帳密、空白、query、#）；不合格 → None。"""
+    v = (raw or "").strip().rstrip("/")
+    if not v:
+        return None
+    try:
+        u = urlsplit(v)
+    except ValueError:
+        return None
+    ok = (u.scheme.lower() in ("http", "https") and u.hostname and "@" not in u.netloc and not u.query and not u.fragment
+          and "#" not in v and not any(c.isspace() for c in v))
+    return v if ok else None
+
+
+FRONTEND_URL = frontend_url_from(os.environ.get("WINDSCOPE_FRONTEND_URL"))
+if os.environ.get("WINDSCOPE_FRONTEND_URL", "").strip() and FRONTEND_URL is None:   # 設了卻不合格：講出來，不要默默變成 410
+    logging.getLogger(__name__).warning("WINDSCOPE_FRONTEND_URL ignored (need http(s)://host[/path], no user/query/#/spaces)")
 
 # === Chip 自動來源（FinMind）===
 # 分點明細唯一可自動化的合法來源是 FinMind TaiwanStockTradingDailyReport，
