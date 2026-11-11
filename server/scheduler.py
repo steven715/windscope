@@ -17,6 +17,7 @@ monthly）。三件事各自獨立、不互相耦合：
 import json
 import logging
 import re
+import threading
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -520,7 +521,32 @@ def _record_run(job_id: str, job_name: str | None, trigger_type: str,
         logger.warning("job_runs persist failed for %s: %s", job_id, e)
 
 
+_running: set[str] = set()                 # 正在跑的 job（排程或手動，同一個 job 共用）
+_running_lock = threading.Lock()
+
+
+def is_running(job_id: str) -> bool:
+    """這個 job 現在有沒有在跑（排程那次或手動那次都算）。"""
+    with _running_lock:
+        return job_id in _running
+
+
 def _make_runner(job_id: str, trigger_type: str = "scheduled"):
+    """包 _make_runner_inner：進出時記在 _running（手動 run API 用它擋重複觸發）。"""
+    inner = _make_runner_inner(job_id, trigger_type)
+
+    def runner(db_path: str | None) -> None:
+        with _running_lock:
+            _running.add(job_id)
+        try:
+            inner(db_path)
+        finally:
+            with _running_lock:
+                _running.discard(job_id)
+    return runner
+
+
+def _make_runner_inner(job_id: str, trigger_type: str = "scheduled"):
     """包一層執行器：跑 job、記結果（記憶體＋持久化）、視 announce 發一次 TG 通知。"""
     def runner(db_path: str | None) -> None:
         started_dt = datetime.now()

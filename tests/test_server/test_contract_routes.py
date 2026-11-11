@@ -46,17 +46,24 @@ def test_bars_from_legacy_view(client):
     assert client.get("/api/bars?instrument_id=TWSE:TAIEX&date_from=2026-07-01").json()["count"] == 0
 
 
+@pytest.fixture(autouse=True)
+def _before_lock_deadline(monkeypatch):
+    """fixture 的 target 是 2026-06-12：鎖定 API 過了 08:55 回 409，這裡把「現在」定在當天 08:40。"""
+    import utils.tw_time as tw
+    monkeypatch.setattr(tw, "now_tw_iso", lambda: "2026-06-12T08:40:00+08:00")
+
+
 def test_targets_list_and_lock(client):
     body = client.get("/api/targets?date=2026-06-12").json()
     assert body["schema_version"] == "0.2" and body["count"] == 1
     tid = body["records"][0]["target_id"]
     assert body["records"][0]["locked_at"] is None
-    r = client.post(f"/api/targets/{tid}/lock")
+    r = client.post(f"/api/targets/{tid}/lock", json={})
     assert r.status_code == 200 and r.json()["locked_at"].endswith("+08:00")
     first = r.json()["locked_at"]
-    assert client.post(f"/api/targets/{tid}/lock").json()["locked_at"] == first      # 再鎖不變
+    assert client.post(f"/api/targets/{tid}/lock", json={}).json()["locked_at"] == first      # 再鎖不變
     assert client.get("/api/targets?date=2026-06-12").json()["records"][0]["locked_at"] == first
-    assert client.post("/api/targets/nope/lock").status_code == 404
+    assert client.post("/api/targets/nope/lock", json={}).status_code == 404
     assert client.get("/api/targets?strategy_id=trend_signal").json()["count"] == 2
 
 
@@ -80,7 +87,7 @@ def test_targets_since_rejects_bad_format_and_sees_lock(client):
     tid = client.get("/api/targets?date=2026-06-12").json()["records"][0]["target_id"]
     assert client.get("/api/targets?since=2099-01-01T00:00:00%2B08:00").json()["count"] == 0
     assert client.get("/api/targets?since=2099-01-01T00:00:00+08:00").json()["count"] == 0   # 未編碼的 + 也接受
-    client.post(f"/api/targets/{tid}/lock")
+    client.post(f"/api/targets/{tid}/lock", json={})
     # 鎖定後 updated_at 更新 → 以鎖定前的時刻當 since 一定拿得到
     assert client.get("/api/targets?since=2000-01-01T00:00:00%2B08:00&locked_only=true").json()["count"] == 1
     body = client.get("/api/bars?instrument_id=TWSE:TAIEX&limit=1&offset=5").json()

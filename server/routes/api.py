@@ -147,11 +147,44 @@ def query_job_runs(request: Request, job_id: str | None = None,
 def query_scheduler(request: Request) -> dict:
     """各排程 job 的設定與狀態（唯讀，與 /scheduler 頁同一份 get_jobs_info；last_run 見 scheduler.latest_runs）。
     next_run 是台北時間、排程器沒開時為 None。"""
-    from server.scheduler import get_jobs_info
+    from server.scheduler import get_jobs_info, is_running
 
     scheduler = request.app.state.scheduler
-    return {"scheduler_enabled": scheduler is not None,
-            "jobs": get_jobs_info(scheduler, db_path=request.app.state.db_path)}
+    jobs = get_jobs_info(scheduler, db_path=request.app.state.db_path)
+    for j in jobs:
+        j["api_runnable"] = j["id"] in settings.API_RUNNABLE_JOBS        # 前端「立即執行」只給這些（windwatch ADR-0002）
+        j["running"] = is_running(j["id"])
+    return {"scheduler_enabled": scheduler is not None, "jobs": jobs}
+
+
+def _require_json(request: Request) -> None:
+    """會改東西的 POST 只收 application/json（windwatch ADR-0002）：跨站表單只能送 text/plain 等，經代理也排不進來。
+    比 media type 本身（分號前、去空白、不分大小寫）：`text/plain; charset=application/json`、`application/jsonp` 都不算。"""
+    if request.headers.get("content-type", "").split(";")[0].strip().lower() != "application/json":
+        raise HTTPException(status_code=415, detail="Content-Type must be application/json")
+
+
+@router.post("/scheduler/{job_id}/run", status_code=202)
+def run_scheduler_job(job_id: str, request: Request) -> dict:
+    """立即在背景補跑一次 job（跟 /scheduler 頁同一個 run_job_now；不影響原排程）。只准 API_RUNNABLE_JOBS、且當天排定時間之後。
+    不存在 404；不在清單 403；排程器沒開／正在跑／還沒到排定時間 409；觸發了回 202（結果看 /api/scheduler 的 last_run）。"""
+    from server.scheduler import JOB_DEFS, get_schedule_times, is_running, run_job_now
+    from utils.tw_time import now_tw
+
+    _require_json(request)
+    if job_id not in JOB_DEFS:
+        raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
+    if job_id not in settings.API_RUNNABLE_JOBS:
+        raise HTTPException(status_code=403, detail=f"{job_id} 不能從 API 補跑（收的資料看時間點）；要跑用 /scheduler 頁或 CLI")
+    if request.app.state.scheduler is None:
+        raise HTTPException(status_code=409, detail="scheduler is not running (started with --no-scheduler)")
+    if is_running(job_id):
+        raise HTTPException(status_code=409, detail=f"{job_id} 正在跑，等它跑完再試")
+    at = get_schedule_times(request.app.state.db_path).get(job_id)
+    if at and now_tw().strftime("%H:%M") < at:
+        raise HTTPException(status_code=409, detail=f"還沒到 {job_id} 今天的排定時間 {at}（API 只能補跑）")
+    run_job_now(request.app.state.scheduler, job_id, db_path=request.app.state.db_path)
+    return {"job_id": job_id, "triggered": True}
 
 
 @router.get("/raw/{table}")
@@ -287,11 +320,29 @@ def query_targets(request: Request, date: str | None = None, since: str | None =
 
 
 @router.post("/targets/{target_id}/lock")
-def lock_target(target_id: str, request: Request) -> dict:
-    """盤前鎖定 Trade Plan（寫 locked_at；已鎖定不變）。不存在回 404。"""
-    from db.targets import target_lock
+async def lock_target(target_id: str, request: Request) -> dict:
+    """盤前鎖定 Trade Plan（寫 locked_at；已鎖定不變）。不存在 404；要 application/json（windwatch ADR-0002）。
+    過了 TARGET_LOCK_DEADLINE 回 409（tradewind 已視為中性，鎖了也沒用；CLI 仍可晚鎖）；body 帶 produced_at 而 target 已被重算 → 409。"""
+    from db.targets import target_get, target_lock
     from utils.contract_schema import ContractError
+    from utils.tw_time import now_tw_iso
 
+    _require_json(request)
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="body must be a JSON object")
+    with get_connection(request.app.state.db_path) as conn:
+        cur = target_get(conn, target_id)
+    if cur is None:
+        raise HTTPException(status_code=404, detail=f"unknown target: {target_id}")
+    if not cur.get("locked_at"):
+        expect = body.get("produced_at") if isinstance(body, dict) else None
+        if expect and expect != cur.get("produced_at"):
+            raise HTTPException(status_code=409, detail=f"target 已被重算（{cur.get('produced_at')}），重新整理後再確認")
+        deadline = f"{cur['valid_from'][:10]}T{settings.TARGET_LOCK_DEADLINE}:00+08:00"
+        if now_tw_iso() > deadline:
+            raise HTTPException(status_code=409, detail=f"已過鎖定期限 {settings.TARGET_LOCK_DEADLINE}，tradewind 視為中性（要晚鎖用 CLI）")
     try:
         with get_connection(request.app.state.db_path) as conn:
             rec = target_lock(conn, target_id)

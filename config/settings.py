@@ -130,6 +130,10 @@ BACKTEST_ASSUME_GATE_PASS = True
 PREMARKET_TARGET_INSTRUMENT = "TAIFEX:TMF"   # 盤前判斷對應的可交易商品（微台）
 PREMARKET_TARGET_VALID_FROM = "08:50"
 PREMARKET_TARGET_VALID_UNTIL = "13:25"
+# 前端（windwatch ADR-0002）能「立即執行」的 job：只收「不看收集時間點」的資料、而且只能在當天排定時間之後補跑。
+# 不在清單：before_open（拿現在的匯率當 08:45 報價重算訊號＝事後資料）、afternoon_fx（16:00 收盤價）、after_night（夜盤＋美股收盤，
+# 美股開盤後會變）、live_refresh（盤中快取）——這些補跑走 /scheduler 頁或 CLI，自己判斷時點。
+API_RUNNABLE_JOBS = ("verify_close", "after_close", "chip_collect", "refresh_holidays")
 TARGET_LOCK_DEADLINE = "08:55"               # 08:55 未鎖定的 target，tradewind 視為中性；之後才鎖只記 warning
 # 失效條件：開盤 30 分內現貨跌破（偏多）／站上（偏空）前一交易日低點／高點
 PREMARKET_INVALIDATION_UNTIL = "09:30"
