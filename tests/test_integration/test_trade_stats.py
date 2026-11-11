@@ -1,6 +1,6 @@
 """integration/trade_stats（依成交打分，一筆交易＝一段部位）：分批出場的加權 R、風控平倉（成交沒有 target）、趨勢加碼／減碼被淨額、
 同日重跑只看最後一次（跨日不切半）、日期區間不切半、到期沒成交、翻向、出場原因（停損／失效／目標／override／flatten）、
-版本分組、Insight 對錯（開倉方向 vs 當天漲跌）、帳戶曲線（基準、含入出金）、/api/trade-stats 與 /stats 頁（壞了不 500）。"""
+版本分組、Insight 對錯（開倉方向 vs 當天漲跌）、帳戶曲線（基準、含入出金）、/api/trade-stats（/stats 頁已下線，前端 windwatch「交易」讀這支）。"""
 
 import json
 import sqlite3

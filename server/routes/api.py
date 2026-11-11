@@ -369,7 +369,7 @@ def query_trade_stats(request: Request, run_mode: str | None = None, strategy_id
 def query_call_stats(request: Request, rule_version: str | None = None,
                      date_from: str | None = None, date_to: str | None = None,
                      cost_bps: float | None = None) -> dict:
-    """盤前判斷有效性統計（基準線/信心校準/單因子/判斷回測＋結論），與 /stats 頁同一份結果。
+    """盤前判斷有效性統計（基準線/信心校準/單因子/判斷回測＋結論），前端 windwatch「情報」的判斷有效性用這一份（舊 /stats 頁已下線）。
 
     結構化戰績，供外部工具或 LLM 讀取；比例以 0–1 表示、報酬為小數。
     """

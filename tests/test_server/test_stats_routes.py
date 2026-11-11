@@ -78,6 +78,17 @@ def test_api_call_stats_filters(client_with_data):
     assert body["n"] == 2 and body["backtest"]["cost_bps"] == 0
 
 
+def test_api_call_stats_lists_unknown_version_as_empty_string(client_with_data):
+    """驗證時版本不明（NULL）的列在 versions 以 "" 列出（前端拿它說「另有 N 筆沒有規則版本」，不讓人選）。"""
+    conn = sqlite3.connect(client_with_data.app.state.db_path)
+    conn.execute("UPDATE verifications SET rule_version = NULL WHERE date = ?", (_DAYS[1],))
+    conn.commit()
+    conn.close()
+    versions = client_with_data.get("/api/call-stats").json()["versions"]
+    assert {"rule_version": "", "n": 1} in versions
+    assert sum(v["n"] for v in versions) == 4
+
+
 def test_api_call_stats_empty(client):
     body = client.get("/api/call-stats").json()
     assert body["n"] == 0 and body["assessment"]["verdict"] == "insufficient"

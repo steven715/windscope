@@ -1,7 +1,6 @@
 """Server-rendered 頁面：dashboard、訊號紀錄、資料查詢、觀察名單、排程狀態。"""
 
 import json
-import logging
 import re
 from pathlib import Path
 from urllib.parse import quote
@@ -35,7 +34,6 @@ from server.routes.api import (
     _query_job_runs,
 )
 
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 

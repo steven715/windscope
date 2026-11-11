@@ -81,14 +81,14 @@
   </div>
 </div>
 
-<a class="trust-strip" href="{{ (frontend_url() ~ '/#intel') if frontend_url() else '#' }}">
+{% if frontend_url() %}<a class="trust-strip" href="{{ frontend_url() }}/#intel">{% else %}<div class="trust-strip">{% endif %}
   {% if stats.total > 0 %}
   <span class="tl"><span class="muted">{{ stats.rule_version }} 近 {{ stats.total }} 日命中率</span><span class="rate-mini">{{ stats.hit_day_rate }}%</span></span>
   {% else %}
   <span class="tl"><span class="muted">{{ stats.rule_version }} 還沒有驗證紀錄</span></span>
   {% endif %}
   {% if frontend_url() %}<span class="dim" style="color:var(--accent)">驗證紀錄 ›</span>{% endif %}
-</a>
+{% if frontend_url() %}</a>{% else %}</div>{% endif %}
 
 {% if metrics %}
 <div class="cards">

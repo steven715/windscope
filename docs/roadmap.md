@@ -26,7 +26,7 @@
 - ✅ 個股還原日K（`raw_stock_daily` + 還原）＝報酬計算的價格基礎。
 - ✅ 趨勢訊號有 action/position 語意。
 - ✅ 個股趨勢訊號回測引擎（`integration/backtest.py`，`/backtest`）。
-- ✅ **盤前判斷有效性統計**（`integration/call_stats.py`，`/stats`、`/api/call-stats`）——見下節。
+- ✅ **盤前判斷有效性統計**（`integration/call_stats.py`，`/api/call-stats`；頁面在前端 windwatch「情報」）——見下節。
 - 🔲 大盤盤前判斷接進多日持有／跟大勢出場的回測（目前只做單日 open→close / close→close）。
 
 > 這是使用者指定的下一個主線項目。動工前先給計畫。
