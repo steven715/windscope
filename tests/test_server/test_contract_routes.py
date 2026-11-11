@@ -53,6 +53,14 @@ def _before_lock_deadline(monkeypatch):
     monkeypatch.setattr(tw, "now_tw_iso", lambda: "2026-06-12T08:40:00+08:00")
 
 
+def test_targets_envelope_carries_the_lock_deadline(client, monkeypatch):
+    """lock_deadline 從 settings 來（單一來源）：前端照它判斷，不再自己寫 08:55。"""
+    from config import settings
+    assert client.get("/api/targets?date=2026-06-12").json()["lock_deadline"] == settings.TARGET_LOCK_DEADLINE
+    monkeypatch.setattr(settings, "TARGET_LOCK_DEADLINE", "08:57")
+    assert client.get("/api/targets").json()["lock_deadline"] == "08:57"
+
+
 def test_targets_list_and_lock(client):
     body = client.get("/api/targets?date=2026-06-12").json()
     assert body["schema_version"] == "0.2" and body["count"] == 1

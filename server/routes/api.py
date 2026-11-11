@@ -306,7 +306,8 @@ def query_bars(request: Request, instrument_id: str, resolution: str = "1d",
 def query_targets(request: Request, date: str | None = None, since: str | None = None,
                   strategy_id: str | None = None, locked_only: bool = False,
                   limit: int = 200) -> dict:
-    """目標部位（契約 targets＝Insight＋Trade Plan）。date＝某交易日；since＝有變動（產生或鎖定）≥ 時刻。"""
+    """目標部位（契約 targets＝Insight＋Trade Plan）。date＝某交易日；since＝有變動（產生或鎖定）≥ 時刻。
+    信封另帶 lock_deadline（HH:MM，台北；settings.TARGET_LOCK_DEADLINE）：前端照它判斷還能不能鎖，不再自己寫死。"""
     from db.targets import targets_list
 
     if since:
@@ -316,7 +317,7 @@ def query_targets(request: Request, date: str | None = None, since: str | None =
     with get_connection(request.app.state.db_path) as conn:
         rows = targets_list(conn, session_date=date, since=since, strategy_id=strategy_id,
                             locked_only=locked_only, limit=max(1, min(limit, _MAX_ROWS)))
-    return _envelope("targets", rows)
+    return {**_envelope("targets", rows), "lock_deadline": settings.TARGET_LOCK_DEADLINE}
 
 
 @router.post("/targets/{target_id}/lock")
