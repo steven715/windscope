@@ -25,7 +25,7 @@
 | `TELEGRAM_ALLOWED_USERS` | tradewind `telegram_bot.py` | 只准這些人下 `/halt` 等指令 |
 | `FINMIND_TOKEN` | windscope `chip_collect` | 沒設就略過分點（`chip_collect` 預設停用） |
 | `MARKET_SOURCE`、`INSTALL_SHIOAJI`、`SHIOAJI_API_KEY`、`SHIOAJI_SECRET`、`SHIOAJI_SIMULATION` | windscope 行情串流 | 先 `replay` 演練，再 `shioaji`（§2.4） |
-| `SHIOAJI_API_KEY`、`SHIOAJI_SECRET_KEY` | tradewind `--broker shioaji_sim` | ⚠ 名字跟 windscope 不同（`SECRET` vs `SECRET_KEY`），兩邊各設 |
+| `SHIOAJI_API_KEY`、`SHIOAJI_SECRET`（或 `SHIOAJI_SECRET_KEY`） | tradewind `--broker shioaji_sim` | 跟 windscope 同名即可共用一份 `.env`（tradewind 兩個名字都收；兩個都設又不同會拒絕登入） |
 | `TRADEWIND_INBOX` | windscope | tradewind `--out` 寫的地方（預設 `data/inbox`，容器內）；兩邊要指同一個實體目錄 |
 | `WINDWATCH_USER`、`WINDWATCH_PASS_HASH` | Caddy | 對外那道 HTTP Basic；`caddy hash-password` 產 |
 
