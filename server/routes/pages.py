@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, Request, UploadFile
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
+    PlainTextResponse,
     RedirectResponse,
     Response,
 )
@@ -58,32 +59,8 @@ def _status_zh(status: str | None) -> str:
 
 
 templates.env.filters["status_zh"] = _status_zh
+templates.env.globals["frontend_url"] = lambda: settings.FRONTEND_URL   # 前端 windwatch 網址（沒設為 None；模板用 frontend_url()）
 
-
-def _fmt_pct(v: float | None, digits: int = 1) -> str:
-    """0–1 比例 → '61.5%'；None → '—'。"""
-    return "—" if v is None else f"{v * 100:.{digits}f}%"
-
-
-def _fmt_signed_pct(v: float | None, digits: int = 2) -> str:
-    """小數報酬 → '+1.23%'（帶號）；None → '—'。"""
-    return "—" if v is None else f"{v * 100:+.{digits}f}%"
-
-
-def _fmt_pp(v: float | None) -> str:
-    """百分點差 → '+8.3 pp'；None → '—'。"""
-    return "—" if v is None else f"{v:+.1f} pp"
-
-
-def _fmt_num(v: float | None, digits: int = 2) -> str:
-    """一般數值 → 固定小數；None → '—'。"""
-    return "—" if v is None else f"{v:.{digits}f}"
-
-
-templates.env.filters["pct"] = _fmt_pct
-templates.env.filters["spct"] = _fmt_signed_pct
-templates.env.filters["pp"] = _fmt_pp
-templates.env.filters["num"] = _fmt_num
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _CLASS_LABELS = {"up": "漲", "down": "跌", "flat": "平"}
@@ -514,96 +491,32 @@ def dashboard(request: Request):
     })
 
 
-@router.get("/signals", response_class=HTMLResponse)
-def signals_page(request: Request, date_from: str | None = None,
-                 date_to: str | None = None):
-    """訊號與驗證紀錄：逐日列表（訊號 join 驗證）。"""
-    db_path = request.app.state.db_path
-    with get_connection(db_path) as conn:
-        sql = (
-            "SELECT s.date, s.direction, s.confidence, s.reasons, s.rule_version, "
-            "       v.day_change_pct, v.day_change_class, v.hit_day, "
-            "       v.open_gap_pct, v.hit_open, "
-            "       v.date, v.predicted_direction, v.confidence, v.rule_version "
-            "FROM signals s LEFT JOIN verifications v ON s.date = v.date"
-        )
-        conditions, params = [], []
-        if date_from:
-            conditions.append("s.date >= ?")
-            params.append(date_from)
-        if date_to:
-            conditions.append("s.date <= ?")
-            params.append(date_to)
-        if conditions:
-            sql += " WHERE " + " AND ".join(conditions)
-        sql += " ORDER BY s.date DESC LIMIT 200"
-        rows = conn.execute(sql, params).fetchall()
-        stats = get_verification_stats(conn, settings.SIGNAL_RULE_VERSION)
-
-    # 已驗證的列顯示「驗證當下」的判斷與版本（命中是照它算的；signals 之後可能被 recompute 改掉）
-    records = [
-        {
-            "date": r[0],
-            "direction_label": _DIRECTION_LABELS.get(r[11] if r[10] else r[1], r[11] if r[10] else r[1]),
-            "confidence": r[12] if r[10] else r[2],
-            "reasons": json.loads(r[3]) if r[3] else [],
-            "rule_version": (r[13] or "版本不明") if r[10] else r[4],
-            "day_change_pct": r[5],
-            "day_change_class": r[6],
-            "day_label": _CLASS_LABELS.get(r[6], None),
-            "hit_day": r[7],
-            "open_gap_pct": r[8],
-            "hit_open": r[9],
-        }
-        for r in rows
-    ]
-
-    return templates.TemplateResponse(request, "signals.html", {
-        "active": "signals", "records": records, "stats": stats,
-        "date_from": date_from or "", "date_to": date_to or "",
-    })
-
-
-_VERDICT_LABELS = {
-    "insufficient": ("樣本不足", "chip-neutral"),
-    "edge": ("有 edge", "chip-ok"),
-    "unclear": ("可能有 edge", "chip-flat"),
-    "no_edge": ("看不出 edge", "chip-bad"),
-}
-_CALL_BT_MODE_LABELS = {
-    "open_to_close": ("開盤進 → 收盤出", "08:50 看判斷、09:00 開盤進、13:30 收盤出；真正可執行的口徑"),
-    "close_to_close": ("前收 → 收盤", "與收盤基準命中同口徑；對照「方向對」和「有賺」差多少"),
+# ── 已下線、搬到前端 windwatch 的頁（ADR-0006）──────────────────────
+# 有設 WINDSCOPE_FRONTEND_URL → 302 導到前端那一區；沒設 → 410 說明搬到哪。舊書籤與連結不會變成空白的 404。
+_RETIRED_PAGES = {
+    "/signals": ("intel", "訊號與驗證紀錄已搬到前端 windwatch 的「情報」區"),
+    "/stats": ("intel", "判斷有效性已搬到前端 windwatch 的「情報」區（Paper／模擬交易成績在「交易」區）"),
 }
 
 
-@router.get("/stats", response_class=HTMLResponse)
-def stats_page(request: Request, rule_version: str | None = None,
-               date_from: str | None = None, date_to: str | None = None):
-    """判斷有效性：基準線對照、信心校準、單因子表、判斷回測＋三選一結論。純讀取。"""
-    from integration.call_stats import build_call_stats
+def _retired(path: str) -> Response:
+    """下線頁：導到前端對應的區，或回 410 說明。"""
+    area, what = _RETIRED_PAGES[path]
+    if settings.FRONTEND_URL:
+        return RedirectResponse(url=f"{settings.FRONTEND_URL}/#{area}", status_code=302)
+    return PlainTextResponse(f"{what}（#{area}）。設定 WINDSCOPE_FRONTEND_URL 後，這個網址會直接導過去。", status_code=410)
 
-    rule_version = rule_version or None
-    date_from = date_from if date_from and _DATE_RE.match(date_from) else None
-    date_to = date_to if date_to and _DATE_RE.match(date_to) else None
-    from integration.trade_stats import build_trade_stats
 
-    with get_connection(request.app.state.db_path) as conn:
-        stats = build_call_stats(conn, rule_version, date_from, date_to)
-        try:                                                         # 交易成績壞了不能讓整頁 500（上面的判斷統計照常）
-            trade = build_trade_stats(conn, None, None, None, date_from, date_to, trades_limit=20)
-        except Exception as e:
-            logger.error("trade stats failed: %s: %s", type(e).__name__, e)
-            trade = {"groups": [], "accounts": [], "error": f"{type(e).__name__}: {e}"}
+@router.get("/signals", include_in_schema=False)
+def signals_page() -> Response:
+    """已下線：訊號與驗證紀錄 → 前端「情報」。"""
+    return _retired("/signals")
 
-    verdict_label, verdict_css = _VERDICT_LABELS[stats["assessment"]["verdict"]]
-    return templates.TemplateResponse(request, "stats.html", {
-        "active": "stats", "s": stats, "t": trade,
-        "verdict_label": verdict_label, "verdict_css": verdict_css,
-        "direction_labels": _DIRECTION_LABELS, "class_labels": _CLASS_LABELS,
-        "bt_modes": _CALL_BT_MODE_LABELS,
-        "current_version": settings.SIGNAL_RULE_VERSION,
-        "flat_band": settings.VERIFY_FLAT_BAND_PCT,
-    })
+
+@router.get("/stats", include_in_schema=False)
+def stats_page() -> Response:
+    """已下線：判斷有效性 → 前端「情報」（交易成績 → 「交易」）。"""
+    return _retired("/stats")
 
 
 @router.get("/data", response_class=HTMLResponse)

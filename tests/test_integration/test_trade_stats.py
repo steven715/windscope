@@ -194,7 +194,7 @@ def test_empty_db_is_fine(db):
     assert s["groups"] == [] and s["accounts"] == [] and s["trades"] == [] and s["min_sample"] == settings.STATS_MIN_SAMPLE
 
 
-def test_api_and_stats_page(tmp_path, monkeypatch):
+def test_api(tmp_path):
     p = str(tmp_path / "t.db")
     conn = sqlite3.connect(p)
     _setup(conn)
@@ -206,9 +206,3 @@ def test_api_and_stats_page(tmp_path, monkeypatch):
     assert r["groups"][0]["r"]["avg_r"] == 1.0 and r["filters"]["run_mode"] == "paper"
     assert c.get("/api/trade-stats", params={"date_from": "2026-6-1"}).status_code == 422
     assert c.get("/api/trade-stats", params={"run_mode": "live"}).status_code == 422
-    page = c.get("/stats").text
-    assert "Paper／模擬交易成績" in page and "pullback_hold/p1" in page and "+1.00" in page
-    import integration.trade_stats as mod
-    monkeypatch.setattr(mod, "build_trade_stats", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
-    r = c.get("/stats")
-    assert r.status_code == 200 and "交易成績算不出來" in r.text and "boom" in r.text

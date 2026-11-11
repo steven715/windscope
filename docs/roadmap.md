@@ -31,7 +31,7 @@
 
 > 這是使用者指定的下一個主線項目。動工前先給計畫。
 
-### 盤前判斷有效性（Layer 4b，`/stats`）
+### 盤前判斷有效性（Layer 4b，`/api/call-stats`；頁面已搬到前端 windwatch「情報」）
 
 **為什麼先做這個**：規則來源是文章經驗值（作者自承「沒科學根據」），合成與信心加減分是代碼自創；
 在加任何新資料源／新規則之前，先用**現有資料**回答「這套到底有沒有 edge」（見 ADR-0004）。
@@ -107,7 +107,7 @@
 - 本 repo 不再新增 Jinja 頁；既有頁面過渡期保留，**API-first**：先補每頁對應的 `/api/*`（`/stats` 已有 `/api/call-stats`），前端做到哪頁、哪頁的 Jinja 才下線。
 - 前端第一批只做兩頁：判斷有效性（windscope）、狀態頁＋kill switch（tradewind，按鈕走 ops）。
 - 前端 repo＝windwatch：「今日」（windwatch #1）、「情報」（windwatch #2：判斷有效性、判斷與驗證、籌碼觀察）已做；
-  `signals.html`、`stats.html` 的內容前端都有了，可排下線。
+  ✅ `signals.html`、`stats.html` 已下線（2026-11-11）：舊網址導到前端 `#intel`（`WINDSCOPE_FRONTEND_URL`），沒設回 410 說明；清單見 ADR-0006。
 - ✅ `GET /api/scheduler`（2026-11-10）：排程設定與狀態（唯讀，同 `/scheduler` 頁的 get_jobs_info；最近一次執行取 job_runs，重啟後也在）——給 windwatch「系統」區；手動觸發／改設定仍只在 Jinja 頁（前端要做得先加代理 POST 白名單）。
 - ✅ 命中率依「驗證當下」的規則版本分（2026-11-09，windwatch #2 審查）：`verifications.rule_version` 驗證時記下，
   `call-stats` 與近 N 筆小卡（`/api/stats`、首頁、訊號頁，預設現行版本）都依它篩；之前用 signals 的現在版本篩，
